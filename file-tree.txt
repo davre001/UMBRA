@@ -1,13 +1,62 @@
 UMBRA/
 ├── backend/
 │   ├── circuits/
-│   │   └── shield.circom
+│   │   ├── build/
+│   │   ├── noir/
+│   │   │   └── shield.nr
+│   │   ├── test/
+│   │   │   └── shield.test.js
+│   │   ├── order.circom
+│   │   ├── shield.circom
+│   │   └── unshield.circom
 │   ├── contracts/
+│   │   ├── interfaces/
+│   │   │   ├── IFAsset.sol
+│   │   │   ├── IFdc.sol
+│   │   │   ├── IFtso.sol
+│   │   │   └── ITeeAttestation.sol
+│   │   ├── libraries/
+│   │   │   ├── MerkleTree.sol
+│   │   │   └── ZkVerifier.sol
+│   │   ├── script/
+│   │   │   ├── Configure.s.sol
+│   │   │   └── Deploy.s.sol
+│   │   ├── test/
+│   │   │   ├── Compliance.t.sol
+│   │   │   ├── FairPricing.t.sol
+│   │   │   ├── Settlement.t.sol
+│   │   │   └── ShieldedVault.t.sol
 │   │   ├── Compliance.sol
 │   │   ├── FairPricing.sol
-│   │   └── ShieldedVault.sol
-│   └── tee/
-│       └── matcher.py
+│   │   ├── OrderBook.sol
+│   │   ├── Settlement.sol
+│   │   ├── ShieldedVault.sol
+│   │   ├── foundry.toml
+│   │   └── hardhat.config.ts
+│   ├── oracle/
+│   │   ├── tests/
+│   │   │   ├── test_fdc_client.py
+│   │   │   └── test_ftso_client.py
+│   │   ├── fdc_client.py
+│   │   └── ftso_client.py
+│   ├── shared/
+│   │   ├── types/
+│   │   └── constants.py
+│   ├── tee/
+│   │   ├── config/
+│   │   │   └── matcher.config.yaml
+│   │   ├── enclave/
+│   │   │   ├── Dockerfile
+│   │   │   └── entrypoint.sh
+│   │   ├── tests/
+│   │   │   └── test_matcher.py
+│   │   ├── attestation.py
+│   │   ├── matcher.py
+│   │   ├── proof_relay.py
+│   │   └── requirements.txt
+│   ├── .env.example
+│   ├── docker-compose.yml
+│   └── README.md
 ├── frontend/
 │   ├── src/
 │   │   ├── App.tsx
