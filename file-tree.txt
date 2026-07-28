@@ -1,22 +1,37 @@
 UMBRA/
 ├── backend/
 │   ├── src/
+│   │   ├── auth/
+│   │   │   └── webauthn.service.ts
 │   │   ├── compliance/
 │   │   │   └── fdc.client.ts
 │   │   ├── dark-engine/
 │   │   │   └── matcher.ts
+│   │   ├── portfolio/
+│   │   │   └── portfolio.service.ts
 │   │   ├── pricing/
 │   │   │   └── ftso.client.ts
+│   │   ├── prover/
+│   │   │   └── prover.service.ts
+│   │   ├── relayer/
+│   │   │   └── relayer.service.ts
 │   │   ├── shared/
 │   │   │   ├── constants.ts
 │   │   │   └── types.ts
+│   │   ├── stealth/
+│   │   │   └── stealth.service.ts
 │   │   ├── vault/
 │   │   │   └── vault.service.ts
 │   │   └── index.ts
 │   ├── test/
+│   │   ├── auth.test.ts
 │   │   ├── compliance.test.ts
 │   │   ├── dark-engine.test.ts
+│   │   ├── portfolio.test.ts
 │   │   ├── pricing.test.ts
+│   │   ├── prover.test.ts
+│   │   ├── relayer.test.ts
+│   │   ├── stealth.test.ts
 │   │   └── vault.test.ts
 │   ├── .env.example
 │   ├── package.json
