@@ -75,16 +75,19 @@ export const Navbar: React.FC = () => {
               whileHover={{ scale: 1.05, rotate: -2 }}
               transition={{ type: "spring", stiffness: 300, damping: 20 }}
             >
-              <Link
+              <a
                 href="/"
                 className="flex items-center gap-2"
-                onClick={() => setIsEntered(false)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  window.location.replace('/');
+                }}
               >
                 <span className="h-6 w-6 rounded-full bg-gradient-to-tr from-accent-secondary to-accent-primary animate-pulse" />
                 <span className="font-display text-lg font-bold tracking-widest text-text-primary">
                   UMBRA
                 </span>
-              </Link>
+              </a>
             </motion.div>
 
             {/* Desktop Navigation Links */}

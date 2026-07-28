@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState } from 'react';
 
 type Notification = {
   id: string;
@@ -32,21 +32,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [anonymityScore, setAnonymityScore] = useState<number>(85); // default starting score
-  // Persist "entered" state locally in session during development for easier reloading
-  useEffect(() => {
-    const saved = sessionStorage.getItem('umbra_vault_entered');
-    if (saved === 'true') {
-      setIsEntered(true);
-    }
-  }, []);
-
   const handleSetEntered = (val: boolean) => {
     setIsEntered(val);
     if (val) {
-      sessionStorage.setItem('umbra_vault_entered', 'true');
       addNotification("Secure Vault Session", "Sanitized TEE connection established.", "success");
-    } else {
-      sessionStorage.removeItem('umbra_vault_entered');
     }
   };
 
