@@ -1,0 +1,18 @@
+UMBRA/
+├── backend/
+│   ├── circuits/
+│   │   └── shield.circom
+│   ├── contracts/
+│   │   ├── Compliance.sol
+│   │   ├── FairPricing.sol
+│   │   └── ShieldedVault.sol
+│   └── tee/
+│       └── matcher.py
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx
+│   │   └── index.css
+│   └── index.html
+├── FRONTEND_IMPLEMENTATION_PLAN.md
+├── LICENSE
+└── README.md
