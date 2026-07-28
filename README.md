@@ -92,15 +92,57 @@ before allowing deposits.
 
 ```
 UMBRA/
-├── backend/     # Node.js + TypeScript services (scaffolded, not yet implemented)
+├── backend/     # Node.js + TypeScript API (active)
 ├── contract/    # Solidity smart contracts (scaffolded, not yet implemented)
 ├── frontend/    # Next.js 16 + React 19 app (active)
 └── README.md
 ```
 
-`backend/` and `contract/` are currently empty placeholder folders reserved
-for the API/matching services and the on-chain contracts respectively.
-`frontend/` contains the working application described below.
+`contract/` is currently an empty placeholder folder reserved for the
+on-chain Solidity contracts. `backend/` and `frontend/` both contain working
+code, described below.
+
+## Backend
+
+The backend is an Express + TypeScript API that backs the flows the frontend
+exercises. Each domain concern is its own module under `backend/src/`, and
+each module talks over in-memory state — there's no database, real Flare
+node, ZK circuit, or TEE wired up yet, so behavior (proof bytes, relay hashes,
+oracle rates, sanction screens) is simulated rather than cryptographically
+real. That keeps the API contract stable while the underlying primitives
+(Noir circuits, TEE matcher, live FTSO/FDC clients) are built out.
+
+| Module | Responsibility |
+| --- | --- |
+| `vault` | Shielded balances: shield, withdraw, private pay (in-memory per address) |
+| `portfolio` | Aggregates vault balances into net worth, allocation, and history |
+| `dark-engine` | Swap intents: routes, matches, and settles against a midpoint rate |
+| `pricing` | FTSO-style midpoint rate lookup |
+| `compliance` | FDC-style sanction screening and compliance viewing-key export |
+| `stealth` | One-time stealth address derivation and recipient resolution |
+| `prover` | Simulated Noir witness/proof generation |
+| `relayer` | Simulated gasless transaction relaying |
+| `auth` | WebAuthn-style passkey challenge/verify |
+
+### Getting Started
+
+```bash
+cd backend
+npm install
+npm run dev
+```
+
+The API listens on [http://localhost:4000](http://localhost:4000) (override
+with `PORT` in a `.env` file — see `.env.example`). `GET /health` returns
+`{"status":"ok"}` once it's up.
+
+Other scripts (run from `backend/`):
+
+```bash
+npm run build   # type-check and compile to dist/
+npm run start   # run the compiled build
+npm test        # run the vitest suite (supertest against every route)
+```
 
 ## Frontend
 

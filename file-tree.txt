@@ -2,26 +2,36 @@ UMBRA/
 ├── backend/
 │   ├── src/
 │   │   ├── auth/
+│   │   │   ├── auth.routes.ts
 │   │   │   └── webauthn.service.ts
 │   │   ├── compliance/
+│   │   │   ├── compliance.routes.ts
 │   │   │   └── fdc.client.ts
 │   │   ├── dark-engine/
+│   │   │   ├── dark-engine.routes.ts
 │   │   │   └── matcher.ts
 │   │   ├── portfolio/
+│   │   │   ├── portfolio.routes.ts
 │   │   │   └── portfolio.service.ts
 │   │   ├── pricing/
-│   │   │   └── ftso.client.ts
+│   │   │   ├── ftso.client.ts
+│   │   │   └── pricing.routes.ts
 │   │   ├── prover/
+│   │   │   ├── prover.routes.ts
 │   │   │   └── prover.service.ts
 │   │   ├── relayer/
+│   │   │   ├── relayer.routes.ts
 │   │   │   └── relayer.service.ts
 │   │   ├── shared/
 │   │   │   ├── constants.ts
 │   │   │   └── types.ts
 │   │   ├── stealth/
+│   │   │   ├── stealth.routes.ts
 │   │   │   └── stealth.service.ts
 │   │   ├── vault/
+│   │   │   ├── vault.routes.ts
 │   │   │   └── vault.service.ts
+│   │   ├── app.ts
 │   │   └── index.ts
 │   ├── test/
 │   │   ├── auth.test.ts
@@ -34,7 +44,9 @@ UMBRA/
 │   │   ├── stealth.test.ts
 │   │   └── vault.test.ts
 │   ├── .env.example
+│   ├── .gitignore
 │   ├── package.json
+│   ├── package-lock.json
 │   └── tsconfig.json
 ├── contract/
 ├── frontend/
