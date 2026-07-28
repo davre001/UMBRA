@@ -8,26 +8,44 @@ import { Sidebar } from '@/components/shared/sidebar';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { GlowBorder } from '@/components/ui/glow-border';
-import { 
-  Shield, 
-  Cpu, 
-  ChevronRight, 
-  Lock, 
-  CheckCircle2, 
-  Server, 
-  ArrowRight, 
+import {
+  Shield,
+  Cpu,
+  ChevronRight,
+  Lock,
+  CheckCircle2,
+  Server,
+  ArrowRight,
   ExternalLink,
-  Code,
   ShieldCheck,
-  RefreshCw
+  RefreshCw,
+  GitBranch,
+  BookOpen,
+  Zap,
+  ArrowDown,
 } from 'lucide-react';
 import Link from 'next/link';
+
+// Fade-in-up animation wrapper — hook-free, uses framer-motion whileInView
+function FadeUp({ children, delay = 0, className = '' }: { children: React.ReactNode; delay?: number; className?: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 32 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-60px' }}
+      transition={{ duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  );
+}
 
 export default function Home() {
   const { isEntered, setIsEntered, connectWallet, isWalletConnected } = useApp();
   const [transitioning, setTransitioning] = useState(false);
 
-  // ZK Proof Simulator States
+  // ZK Proof Simulator States (used in dashboard)
   const [zkStep, setZkStep] = useState<'idle' | 'witness' | 'proving' | 'verifying' | 'success'>('idle');
   const [proveProgress, setProveProgress] = useState(0);
   const [witnessData, setWitnessData] = useState<string>('');
@@ -35,14 +53,12 @@ export default function Home() {
 
   const handleEnterVault = () => {
     setTransitioning(true);
-    // Cinematic delay
     setTimeout(() => {
       setIsEntered(true);
       setTransitioning(false);
     }, 1200);
   };
 
-  // ZK proof simulation loop
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (zkStep === 'witness') {
@@ -53,13 +69,10 @@ export default function Home() {
       const interval = setInterval(() => {
         currentProgress += 5;
         setProveProgress(currentProgress);
-        
-        // Generate random fake proof hex bytes
-        const randomHex = Array.from({ length: 12 }, () => 
+        const randomHex = Array.from({ length: 12 }, () =>
           Math.floor(Math.random() * 256).toString(16).padStart(2, '0')
         ).join('');
         setProofBytes(prev => (prev + randomHex).slice(-360));
-
         if (currentProgress >= 100) {
           clearInterval(interval);
           setZkStep('verifying');
@@ -84,92 +97,343 @@ export default function Home() {
 
       <AnimatePresence mode="wait">
         {!isEntered ? (
-          /* CINEMATIC LANDING PANEL */
+
+          /* ── LANDING PAGE ── */
           <motion.div
             key="vault-portal"
             initial={{ opacity: 1 }}
             exit={{ opacity: 0, scale: 1.05, filter: 'blur(10px)' }}
             transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
-            className="relative flex flex-col items-center justify-center min-h-screen px-4 z-30"
+            className="relative w-full"
           >
-            {/* Grid background */}
-            <div className="absolute inset-0 grid-overlay opacity-30 z-0 pointer-events-none" />
 
-            <div className="relative text-center flex flex-col items-center max-w-3xl z-10">
-              {/* Giant Luxury Ambient Ring */}
+            {/* ── TOP NAV ── */}
+            <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 sm:px-10 py-4 border-b border-white/5 backdrop-blur-xl bg-black/40">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-lg border border-accent-primary/40 bg-accent-primary/10 flex items-center justify-center">
+                  <Lock size={14} className="text-accent-primary" />
+                </div>
+                <span className="font-display font-extrabold text-lg tracking-tighter text-text-primary uppercase">
+                  Umbra<span className="text-accent-primary">.</span>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <a
+                  href="https://docs.umbraprotocol.io"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border-custom text-xs text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider"
+                >
+                  <BookOpen size={12} />
+                  Docs
+                </a>
+                <a
+                  href="https://github.com/umbraprotocol"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border-custom text-xs text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider"
+                >
+                  <GitBranch size={12} />
+                  GitHub
+                </a>
+                <AnimatedButton variant="primary" size="sm" onClick={handleEnterVault} disabled={transitioning}>
+                  {transitioning ? (
+                    <span className="flex items-center gap-1.5"><RefreshCw size={12} className="animate-spin" />Loading...</span>
+                  ) : (
+                    <span className="flex items-center gap-1.5">Launch App <ArrowRight size={12} /></span>
+                  )}
+                </AnimatedButton>
+              </div>
+            </header>
+
+            {/* ── HERO ── */}
+            <section className="relative flex flex-col items-center justify-center min-h-screen px-4 pt-20 z-10">
+              <div className="absolute inset-0 grid-overlay opacity-20 z-0 pointer-events-none" />
+
               <motion.div
                 animate={{ rotate: 360 }}
                 transition={{ duration: 25, repeat: Infinity, ease: 'linear' }}
-                className="absolute -top-36 w-96 h-96 rounded-full border border-dashed border-accent-primary/20 opacity-30 pointer-events-none blur-[2px]"
+                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full border border-dashed border-accent-primary/10 opacity-30 pointer-events-none blur-[1px]"
               />
-              
-              {/* Giant Vault Logo Lock */}
+
+              <div className="relative text-center flex flex-col items-center max-w-3xl z-10">
+                {/* Status badge */}
+                <motion.div
+                  initial={{ opacity: 0, y: -12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1, duration: 0.6 }}
+                  className="mb-8 inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-accent-primary/30 bg-accent-primary/5 text-[10px] text-accent-primary uppercase tracking-widest font-sans"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-accent-primary animate-pulse" />
+                  Live on Flare Network Testnet
+                </motion.div>
+
+                {/* Lock icon */}
+                <motion.div
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 1, ease: 'easeOut' }}
+                  className="mb-8 p-6 rounded-full border border-border-custom bg-surface/30 backdrop-blur-xl relative group"
+                >
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-accent-secondary/20 to-accent-primary/20 opacity-0 group-hover:opacity-100 transition-opacity duration-700 blur" />
+                  <div className="h-20 w-20 rounded-full border border-accent-primary/30 flex items-center justify-center bg-bg-base relative">
+                    <Lock size={32} className="text-accent-primary animate-pulse" />
+                  </div>
+                </motion.div>
+
+                <motion.h1
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.2, duration: 0.8 }}
+                  className="font-display text-5xl sm:text-7xl font-extrabold tracking-tighter text-text-primary mb-6 uppercase cursor-default select-none filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)] drop-shadow-[0_12px_24px_rgba(0,0,0,0.95)]"
+                >
+                  Private Trading.<br />
+                  <span className="text-accent-primary">Without Compromise.</span>
+                </motion.h1>
+
+                <motion.p
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.4, duration: 0.8 }}
+                  className="font-sans text-sm sm:text-base text-text-primary max-w-lg mb-10 font-semibold leading-relaxed select-none filter drop-shadow-[0_2px_4px_rgba(0,0,0,1)]"
+                >
+                  Trustless dark pool liquidity, stealth addresses, and zero-knowledge proving on Flare Network.
+                </motion.p>
+
+                <motion.div
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.6, duration: 0.8 }}
+                  className="flex flex-col sm:flex-row items-center gap-4"
+                >
+                  <AnimatedButton
+                    variant="primary"
+                    size="lg"
+                    onClick={handleEnterVault}
+                    disabled={transitioning}
+                    className="px-10 py-4 font-bold border border-accent-primary/30 rounded-xl"
+                  >
+                    {transitioning ? (
+                      <span className="flex items-center gap-2">
+                        <RefreshCw className="animate-spin" size={16} />
+                        Opening Secure Vault...
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        Initiate Protocol Session
+                        <ArrowRight size={16} />
+                      </span>
+                    )}
+                  </AnimatedButton>
+                  <a
+                    href="https://docs.umbraprotocol.io"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-6 py-3 rounded-xl border border-border-custom text-sm text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all"
+                  >
+                    <BookOpen size={16} />
+                    Read the Docs
+                  </a>
+                </motion.div>
+              </div>
+
+              {/* Scroll cue */}
               <motion.div
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ duration: 1, ease: 'easeOut' }}
-                className="mb-8 p-6 rounded-full border border-border-custom bg-surface/30 backdrop-blur-xl relative group shadow-[0_0_50px_rgba(112,0,255,0.05)]"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 1.4, duration: 1 }}
+                className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2"
               >
-                <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-accent-secondary/20 to-accent-primary/20 opacity-0 group-hover:opacity-100 transition-opacity duration-700 blur" />
-                <div className="h-20 w-20 rounded-full border border-accent-primary/30 flex items-center justify-center bg-bg-base relative">
-                  <Lock size={32} className="text-accent-primary animate-pulse" />
-                </div>
+                <span className="text-[9px] text-text-secondary uppercase tracking-widest">Scroll to explore</span>
+                <motion.div animate={{ y: [0, 6, 0] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}>
+                  <ArrowDown size={14} className="text-accent-primary/60" />
+                </motion.div>
               </motion.div>
+            </section>
 
-              <motion.h1
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.2, duration: 0.8 }}
-                whileHover={{
-                  scale: 1.03,
-                  rotate: -1,
-                }}
-                className="font-display text-5xl sm:text-7xl font-extrabold tracking-tighter text-text-primary mb-6 uppercase cursor-default origin-center select-none filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)] drop-shadow-[0_12px_24px_rgba(0,0,0,0.95)]"
-              >
-                Private Trading.<br />
-                <span className="text-accent-primary">
-                  Without Compromise.
-                </span>
-              </motion.h1>
+            {/* ── STATS STRIP ── */}
+            <section className="relative z-10 border-y border-border-custom/40 bg-black/60 backdrop-blur-sm py-8 px-4">
+              <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
+                {[
+                  { label: 'Total Shielded Value', value: '$84.2M' },
+                  { label: 'Active Stealth Sets', value: '1,492' },
+                  { label: 'Avg Proof Time', value: '1.24s' },
+                  { label: 'Compliance Rate', value: '100%' },
+                ].map((s, i) => (
+                  <FadeUp key={i} delay={i * 0.1}>
+                    <div className="text-2xl sm:text-3xl font-display font-extrabold text-text-primary tracking-tight">{s.value}</div>
+                    <div className="text-[10px] text-accent-primary uppercase tracking-widest mt-1">{s.label}</div>
+                  </FadeUp>
+                ))}
+              </div>
+            </section>
 
-              <motion.p
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.4, duration: 0.8 }}
-                className="font-sans text-sm sm:text-base text-text-primary max-w-lg mb-10 tracking-normal font-semibold leading-relaxed text-center select-none filter drop-shadow-[0_2px_4px_rgba(0,0,0,1)] drop-shadow-[0_8px_16px_rgba(0,0,0,1)]"
-              >
-                Umbra Protocol brings trustless dark pool liquidity, stealth addresses, and compliance-certified zero-knowledge proving architecture to the Flare Network.
-              </motion.p>
+            {/* ── 3 FEATURE CARDS ── */}
+            <section className="relative z-10 max-w-5xl mx-auto px-4 sm:px-8 py-20">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {[
+                  {
+                    icon: Shield,
+                    title: 'Stealth Addresses',
+                    desc: 'Every transaction gets a unique, unlinkable destination address. No on-chain connection between sender and recipient.',
+                  },
+                  {
+                    icon: Cpu,
+                    title: 'ZK-SNARK Proofs',
+                    desc: 'Noir circuits prove your right to withdraw without revealing the deposit. Generated locally in-browser in under 2 seconds.',
+                  },
+                  {
+                    icon: ShieldCheck,
+                    title: 'Compliance Ready',
+                    desc: 'Export viewing keys to satisfy auditors without breaking privacy for anyone else on the network.',
+                  },
+                ].map((f, i) => (
+                  <FadeUp key={i} delay={i * 0.1}>
+                    <GlassCard className="p-6 h-full flex flex-col" hoverGlow>
+                      <div className="p-2.5 rounded-lg bg-accent-primary/10 border border-accent-primary/20 w-fit mb-4">
+                        <f.icon size={18} className="text-accent-primary" />
+                      </div>
+                      <h3 className="font-display text-sm font-bold uppercase tracking-wider text-text-primary mb-2">{f.title}</h3>
+                      <p className="text-[11px] text-text-secondary leading-relaxed font-light">{f.desc}</p>
+                    </GlassCard>
+                  </FadeUp>
+                ))}
+              </div>
+            </section>
 
-              <motion.div
-                initial={{ y: 20, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.6, duration: 0.8 }}
-              >
+            {/* ── HOW IT WORKS ── */}
+            <section className="relative z-10 border-y border-border-custom/30 bg-black/40 backdrop-blur-sm py-20 px-4">
+              <div className="max-w-5xl mx-auto">
+                <FadeUp className="text-center mb-12">
+                  <span className="text-[10px] text-accent-primary uppercase tracking-widest font-sans mb-3 block">How It Works</span>
+                  <h2 className="font-display text-2xl sm:text-3xl font-extrabold uppercase tracking-tight text-text-primary">
+                    Three steps to total privacy
+                  </h2>
+                </FadeUp>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {[
+                    {
+                      step: '01',
+                      icon: Shield,
+                      title: 'Shield Your Assets',
+                      desc: 'Deposit tokens into a shielded pool. A zero-knowledge proof is generated locally — your keys never leave your device.',
+                    },
+                    {
+                      step: '02',
+                      icon: Cpu,
+                      title: 'Trade in the Dark Pool',
+                      desc: 'Swap inside Trusted Execution Environments. Orders match off-chain in SGX enclaves and settle atomically on Flare.',
+                    },
+                    {
+                      step: '03',
+                      icon: Zap,
+                      title: 'Withdraw Privately',
+                      desc: 'Funds are released to a stealth address with no on-chain link to the original deposit. Gasless relayer pays the fee.',
+                    },
+                  ].map((item, i) => (
+                    <FadeUp key={i} delay={i * 0.12}>
+                      <div className="flex flex-col p-6 rounded-xl border border-border-custom/50 bg-surface/20 hover:border-accent-primary/30 transition-all duration-300 h-full">
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="p-2.5 rounded-lg bg-accent-primary/10 border border-accent-primary/20">
+                            <item.icon size={16} className="text-accent-primary" />
+                          </div>
+                          <span className="font-display text-3xl font-extrabold text-border-custom/50 tracking-tight">{item.step}</span>
+                        </div>
+                        <h3 className="font-display text-xs font-bold uppercase tracking-wider text-text-primary mb-2">{item.title}</h3>
+                        <p className="text-[10px] text-text-secondary leading-relaxed font-light">{item.desc}</p>
+                      </div>
+                    </FadeUp>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            {/* ── TECH STACK ── */}
+            <section className="relative z-10 max-w-5xl mx-auto px-4 sm:px-8 py-16">
+              <FadeUp className="text-center mb-10">
+                <span className="text-[10px] text-accent-primary uppercase tracking-widest font-sans mb-3 block">Built on Proven Primitives</span>
+                <h2 className="font-display text-2xl sm:text-3xl font-extrabold uppercase tracking-tight text-text-primary">
+                  The full stack
+                </h2>
+              </FadeUp>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {[
+                  { name: 'Noir', role: 'ZK Circuits' },
+                  { name: 'Flare', role: 'Settlement' },
+                  { name: 'Intel SGX', role: 'TEE Matching' },
+                  { name: 'FTSO', role: 'Price Oracle' },
+                  { name: 'WebGPU', role: 'Client Prover' },
+                  { name: 'WASM', role: 'Prover Runtime' },
+                  { name: 'EVM', role: 'Smart Contracts' },
+                  { name: 'ECDH', role: 'Stealth Keys' },
+                ].map((t, i) => (
+                  <FadeUp key={i} delay={(i % 4) * 0.07}>
+                    <div className="p-4 rounded-xl border border-border-custom/40 bg-surface/10 hover:border-accent-primary/20 hover:bg-surface/30 transition-all text-center">
+                      <div className="font-display text-sm font-extrabold uppercase tracking-tight text-accent-primary mb-1">{t.name}</div>
+                      <div className="text-[9px] text-text-secondary uppercase tracking-widest">{t.role}</div>
+                    </div>
+                  </FadeUp>
+                ))}
+              </div>
+            </section>
+
+            {/* ── CTA BANNER ── */}
+            <section className="relative z-10 bg-black/60 backdrop-blur-sm border-y border-border-custom/30 py-20 px-4">
+              <FadeUp className="max-w-2xl mx-auto text-center">
+                <div className="mb-5 inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-accent-primary/30 bg-accent-primary/5 text-[10px] text-accent-primary uppercase tracking-widest">
+                  <span className="h-1.5 w-1.5 rounded-full bg-accent-primary animate-pulse" />
+                  Testnet Live — No Real Funds at Risk
+                </div>
+                <h2 className="font-display text-3xl sm:text-4xl font-extrabold uppercase tracking-tighter text-text-primary mb-4">
+                  Ready to trade in the dark?
+                </h2>
+                <p className="text-sm text-text-secondary mb-8 font-light max-w-sm mx-auto leading-relaxed">
+                  Connect a wallet, shield your first assets, and experience private DeFi on Flare.
+                </p>
                 <AnimatedButton
                   variant="primary"
                   size="lg"
                   onClick={handleEnterVault}
                   disabled={transitioning}
-                  className="px-10 py-4 font-bold border border-accent-primary/30 rounded-xl"
+                  className="px-10 py-4 font-bold"
                 >
                   {transitioning ? (
-                    <span className="flex items-center gap-2">
-                      <RefreshCw className="animate-spin" size={16} />
-                      Opening Secure Vault...
-                    </span>
+                    <span className="flex items-center gap-2"><RefreshCw className="animate-spin" size={16} />Loading...</span>
                   ) : (
-                    <span className="flex items-center gap-2">
-                      Initiate Protocol Session
-                      <ArrowRight size={16} />
-                    </span>
+                    <span className="flex items-center gap-2">Launch Protocol <ArrowRight size={16} /></span>
                   )}
                 </AnimatedButton>
-              </motion.div>
-            </div>
+              </FadeUp>
+            </section>
+
+            {/* ── FOOTER ── */}
+            <footer className="relative z-10 max-w-5xl mx-auto px-4 sm:px-8 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-border-custom/30">
+              <div className="flex items-center gap-2">
+                <div className="h-5 w-5 rounded-md border border-accent-primary/40 bg-accent-primary/10 flex items-center justify-center">
+                  <Lock size={9} className="text-accent-primary" />
+                </div>
+                <span className="font-display font-extrabold text-sm tracking-tighter text-text-primary uppercase">
+                  Umbra<span className="text-accent-primary">.</span>
+                </span>
+                <span className="text-[10px] text-text-secondary ml-3 hidden sm:block">© 2026 Umbra Protocol.</span>
+              </div>
+              <div className="flex items-center gap-6">
+                <a href="https://docs.umbraprotocol.io" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1 transition-colors">
+                  <BookOpen size={10} />Docs
+                </a>
+                <a href="https://github.com/umbraprotocol" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1 transition-colors">
+                  <GitBranch size={10} />GitHub
+                </a>
+                <a href="#" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest transition-colors">Audits</a>
+              </div>
+            </footer>
+
           </motion.div>
+
         ) : (
-          /* CORE APPLICATION DASHBOARD OVERVIEW */
+
+          /* ── CORE APPLICATION DASHBOARD ── */
           <motion.div
             key="app-dashboard"
             initial={{ opacity: 0 }}
@@ -226,9 +490,9 @@ export default function Home() {
                 ))}
               </div>
 
-              {/* TWO PANEL CONTENT: ZK Sim and Architecture */}
+              {/* TWO PANEL: ZK Sim and Architecture */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
+
                 {/* ZK Proving Simulator (Span 2) */}
                 <div className="lg:col-span-2">
                   <GlowBorder active={zkStep !== 'idle'} glowColor={zkStep === 'success' ? 'success' : 'cyan'}>
@@ -250,16 +514,12 @@ export default function Home() {
                           Shielding assets requires proving membership in Flare state Merkle trees. Generate a zero-knowledge membership proof locally to hide your inputs.
                         </p>
 
-                        {/* Interactive proving simulator screen */}
                         <div className="bg-surface/50 border border-border-custom rounded-lg p-4 font-mono text-[11px] min-h-[180px] flex flex-col justify-between relative overflow-hidden mb-6">
-                          
-                          {/* Ambient Proving Ring background */}
                           {zkStep === 'proving' && (
                             <div className="absolute inset-0 bg-accent-primary/5 animate-pulse flex items-center justify-center">
                               <span className="h-40 w-40 rounded-full border border-dashed border-accent-primary/20 animate-spin" />
                             </div>
                           )}
-
                           {zkStep === 'idle' && (
                             <div className="flex flex-col items-center justify-center flex-1 text-center py-6">
                               <Shield size={32} className="text-border-custom mb-2" />
@@ -267,30 +527,18 @@ export default function Home() {
                               <span className="text-[9px] text-text-secondary/50 mt-1">Select Shielding parameters to generate zk-SNARK proof.</span>
                             </div>
                           )}
-
                           {zkStep === 'witness' && (
-                            <div className="text-accent-primary leading-normal whitespace-pre-wrap">
-                              {witnessData}
-                            </div>
+                            <div className="text-accent-primary leading-normal whitespace-pre-wrap">{witnessData}</div>
                           )}
-
                           {zkStep === 'proving' && (
                             <div className="flex flex-col justify-between h-full flex-1">
-                              <div className="text-accent-secondary leading-none mb-2 uppercase tracking-widest text-[10px]">
-                                WASM WebGPU Proving...
-                              </div>
-                              <div className="text-text-secondary overflow-y-hidden text-[9px] leading-tight break-all max-h-[80px]">
-                                {proofBytes}
-                              </div>
+                              <div className="text-accent-secondary leading-none mb-2 uppercase tracking-widest text-[10px]">WASM WebGPU Proving...</div>
+                              <div className="text-text-secondary overflow-y-hidden text-[9px] leading-tight break-all max-h-[80px]">{proofBytes}</div>
                               <div className="w-full bg-border-custom/50 rounded-full h-1.5 mt-2">
-                                <div 
-                                  className="bg-accent-primary h-1.5 rounded-full transition-all duration-100" 
-                                  style={{ width: `${proveProgress}%` }}
-                                />
+                                <div className="bg-accent-primary h-1.5 rounded-full transition-all duration-100" style={{ width: `${proveProgress}%` }} />
                               </div>
                             </div>
                           )}
-
                           {zkStep === 'verifying' && (
                             <div className="flex flex-col items-center justify-center flex-1 py-4 text-center">
                               <RefreshCw size={24} className="text-accent-primary animate-spin mb-2" />
@@ -298,7 +546,6 @@ export default function Home() {
                               <span className="text-[9px] text-text-secondary mt-1">Executing verify_proof() recursive check on-chain.</span>
                             </div>
                           )}
-
                           {zkStep === 'success' && (
                             <div className="flex flex-col justify-between flex-1">
                               <div className="flex items-center gap-2 text-success-state mb-2">
@@ -320,10 +567,7 @@ export default function Home() {
 
                       <div className="flex items-center justify-end gap-3">
                         {zkStep !== 'idle' && (
-                          <button 
-                            onClick={() => setZkStep('idle')} 
-                            className="text-xs text-text-secondary hover:text-text-primary hover:underline cursor-pointer"
-                          >
+                          <button onClick={() => setZkStep('idle')} className="text-xs text-text-secondary hover:text-text-primary hover:underline cursor-pointer">
                             Reset Engine
                           </button>
                         )}
@@ -353,28 +597,22 @@ export default function Home() {
                           Protocol Architecture
                         </h2>
                       </div>
-
                       <div className="space-y-4">
                         {[
                           { title: 'Stealth Addresses', desc: 'Diffie-Hellman key derivation generates clean, unique payment seeds on Flare Network, isolating recipient identities.' },
                           { title: 'TEE Matching Nodes', desc: 'Dark Swap intents are matched in secure Enclaves (Intel SGX), executing batch orders at midpoint oracle rates.' },
-                          { title: 'Compliance verification', desc: 'Privacy is backed by opt-in cryptographic audits. Export viewing keys to prove clean transaction chains without breaking secrecy.' }
+                          { title: 'Compliance Verification', desc: 'Privacy is backed by opt-in cryptographic audits. Export viewing keys to prove clean transaction chains without breaking secrecy.' }
                         ].map((item, idx) => (
                           <div key={idx} className="border-l border-accent-secondary/30 pl-3">
-                            <span className="text-xs font-semibold text-text-primary uppercase tracking-wider font-display block">
-                              {item.title}
-                            </span>
-                            <p className="text-[10px] text-text-secondary mt-1 font-light leading-normal">
-                              {item.desc}
-                            </p>
+                            <span className="text-xs font-semibold text-text-primary uppercase tracking-wider font-display block">{item.title}</span>
+                            <p className="text-[10px] text-text-secondary mt-1 font-light leading-normal">{item.desc}</p>
                           </div>
                         ))}
                       </div>
                     </div>
-
-                    <div className="pt-6 border-t border-border-custom/50 mt-6 flex items-center justify-between">
-                      <Link 
-                        href="/portfolio" 
+                    <div className="pt-6 border-t border-border-custom/50 mt-6">
+                      <Link
+                        href="/portfolio"
                         className="text-xs text-accent-primary hover:text-accent-primary/80 font-semibold tracking-wider uppercase inline-flex items-center gap-1 hover:gap-1.5 transition-all"
                       >
                         Enter App Modules
@@ -392,13 +630,11 @@ export default function Home() {
                   © 2026 Umbra Protocol. Built on Flare Network.
                 </span>
                 <div className="flex items-center gap-6">
-                  <a href="#" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1">
+                  <a href="https://docs.umbraprotocol.io" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1">
                     Documentation <ExternalLink size={10} />
                   </a>
-                  <a href="#" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest">
-                    Audits
-                  </a>
-                  <a href="#" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest">
+                  <a href="#" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest">Audits</a>
+                  <a href="https://github.com/umbraprotocol" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest">
                     GitHub
                   </a>
                 </div>
