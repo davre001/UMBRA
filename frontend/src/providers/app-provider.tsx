@@ -1,6 +1,7 @@
 "use client";
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useAccount, useDisconnect } from 'wagmi';
 
 type Notification = {
   id: string;
@@ -13,13 +14,19 @@ type Notification = {
 type AppContextType = {
   isEntered: boolean;
   setIsEntered: (val: boolean) => void;
+  // Wallet state — driven by wagmi
   isWalletConnected: boolean;
   walletAddress: string | null;
-  connectWallet: () => void;
+  connectWallet: () => void;   // now opens the modal — set externally
   disconnectWallet: () => void;
+  // Modal control
+  walletModalOpen: boolean;
+  setWalletModalOpen: (open: boolean) => void;
+  // Notifications
   notifications: Notification[];
   addNotification: (title: string, message: string, type?: Notification['type']) => void;
   clearNotifications: () => void;
+  // Anonymity
   anonymityScore: number;
   setAnonymityScore: (score: number) => void;
 };
@@ -28,29 +35,38 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isEntered, setIsEntered] = useState<boolean>(false);
-  const [isWalletConnected, setIsWalletConnected] = useState<boolean>(false);
-  const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [anonymityScore, setAnonymityScore] = useState<number>(85); // default starting score
+  const [anonymityScore, setAnonymityScore] = useState<number>(85);
+  const [walletModalOpen, setWalletModalOpen] = useState(false);
+
+  // Real wallet state from wagmi
+  const { address, isConnected } = useAccount();
+  const { disconnect } = useDisconnect();
+
+  // Notify on connect/disconnect
+  useEffect(() => {
+    if (isConnected && address) {
+      addNotification(
+        'Wallet Connected',
+        `Linked ${address.slice(0, 6)}...${address.slice(-4)}`,
+        'success'
+      );
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isConnected, address]);
+
   const handleSetEntered = (val: boolean) => {
     setIsEntered(val);
     if (val) {
-      addNotification("Secure Vault Session", "Sanitized TEE connection established.", "success");
+      addNotification('Secure Vault Session', 'Sanitized TEE connection established.', 'success');
     }
   };
 
-  const connectWallet = () => {
-    setIsWalletConnected(true);
-    // Standard stealth preview address
-    const mockAddress = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
-    setWalletAddress(mockAddress);
-    addNotification("Wallet Connected", `Linked ${mockAddress.slice(0, 6)}...${mockAddress.slice(-4)}`, "info");
-  };
+  const connectWallet = () => setWalletModalOpen(true);
 
   const disconnectWallet = () => {
-    setIsWalletConnected(false);
-    setWalletAddress(null);
-    addNotification("Wallet Disconnected", "Secure connection terminated.", "warning");
+    disconnect();
+    addNotification('Wallet Disconnected', 'Secure connection terminated.', 'warning');
   };
 
   const addNotification = (title: string, message: string, type: Notification['type'] = 'info') => {
@@ -59,28 +75,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       title,
       message,
       type,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
-    setNotifications(prev => [newNotif, ...prev].slice(0, 15)); // keep last 15
+    setNotifications(prev => [newNotif, ...prev].slice(0, 15));
   };
 
-  const clearNotifications = () => {
-    setNotifications([]);
-  };
+  const clearNotifications = () => setNotifications([]);
 
   return (
     <AppContext.Provider value={{
       isEntered,
       setIsEntered: handleSetEntered,
-      isWalletConnected,
-      walletAddress,
+      isWalletConnected: isConnected,
+      walletAddress: address ?? null,
       connectWallet,
       disconnectWallet,
+      walletModalOpen,
+      setWalletModalOpen,
       notifications,
       addNotification,
       clearNotifications,
       anonymityScore,
-      setAnonymityScore
+      setAnonymityScore,
     }}>
       {children}
     </AppContext.Provider>
