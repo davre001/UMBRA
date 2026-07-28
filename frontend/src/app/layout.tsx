@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
-import { AppProvider } from "@/providers/app-provider";
+import { Providers } from "@/providers/providers";
 import { WebGLBackground } from "@/components/shared/web-gl-background";
 import "./globals.css";
 
@@ -32,14 +32,14 @@ export default function RootLayout({
       className={`${inter.variable} ${spaceGrotesk.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-bg-base text-text-primary flex flex-col selection:bg-accent-primary/20 selection:text-accent-primary relative">
-        <AppProvider>
+        <Providers>
           <div className="fixed inset-0 z-0 pointer-events-none">
             <WebGLBackground />
           </div>
           <div className="relative z-10 flex flex-col min-h-screen">
             {children}
           </div>
-        </AppProvider>
+        </Providers>
       </body>
     </html>
   );
