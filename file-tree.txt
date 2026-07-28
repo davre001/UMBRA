@@ -1,67 +1,79 @@
 UMBRA/
 ├── backend/
-│   ├── circuits/
-│   │   ├── build/
-│   │   ├── noir/
-│   │   │   └── shield.nr
-│   │   ├── test/
-│   │   │   └── shield.test.js
-│   │   ├── order.circom
-│   │   ├── shield.circom
-│   │   └── unshield.circom
-│   ├── contracts/
-│   │   ├── interfaces/
-│   │   │   ├── IFAsset.sol
-│   │   │   ├── IFdc.sol
-│   │   │   ├── IFtso.sol
-│   │   │   └── ITeeAttestation.sol
-│   │   ├── libraries/
-│   │   │   ├── MerkleTree.sol
-│   │   │   └── ZkVerifier.sol
-│   │   ├── script/
-│   │   │   ├── Configure.s.sol
-│   │   │   └── Deploy.s.sol
-│   │   ├── test/
-│   │   │   ├── Compliance.t.sol
-│   │   │   ├── FairPricing.t.sol
-│   │   │   ├── Settlement.t.sol
-│   │   │   └── ShieldedVault.t.sol
-│   │   ├── Compliance.sol
-│   │   ├── FairPricing.sol
-│   │   ├── OrderBook.sol
-│   │   ├── Settlement.sol
-│   │   ├── ShieldedVault.sol
-│   │   ├── foundry.toml
-│   │   └── hardhat.config.ts
-│   ├── oracle/
-│   │   ├── tests/
-│   │   │   ├── test_fdc_client.py
-│   │   │   └── test_ftso_client.py
-│   │   ├── fdc_client.py
-│   │   └── ftso_client.py
-│   ├── shared/
-│   │   ├── types/
-│   │   └── constants.py
-│   ├── tee/
-│   │   ├── config/
-│   │   │   └── matcher.config.yaml
-│   │   ├── enclave/
-│   │   │   ├── Dockerfile
-│   │   │   └── entrypoint.sh
-│   │   ├── tests/
-│   │   │   └── test_matcher.py
-│   │   ├── attestation.py
-│   │   ├── matcher.py
-│   │   ├── proof_relay.py
-│   │   └── requirements.txt
-│   ├── .env.example
-│   ├── docker-compose.yml
-│   └── README.md
-├── frontend/
 │   ├── src/
-│   │   ├── App.tsx
-│   │   └── index.css
-│   └── index.html
+│   │   ├── compliance/
+│   │   │   └── fdc.client.ts
+│   │   ├── dark-engine/
+│   │   │   └── matcher.ts
+│   │   ├── pricing/
+│   │   │   └── ftso.client.ts
+│   │   ├── shared/
+│   │   │   ├── constants.ts
+│   │   │   └── types.ts
+│   │   ├── vault/
+│   │   │   └── vault.service.ts
+│   │   └── index.ts
+│   ├── test/
+│   │   ├── compliance.test.ts
+│   │   ├── dark-engine.test.ts
+│   │   ├── pricing.test.ts
+│   │   └── vault.test.ts
+│   ├── .env.example
+│   ├── package.json
+│   └── tsconfig.json
+├── contract/
+├── frontend/
+│   ├── public/
+│   │   ├── file.svg
+│   │   ├── globe.svg
+│   │   ├── next.svg
+│   │   ├── vercel.svg
+│   │   └── window.svg
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── pay/
+│   │   │   │   └── page.tsx
+│   │   │   ├── portfolio/
+│   │   │   │   └── page.tsx
+│   │   │   ├── receive/
+│   │   │   │   └── page.tsx
+│   │   │   ├── shield/
+│   │   │   │   └── page.tsx
+│   │   │   ├── swap/
+│   │   │   │   └── page.tsx
+│   │   │   ├── favicon.ico
+│   │   │   ├── globals.css
+│   │   │   ├── layout.tsx
+│   │   │   └── page.tsx
+│   │   ├── components/
+│   │   │   ├── shared/
+│   │   │   │   ├── navbar.tsx
+│   │   │   │   ├── sidebar.tsx
+│   │   │   │   └── web-gl-background.tsx
+│   │   │   └── ui/
+│   │   │       ├── animated-button.tsx
+│   │   │       ├── button.tsx
+│   │   │       ├── dock.tsx
+│   │   │       ├── glass-card.tsx
+│   │   │       ├── glow-border.tsx
+│   │   │       ├── liquid-glass-button.tsx
+│   │   │       ├── mouse-glow.tsx
+│   │   │       ├── tooltip.tsx
+│   │   │       └── web-gl-shader.tsx
+│   │   ├── lib/
+│   │   │   └── utils.ts
+│   │   └── providers/
+│   │       └── app-provider.tsx
+│   ├── .gitignore
+│   ├── AGENTS.md
+│   ├── CLAUDE.md
+│   ├── eslint.config.mjs
+│   ├── next.config.ts
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── postcss.config.mjs
+│   └── tsconfig.json
 ├── FRONTEND_IMPLEMENTATION_PLAN.md
 ├── LICENSE
+├── package-lock.json
 └── README.md
