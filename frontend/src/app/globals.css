@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-base: #000000;
+  --color-surface: #111111;
+  --color-border-custom: #222222;
+  --color-accent-primary: #FFA500;
+  --color-accent-secondary: #FFFFFF;
+  --color-success-state: #00E5A3;
+  --color-text-primary: #FFFFFF;
+  --color-text-secondary: #A0A0A0;
+
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), system-ui, sans-serif;
+
+  --animate-border-pulse: border-pulse 4s ease-in-out infinite;
+  --animate-radial-rotate: radial-rotate 20s linear infinite;
+  --animate-slow-pan: slow-pan 60s linear infinite;
+
+  @keyframes border-pulse {
+    0%, 100% { border-color: rgba(255, 165, 0, 0.1); }
+    50% { border-color: rgba(255, 255, 255, 0.4); }
+  }
+  @keyframes radial-rotate {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+  @keyframes slow-pan {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+}
+
+/* Custom Core Styles */
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #08090C;
+  color: #F3F4F6;
+  font-family: var(--font-inter), system-ui, sans-serif;
+  font-weight: 300;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #000000;
+}
+::-webkit-scrollbar-thumb {
+  background: #222222;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #FFA500;
+}
+
+/* Blur & Glassmorphism Utilities */
+.glass-panel {
+  background: rgba(17, 19, 25, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(30, 34, 45, 0.6);
+}
+
+.glass-panel-heavy {
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 165, 0, 0.15);
+}
+
+.glow-text-primary {
+  text-shadow: 0 0 10px rgba(255, 165, 0, 0.3);
+}
+
+.glow-text-secondary {
+  text-shadow: 0 0 15px rgba(255, 255, 255, 0.4);
+}
+
+
+
+/* Custom Grid overlay */
+.grid-overlay {
+  background-size: 40px 40px;
+  background-image: 
+    linear-gradient(to right, rgba(30, 34, 45, 0.2) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(30, 34, 45, 0.2) 1px, transparent 1px);
+}
