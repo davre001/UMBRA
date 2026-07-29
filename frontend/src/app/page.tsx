@@ -22,7 +22,8 @@ import {
   GitBranch,
   BookOpen,
   Droplets,
-  Zap,
+  Send,
+  EyeOff,
   ArrowDown,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -188,9 +189,9 @@ export default function Home() {
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.4, duration: 0.8 }}
-                  className="font-sans text-sm sm:text-base text-text-primary max-w-lg mb-6 sm:mb-10 font-semibold leading-relaxed select-none filter drop-shadow-[0_2px_4px_rgba(0,0,0,1)]"
+                  className="font-sans text-sm sm:text-base text-text-primary max-w-2xl mb-6 sm:mb-10 font-light leading-relaxed select-none filter drop-shadow-[0_2px_4px_rgba(0,0,0,1)]"
                 >
-                  Trustless dark pool liquidity, stealth addresses, and zero-knowledge proving on Flare Network.
+                  Trade without leaving a trace. Umbra pairs zero-knowledge proofs with stealth addresses and TEE-matched dark pool liquidity, so your positions, counterparties, and balances stay private — while settling openly on Flare.
                 </motion.p>
 
                 <motion.div
@@ -245,7 +246,7 @@ export default function Home() {
             </section>
 
             {/* ── STATS STRIP ── */}
-            <section className="relative z-10 border-y border-border-custom/40 bg-black/60 backdrop-blur-sm py-8 px-4">
+            <section className="relative z-10 border-y border-border-custom/40 bg-black/75 backdrop-blur-sm py-8 px-4">
               <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
                 {[
                   { label: 'Total Shielded Value', value: '$84.2M' },
@@ -285,7 +286,7 @@ export default function Home() {
                   },
                 ].map((f, i) => (
                   <FadeUp key={i} delay={i * 0.1}>
-                    <GlassCard className="p-6 h-full flex flex-col" hoverGlow>
+                    <GlassCard className="p-6 h-full flex flex-col bg-surface/65" hoverGlow>
                       <div className="p-2.5 rounded-lg bg-accent-primary/10 border border-accent-primary/20 w-fit mb-4">
                         <f.icon size={18} className="text-accent-primary" />
                       </div>
@@ -316,28 +317,32 @@ export default function Home() {
                     },
                     {
                       step: '02',
-                      icon: Cpu,
+                      icon: Send,
                       title: 'Trade in the Dark Pool',
                       desc: 'Swap inside Trusted Execution Environments. Orders match off-chain in SGX enclaves and settle atomically on Flare.',
                     },
                     {
                       step: '03',
-                      icon: Zap,
+                      icon: EyeOff,
                       title: 'Withdraw Privately',
                       desc: 'Funds are released to a stealth address with no on-chain link to the original deposit. Gasless relayer pays the fee.',
                     },
                   ].map((item, i) => (
                     <FadeUp key={i} delay={i * 0.12}>
-                      <div className="flex flex-col p-6 rounded-xl border border-border-custom/50 bg-surface/20 hover:border-accent-primary/30 transition-all duration-300 h-full">
+                      <motion.div
+                        whileHover={{ y: -4 }}
+                        transition={{ type: 'spring', stiffness: 300, damping: 22 }}
+                        className="group flex flex-col p-6 rounded-xl border border-border-custom/50 bg-surface/65 hover:bg-surface/80 hover:border-accent-primary/50 hover:shadow-[0_12px_32px_rgba(0,0,0,0.55)] transition-colors duration-300 h-full cursor-pointer"
+                      >
                         <div className="flex items-start justify-between mb-4">
-                          <div className="p-2.5 rounded-lg bg-accent-primary/10 border border-accent-primary/20">
+                          <div className="p-2.5 rounded-lg bg-accent-primary/10 border border-accent-primary/20 group-hover:bg-accent-primary/20 group-hover:border-accent-primary/40 transition-colors">
                             <item.icon size={16} className="text-accent-primary" />
                           </div>
-                          <span className="font-display text-3xl font-extrabold text-border-custom/50 tracking-tight">{item.step}</span>
+                          <span className="font-display text-3xl font-extrabold text-text-primary tracking-tight">{item.step}</span>
                         </div>
                         <h3 className="font-display text-xs font-bold uppercase tracking-wider text-text-primary mb-2">{item.title}</h3>
                         <p className="text-[10px] text-text-secondary leading-relaxed font-light">{item.desc}</p>
-                      </div>
+                      </motion.div>
                     </FadeUp>
                   ))}
                 </div>
@@ -354,17 +359,21 @@ export default function Home() {
               </FadeUp>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
-                  { name: 'Noir', role: 'ZK Circuits' },
+                  { name: 'Next.js 16', role: 'App Router' },
+                  { name: 'React 19', role: 'UI Runtime' },
+                  { name: 'TypeScript', role: 'Type Safety' },
+                  { name: 'Tailwind v4', role: 'Styling' },
+                  { name: 'wagmi + viem', role: 'EVM Client' },
                   { name: 'Flare', role: 'Settlement' },
+                  { name: 'Express', role: 'Protocol API' },
+                  { name: 'Noir + WASM', role: 'ZK Proving' },
                   { name: 'Intel SGX', role: 'TEE Matching' },
                   { name: 'FTSO', role: 'Price Oracle' },
-                  { name: 'WebGPU', role: 'Client Prover' },
-                  { name: 'WASM', role: 'Prover Runtime' },
-                  { name: 'EVM', role: 'Smart Contracts' },
-                  { name: 'ECDH', role: 'Stealth Keys' },
+                  { name: 'FDC', role: 'Compliance' },
+                  { name: 'WebAuthn', role: 'Passkey Auth' },
                 ].map((t, i) => (
                   <FadeUp key={i} delay={(i % 4) * 0.07}>
-                    <div className="p-4 rounded-xl border border-border-custom/40 bg-surface/10 hover:border-accent-primary/20 hover:bg-surface/30 transition-all text-center">
+                    <div className="p-4 rounded-xl border border-border-custom/60 bg-surface/65 hover:border-accent-primary/40 hover:bg-surface/80 transition-all text-center">
                       <div className="font-display text-sm font-extrabold uppercase tracking-tight text-accent-primary mb-1">{t.name}</div>
                       <div className="text-[9px] text-text-secondary uppercase tracking-widest">{t.role}</div>
                     </div>
@@ -374,7 +383,7 @@ export default function Home() {
             </section>
 
             {/* ── CTA BANNER ── */}
-            <section className="relative z-10 bg-black/60 backdrop-blur-sm border-y border-border-custom/30 py-20 px-4">
+            <section className="relative z-10 bg-black/75 backdrop-blur-sm border-y border-border-custom/30 py-20 px-4">
               <FadeUp className="max-w-2xl mx-auto text-center">
                 <div className="mb-5 inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-accent-primary/30 bg-accent-primary/5 text-[10px] text-accent-primary uppercase tracking-widest">
                   <span className="h-1.5 w-1.5 rounded-full bg-accent-primary animate-pulse" />
@@ -412,10 +421,9 @@ export default function Home() {
                 <a href="https://docs.umbraprotocol.io" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1 transition-colors">
                   <BookOpen size={10} />Docs
                 </a>
-                <a href="https://github.com/umbraprotocol" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1 transition-colors">
+                <a href="https://github.com/davre001/UMBRA" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1 transition-colors">
                   <GitBranch size={10} />GitHub
                 </a>
-                <a href="#" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest transition-colors">Audits</a>
               </div>
             </footer>
 
@@ -619,8 +627,7 @@ export default function Home() {
                   <a href="https://docs.umbraprotocol.io" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1">
                     Documentation <ExternalLink size={10} />
                   </a>
-                  <a href="#" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest">Audits</a>
-                  <a href="https://github.com/umbraprotocol" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest">
+                  <a href="https://github.com/davre001/UMBRA" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest">
                     GitHub
                   </a>
                 </div>

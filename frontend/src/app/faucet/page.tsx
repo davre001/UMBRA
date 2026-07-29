@@ -28,7 +28,6 @@ const TOKENS = [
   { symbol: 'WFLR', name: 'Wrapped Flare', icon: 'FLR' },
   { symbol: 'WXRP', name: 'Wrapped XRP',   icon: 'XRP' },
   { symbol: 'USDT', name: 'Tether USD',    icon: 'USDT' },
-  { symbol: 'USDC', name: 'USD Coin',      icon: 'USDC' },
 ] as const;
 
 type MintStatus = 'idle' | 'minting' | 'minted';
@@ -127,7 +126,7 @@ export default function FaucetPage() {
 
         {/* Token grid — nested inside an outer black glass shell */}
         <div className="rounded-3xl border border-white/15 bg-black/60 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.08)] p-5 sm:p-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {TOKENS.map((token) => {
             const status = statuses[token.symbol] ?? 'idle';
             const isMinting = status === 'minting';
@@ -158,14 +157,13 @@ export default function FaucetPage() {
                   </div>
 
                   {/* Action */}
-                  <div className="mt-auto">
+                  <div className="mt-auto flex justify-center">
                     <AnimatedButton
                       variant={isMinted ? 'glass' : 'primary'}
                       size="sm"
-                      fullWidth
                       disabled={isMinting}
                       onClick={() => handleMint(token.symbol)}
-                      className="rounded-lg"
+                      className="rounded-lg w-3/5"
                     >
                       <AnimatePresence mode="wait" initial={false}>
                         {isMinting ? (
