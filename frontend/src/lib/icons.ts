@@ -9,7 +9,7 @@ export const walletIcon = (slug: string) => `/icons/wallets/${slug}.svg`;
 // Maps a wagmi connector id to its icon file name.
 export const CONNECTOR_ICONS: Record<string, string> = {
   metaMask: 'metamask',
-  coinbaseWallet: 'coinbase',
+  coinbaseWalletSDK: 'coinbase',
   walletConnect: 'wallet-connect',
   rabby: 'rabby',
   trust: 'trust',

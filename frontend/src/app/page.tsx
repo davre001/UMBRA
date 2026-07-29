@@ -7,6 +7,7 @@ import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { GlowBorder } from '@/components/ui/glow-border';
+import { CountUp } from '@/components/ui/count-up';
 import {
   Shield,
   Cpu,
@@ -108,65 +109,72 @@ export default function Home() {
           >
 
             {/* ── TOP NAV ── */}
-            <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 sm:px-10 py-4 border-b border-white/5 backdrop-blur-xl bg-black/40">
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-lg border border-accent-primary/40 bg-accent-primary/10 flex items-center justify-center">
-                  <Lock size={14} className="text-accent-primary" />
+            <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-10 py-3 sm:py-4 border-b border-white/5 backdrop-blur-xl bg-black/40">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-lg border border-accent-primary/40 bg-accent-primary/10 flex items-center justify-center flex-shrink-0">
+                  <Lock size={13} className="text-accent-primary" />
                 </div>
-                <span className="font-display font-extrabold text-lg tracking-tighter text-text-primary uppercase">
+                <span className="font-display font-extrabold text-base sm:text-lg tracking-tighter text-text-primary uppercase truncate">
                   Umbra<span className="text-accent-primary">.</span>
                 </span>
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
                 <a
                   href="https://docs.umbraprotocol.io"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border-custom text-xs text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider"
+                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border-custom text-[11px] text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider"
                 >
-                  <BookOpen size={12} />
+                  <BookOpen size={11} />
                   Docs
                 </a>
                 <Link
                   href="/faucet"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border-custom text-xs text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider"
+                  className="flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg border border-border-custom text-[10px] sm:text-[11px] text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider whitespace-nowrap"
                 >
-                  <Droplets size={12} />
+                  <Droplets size={11} />
                   Faucet
                 </Link>
-                <AnimatedButton variant="primary" size="sm" onClick={handleEnterVault} disabled={transitioning}>
+                <AnimatedButton
+                  variant="primary"
+                  size="sm"
+                  onClick={handleEnterVault}
+                  disabled={transitioning}
+                  className="px-2 sm:px-2.5 py-1 text-[10px] sm:text-[11px] whitespace-nowrap"
+                >
                   {transitioning ? (
-                    <span className="flex items-center gap-1.5"><RefreshCw size={12} className="animate-spin" />Loading...</span>
+                    <span className="flex items-center gap-1"><RefreshCw size={11} className="animate-spin" />Loading</span>
                   ) : (
-                    <span className="flex items-center gap-1.5">Launch App <ArrowRight size={12} /></span>
+                    <span className="flex items-center gap-1">Launch App <ArrowRight size={11} /></span>
                   )}
                 </AnimatedButton>
               </div>
             </header>
 
             {/* ── HERO ── */}
-            <section className="relative flex flex-col items-center justify-center min-h-screen px-4 pt-20 z-10">
+            <section className="relative flex flex-col items-center justify-start sm:justify-center min-h-screen px-4 pt-24 sm:pt-20 z-10 overflow-x-hidden">
               <div className="absolute inset-0 grid-overlay opacity-20 z-0 pointer-events-none" />
 
               <motion.div
                 animate={{ rotate: 360 }}
                 transition={{ duration: 25, repeat: Infinity, ease: 'linear' }}
-                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full border border-dashed border-accent-primary/10 opacity-30 pointer-events-none blur-[1px]"
+                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[320px] h-[320px] sm:w-[500px] sm:h-[500px] rounded-full border border-dashed border-accent-primary/10 opacity-30 pointer-events-none blur-[1px]"
               />
 
-              <div className="relative text-center flex flex-col items-center max-w-3xl z-10">
+              <div className="relative text-center flex flex-col items-center w-full max-w-3xl z-10">
 
                 {/* Lock icon */}
                 <motion.div
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ duration: 1, ease: 'easeOut' }}
-                  className="mb-8 p-6 rounded-full border border-border-custom bg-surface/30 backdrop-blur-xl relative group"
+                  className="mb-4 sm:mb-8 p-3 sm:p-6 rounded-full border border-border-custom bg-surface/30 backdrop-blur-xl relative group"
                 >
                   <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-accent-secondary/20 to-accent-primary/20 opacity-0 group-hover:opacity-100 transition-opacity duration-700 blur" />
-                  <div className="h-20 w-20 rounded-full border border-accent-primary/30 flex items-center justify-center bg-bg-base relative">
-                    <Lock size={32} className="text-accent-primary animate-pulse" />
+                  <div className="h-12 w-12 sm:h-20 sm:w-20 rounded-full border border-accent-primary/30 flex items-center justify-center bg-bg-base relative">
+                    <Lock size={22} className="text-accent-primary animate-pulse sm:hidden" />
+                    <Lock size={32} className="text-accent-primary animate-pulse hidden sm:block" />
                   </div>
                 </motion.div>
 
@@ -174,7 +182,7 @@ export default function Home() {
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.2, duration: 0.8 }}
-                  className="font-display text-5xl sm:text-7xl font-extrabold tracking-tighter text-text-primary mb-6 uppercase cursor-default select-none filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)] drop-shadow-[0_12px_24px_rgba(0,0,0,0.95)]"
+                  className="font-display text-[2.1rem] leading-[1.05] sm:text-7xl sm:leading-none font-extrabold tracking-tighter text-text-primary mb-4 sm:mb-6 uppercase cursor-default select-none break-words max-w-full filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)] drop-shadow-[0_12px_24px_rgba(0,0,0,0.95)]"
                 >
                   Private Trading.<br />
                   <span className="text-accent-primary">Without Compromise.</span>
@@ -184,7 +192,7 @@ export default function Home() {
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.4, duration: 0.8 }}
-                  className="font-sans text-sm sm:text-base text-text-primary max-w-lg mb-10 font-semibold leading-relaxed select-none filter drop-shadow-[0_2px_4px_rgba(0,0,0,1)]"
+                  className="font-sans text-sm sm:text-base text-text-primary max-w-lg mb-6 sm:mb-10 font-semibold leading-relaxed select-none filter drop-shadow-[0_2px_4px_rgba(0,0,0,1)]"
                 >
                   Trustless dark pool liquidity, stealth addresses, and zero-knowledge proving on Flare Network.
                 </motion.p>
@@ -197,20 +205,20 @@ export default function Home() {
                 >
                   <AnimatedButton
                     variant="primary"
-                    size="lg"
+                    size="sm"
                     onClick={handleEnterVault}
                     disabled={transitioning}
-                    className="px-10 py-4 font-bold border border-accent-primary/30 rounded-xl"
+                    className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest border border-accent-primary/30 rounded-xl"
                   >
                     {transitioning ? (
-                      <span className="flex items-center gap-2">
-                        <RefreshCw className="animate-spin" size={16} />
+                      <span className="flex items-center gap-1.5">
+                        <RefreshCw className="animate-spin" size={13} />
                         Opening Secure Vault...
                       </span>
                     ) : (
-                      <span className="flex items-center gap-2">
+                      <span className="flex items-center gap-1.5">
                         Initiate Protocol Session
-                        <ArrowRight size={16} />
+                        <ArrowRight size={13} />
                       </span>
                     )}
                   </AnimatedButton>
@@ -218,9 +226,9 @@ export default function Home() {
                     href="https://docs.umbraprotocol.io"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-6 py-3 rounded-xl border border-border-custom text-sm text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all"
+                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border-custom text-xs text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all"
                   >
-                    <BookOpen size={16} />
+                    <BookOpen size={13} />
                     Read the Docs
                   </a>
                 </motion.div>
@@ -250,7 +258,10 @@ export default function Home() {
                   { label: 'Compliance Rate', value: '100%' },
                 ].map((s, i) => (
                   <FadeUp key={i} delay={i * 0.1}>
-                    <div className="text-2xl sm:text-3xl font-display font-extrabold text-text-primary tracking-tight">{s.value}</div>
+                    <CountUp
+                      value={s.value}
+                      className="block text-2xl sm:text-3xl font-display font-extrabold text-text-primary tracking-tight tabular-nums"
+                    />
                     <div className="text-[10px] text-accent-primary uppercase tracking-widest mt-1">{s.label}</div>
                   </FadeUp>
                 ))}
@@ -462,9 +473,10 @@ export default function Home() {
                       {stat.name}
                     </span>
                     <div className="mt-2">
-                      <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary font-display">
-                        {stat.value}
-                      </span>
+                      <CountUp
+                        value={stat.value}
+                        className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary font-display tabular-nums"
+                      />
                       <span className={`block text-[10px] mt-1 font-light ${stat.color === 'success' ? 'text-success-state' : 'text-accent-primary'}`}>
                         {stat.change}
                       </span>
