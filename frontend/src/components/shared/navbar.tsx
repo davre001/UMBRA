@@ -29,9 +29,6 @@ export const Navbar: React.FC = () => {
   const [selectedNetwork, setSelectedNetwork] = useState('Flare Mainnet');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Hidden before entering the protocol vault
-  if (!isEntered) return null;
-
   // Manage show/hide on scroll
   useEffect(() => {
     const handleScroll = () => {
@@ -54,11 +51,15 @@ export const Navbar: React.FC = () => {
     { name: 'Private Pay', href: '/pay' },
     { name: 'Dark Swap', href: '/swap' },
     { name: 'Receive', href: '/receive' },
+    { name: 'Faucet', href: '/faucet' },
   ];
 
   const networks = ['Flare Mainnet', 'Songbird Network', 'Coston2 Testnet'];
 
   const unreadCount = notifications.length;
+
+  // Hidden before entering the protocol vault
+  if (!isEntered) return null;
 
   return (
     <motion.nav

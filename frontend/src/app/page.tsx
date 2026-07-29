@@ -21,6 +21,7 @@ import {
   RefreshCw,
   GitBranch,
   BookOpen,
+  Droplets,
   Zap,
   ArrowDown,
 } from 'lucide-react';
@@ -128,15 +129,13 @@ export default function Home() {
                   <BookOpen size={12} />
                   Docs
                 </a>
-                <a
-                  href="https://github.com/umbraprotocol"
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <Link
+                  href="/faucet"
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border-custom text-xs text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider"
                 >
-                  <GitBranch size={12} />
-                  GitHub
-                </a>
+                  <Droplets size={12} />
+                  Faucet
+                </Link>
                 <AnimatedButton variant="primary" size="sm" onClick={handleEnterVault} disabled={transitioning}>
                   {transitioning ? (
                     <span className="flex items-center gap-1.5"><RefreshCw size={12} className="animate-spin" />Loading...</span>

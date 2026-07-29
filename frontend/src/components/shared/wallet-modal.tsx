@@ -22,7 +22,8 @@ export function WalletModal({ open, onClose, onConnected }: WalletModalProps) {
   const { connectors, connect, isPending, error } = useConnect({
     mutation: {
       onSuccess(data) {
-        onConnected?.(data.accounts[0]);
+        const account = data.accounts[0];
+        onConnected?.(typeof account === 'string' ? account : account.address);
         onClose();
       },
     },
