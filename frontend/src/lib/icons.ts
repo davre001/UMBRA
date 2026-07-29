@@ -1,12 +1,12 @@
-// Public, CDN-hosted brand icons (web3icons — branded/colour variants).
-// Served from jsDelivr so nothing needs to be vendored into the repo.
-const W3I = 'https://cdn.jsdelivr.net/gh/0xa3k5/web3icons@main/packages/core/src/svgs';
+// Brand icons vendored into `public/icons` — no CDN dependency, no hotlinking.
+// Tokens/networks are the standard circular badge logos; wallets are their
+// official marks on a transparent background.
 
-export const tokenIcon = (symbol: string) => `${W3I}/tokens/branded/${symbol}.svg`;
-export const networkIcon = (slug: string) => `${W3I}/networks/branded/${slug}.svg`;
-export const walletIcon = (slug: string) => `${W3I}/wallets/branded/${slug}.svg`;
+export const tokenIcon = (symbol: string) => `/icons/tokens/${symbol.toLowerCase()}.svg`;
+export const networkIcon = (slug: string) => `/icons/networks/${slug}.svg`;
+export const walletIcon = (slug: string) => `/icons/wallets/${slug}.svg`;
 
-// Maps a wagmi connector id to its web3icons slug.
+// Maps a wagmi connector id to its icon file name.
 export const CONNECTOR_ICONS: Record<string, string> = {
   metaMask: 'metamask',
   coinbaseWallet: 'coinbase',
@@ -14,16 +14,9 @@ export const CONNECTOR_ICONS: Record<string, string> = {
   rabby: 'rabby',
   trust: 'trust',
   phantom: 'phantom',
-  injected: 'rabby',
 };
 
+// Umbra runs on Flare only (Coston2 for testing, Flare mainnet for production).
 export const SUPPORTED_CHAINS = [
-  { name: 'Flare',     slug: 'flare' },
-  { name: 'Ethereum',  slug: 'ethereum' },
-  { name: 'BNB Chain', slug: 'binance-smart-chain' },
-  { name: 'Polygon',   slug: 'polygon' },
-  { name: 'Arbitrum',  slug: 'arbitrum-one' },
-  { name: 'Base',      slug: 'base' },
-  { name: 'Optimism',  slug: 'optimism' },
-  { name: 'Avalanche', slug: 'avalanche' },
+  { name: 'Flare', slug: 'flare' },
 ] as const;

@@ -24,7 +24,7 @@ import { formatAddress } from '@/lib/utils';
 const MINT_AMOUNT = 10;
 
 // Contract wiring lands here once the faucet tokens are deployed.
-// `icon` is the web3icons token slug, which differs from the wrapped symbol.
+// `icon` is the underlying asset's icon name, which differs from the wrapped symbol.
 const TOKENS = [
   { symbol: 'WFLR', name: 'Wrapped Flare', icon: 'FLR' },
   { symbol: 'WXRP', name: 'Wrapped XRP',   icon: 'XRP' },
@@ -73,8 +73,8 @@ export default function FaucetPage() {
           </Link>
         )}
 
-        {/* Header */}
-        <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        {/* Header — black glass panel */}
+        <div className="mb-8 rounded-2xl border border-white/10 bg-black/40 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.55)] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight text-text-primary font-display uppercase flex items-center gap-2.5">
               <Droplets size={22} className="text-accent-primary" />
@@ -88,7 +88,7 @@ export default function FaucetPage() {
           {/* Wallet action — pinned top right */}
           <div className="flex-shrink-0">
             {isWalletConnected ? (
-              <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-success-state/20 bg-success-state/5 text-xs text-success-state font-mono">
+              <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-success-state/20 bg-black/40 backdrop-blur-xl text-xs text-success-state font-mono">
                 <ShieldCheck size={14} />
                 {formatAddress(walletAddress || '')}
               </div>
@@ -103,7 +103,7 @@ export default function FaucetPage() {
 
         {/* Wallet gate banner */}
         {!isWalletConnected && (
-          <GlassCard className="p-5 mb-8 flex flex-col sm:flex-row sm:items-center gap-4 justify-between" hoverGlow={false}>
+          <GlassCard className="p-5 mb-8 flex flex-col sm:flex-row sm:items-center gap-4 justify-between rounded-2xl border-white/10 bg-black/40 backdrop-blur-xl" hoverGlow={false}>
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-lg border border-accent-primary/20 bg-accent-primary/5 flex-shrink-0">
                 <Wallet size={16} className="text-accent-primary" />
@@ -116,26 +116,25 @@ export default function FaucetPage() {
               </div>
             </div>
 
-            {/* Supported networks */}
+            {/* Supported network */}
             <div className="flex items-center gap-2 flex-shrink-0">
-              <span className="text-[9px] text-text-secondary uppercase tracking-widest hidden sm:inline">Networks</span>
-              <div className="flex items-center -space-x-1.5">
-                {SUPPORTED_CHAINS.slice(0, 6).map((chain) => (
-                  <img
-                    key={chain.slug}
-                    src={networkIcon(chain.slug)}
-                    alt={chain.name}
-                    title={chain.name}
-                    className="h-6 w-6 rounded-full ring-2 ring-bg-base bg-surface"
-                  />
-                ))}
-              </div>
+              <span className="text-[9px] text-text-secondary uppercase tracking-widest hidden sm:inline">Network</span>
+              {SUPPORTED_CHAINS.map((chain) => (
+                <div
+                  key={chain.slug}
+                  className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/40 backdrop-blur-xl px-2.5 py-1.5"
+                >
+                  <img src={networkIcon(chain.slug)} alt={chain.name} className="h-5 w-5" />
+                  <span className="text-[10px] text-text-primary uppercase tracking-widest">{chain.name}</span>
+                </div>
+              ))}
             </div>
           </GlassCard>
         )}
 
-        {/* Token grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        {/* Token grid — nested inside an outer black glass shell */}
+        <div className="rounded-3xl border border-white/10 bg-black/40 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.55)] p-5 sm:p-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {TOKENS.map((token) => {
             const status = statuses[token.symbol] ?? 'idle';
             const isMinting = status === 'minting';
@@ -143,13 +142,13 @@ export default function FaucetPage() {
 
             return (
               <GlowBorder key={token.symbol} active={isMinted} glowColor="success">
-                <GlassCard className="p-5 flex flex-col h-full">
+                <GlassCard className="p-5 flex flex-col h-full rounded-2xl border-white/10 bg-white/[0.04] backdrop-blur-md">
                   {/* Token identity */}
                   <div className="flex items-center gap-3 mb-5">
                     <img
                       src={tokenIcon(token.icon)}
                       alt={token.symbol}
-                      className="h-10 w-10 rounded-full bg-surface/40 border border-border-custom flex-shrink-0"
+                      className="h-10 w-10 flex-shrink-0"
                     />
                     <div className="min-w-0">
                       <div className="font-mono text-sm font-bold text-text-primary">{token.symbol}</div>
@@ -158,7 +157,7 @@ export default function FaucetPage() {
                   </div>
 
                   {/* Amount */}
-                  <div className="rounded-lg border border-border-custom bg-surface/20 px-3 py-3 mb-5">
+                  <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-3 mb-5">
                     <span className="text-[9px] text-text-secondary uppercase tracking-widest block mb-1">Mint Amount</span>
                     <span className="font-mono text-lg font-bold text-text-primary">
                       {MINT_AMOUNT} <span className="text-xs text-text-secondary font-normal">{token.symbol}</span>
@@ -217,6 +216,7 @@ export default function FaucetPage() {
               </GlowBorder>
             );
           })}
+          </div>
         </div>
 
         {/* Footnote */}
