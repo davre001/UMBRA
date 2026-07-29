@@ -74,7 +74,7 @@ export default function FaucetPage() {
         )}
 
         {/* Header — black glass panel */}
-        <div className="mb-8 rounded-2xl border border-white/10 bg-black/40 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.55)] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        <div className="mb-8 rounded-2xl border border-white/15 bg-black/60 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.08)] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight text-text-primary font-display uppercase flex items-center gap-2.5">
               <Droplets size={22} className="text-accent-primary" />
@@ -103,7 +103,7 @@ export default function FaucetPage() {
 
         {/* Wallet gate banner */}
         {!isWalletConnected && (
-          <GlassCard className="p-5 mb-8 flex flex-col sm:flex-row sm:items-center gap-4 justify-between rounded-2xl border-white/10 bg-black/40 backdrop-blur-xl" hoverGlow={false}>
+          <GlassCard className="p-5 mb-8 flex flex-col sm:flex-row sm:items-center gap-4 justify-between rounded-2xl border-white/15 bg-black/60 backdrop-blur-xl" hoverGlow={false}>
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-lg border border-accent-primary/20 bg-accent-primary/5 flex-shrink-0">
                 <Wallet size={16} className="text-accent-primary" />
@@ -133,7 +133,7 @@ export default function FaucetPage() {
         )}
 
         {/* Token grid — nested inside an outer black glass shell */}
-        <div className="rounded-3xl border border-white/10 bg-black/40 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.55)] p-5 sm:p-6">
+        <div className="rounded-3xl border border-white/15 bg-black/60 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.08)] p-5 sm:p-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {TOKENS.map((token) => {
             const status = statuses[token.symbol] ?? 'idle';
@@ -142,7 +142,7 @@ export default function FaucetPage() {
 
             return (
               <GlowBorder key={token.symbol} active={isMinted} glowColor="success">
-                <GlassCard className="p-5 flex flex-col h-full rounded-2xl border-white/10 bg-white/[0.04] backdrop-blur-md">
+                <GlassCard className="p-5 flex flex-col h-full rounded-2xl border-white/10 bg-white/[0.07] backdrop-blur-md">
                   {/* Token identity */}
                   <div className="flex items-center gap-3 mb-5">
                     <img
