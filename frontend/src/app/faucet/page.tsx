@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '@/providers/app-provider';
 import { Navbar } from '@/components/shared/navbar';
-import { Sidebar } from '@/components/shared/sidebar';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { GlowBorder } from '@/components/ui/glow-border';
@@ -57,9 +56,8 @@ export default function FaucetPage() {
 
   // Reachable from the landing header too, so no vault gate — only a wallet gate.
   return (
-    <div className={`flex min-h-screen flex-col z-10 relative ${isEntered ? 'pt-16 md:pl-16' : 'pt-8'}`}>
+    <div className={`flex min-h-screen flex-col z-10 relative ${isEntered ? 'pt-16' : 'pt-8'}`}>
       <Navbar />
-      <Sidebar />
 
       <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         {/* Back to gateway — only when the vault chrome is hidden */}
@@ -86,19 +84,14 @@ export default function FaucetPage() {
           </div>
 
           {/* Wallet action — pinned top right */}
-          <div className="flex-shrink-0">
-            {isWalletConnected ? (
+          {isWalletConnected && (
+            <div className="flex-shrink-0">
               <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-success-state/20 bg-success-state/5 text-xs text-success-state font-mono">
                 <ShieldCheck size={14} />
                 {formatAddress(walletAddress || '')}
               </div>
-            ) : (
-              <AnimatedButton variant="primary" size="sm" onClick={connectWallet}>
-                <Wallet size={14} />
-                Connect Wallet
-              </AnimatedButton>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Wallet gate banner */}

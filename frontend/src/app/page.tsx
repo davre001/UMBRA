@@ -4,7 +4,6 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '@/providers/app-provider';
 import { Navbar } from '@/components/shared/navbar';
-import { Sidebar } from '@/components/shared/sidebar';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { GlowBorder } from '@/components/ui/glow-border';
@@ -157,16 +156,6 @@ export default function Home() {
               />
 
               <div className="relative text-center flex flex-col items-center max-w-3xl z-10">
-                {/* Status badge */}
-                <motion.div
-                  initial={{ opacity: 0, y: -12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1, duration: 0.6 }}
-                  className="mb-8 inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-accent-primary/30 bg-accent-primary/5 text-[10px] text-accent-primary uppercase tracking-widest font-sans"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent-primary animate-pulse" />
-                  Live on Flare Network Testnet
-                </motion.div>
 
                 {/* Lock icon */}
                 <motion.div
@@ -437,10 +426,9 @@ export default function Home() {
             key="app-dashboard"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="flex min-h-screen flex-col pt-16 md:pl-16 z-10 relative"
+            className="flex min-h-screen flex-col pt-16 z-10 relative"
           >
             <Navbar />
-            <Sidebar />
 
             <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
               {/* Dashboard Hero Header */}
@@ -453,11 +441,7 @@ export default function Home() {
                     Zero-Knowledge Dark Pool Liquidity on Flare
                   </p>
                 </div>
-                {!isWalletConnected ? (
-                  <AnimatedButton variant="primary" size="sm" onClick={connectWallet}>
-                    Connect Wallet
-                  </AnimatedButton>
-                ) : (
+                {isWalletConnected && (
                   <div className="text-xs text-text-secondary flex items-center gap-2">
                     <span className="h-2 w-2 bg-success-state rounded-full animate-ping" />
                     Secure Sandbox Active
