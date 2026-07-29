@@ -15,23 +15,27 @@ import {
   RefreshCw,
   Info,
   ArrowLeft,
+  ShieldCheck,
 } from 'lucide-react';
 import Link from 'next/link';
+import { tokenIcon, networkIcon, SUPPORTED_CHAINS } from '@/lib/icons';
+import { formatAddress } from '@/lib/utils';
 
 const MINT_AMOUNT = 10;
 
 // Contract wiring lands here once the faucet tokens are deployed.
+// `icon` is the web3icons token slug, which differs from the wrapped symbol.
 const TOKENS = [
-  { symbol: 'WFLR', name: 'Wrapped Flare',    accent: 'text-accent-primary' },
-  { symbol: 'WXRP', name: 'Wrapped XRP',      accent: 'text-accent-secondary' },
-  { symbol: 'USDT', name: 'Tether USD',       accent: 'text-success-state' },
-  { symbol: 'USDC', name: 'USD Coin',         accent: 'text-accent-primary' },
+  { symbol: 'WFLR', name: 'Wrapped Flare', icon: 'FLR' },
+  { symbol: 'WXRP', name: 'Wrapped XRP',   icon: 'XRP' },
+  { symbol: 'USDT', name: 'Tether USD',    icon: 'USDT' },
+  { symbol: 'USDC', name: 'USD Coin',      icon: 'USDC' },
 ] as const;
 
 type MintStatus = 'idle' | 'minting' | 'minted';
 
 export default function FaucetPage() {
-  const { isEntered, isWalletConnected, connectWallet, addNotification } = useApp();
+  const { isEntered, isWalletConnected, walletAddress, connectWallet, addNotification } = useApp();
   const [statuses, setStatuses] = useState<Record<string, MintStatus>>({});
 
   const handleMint = (symbol: string) => {
@@ -70,14 +74,31 @@ export default function FaucetPage() {
         )}
 
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-extrabold tracking-tight text-text-primary font-display uppercase flex items-center gap-2.5">
-            <Droplets size={22} className="text-accent-primary" />
-            Testnet Faucet
-          </h1>
-          <p className="text-text-secondary text-xs font-light mt-1 tracking-wider uppercase">
-            Mint free test tokens to explore the protocol — no real value, testnet only
-          </p>
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-text-primary font-display uppercase flex items-center gap-2.5">
+              <Droplets size={22} className="text-accent-primary" />
+              Testnet Faucet
+            </h1>
+            <p className="text-text-secondary text-xs font-light mt-1 tracking-wider uppercase">
+              Mint free test tokens to explore the protocol — no real value, testnet only
+            </p>
+          </div>
+
+          {/* Wallet action — pinned top right */}
+          <div className="flex-shrink-0">
+            {isWalletConnected ? (
+              <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-success-state/20 bg-success-state/5 text-xs text-success-state font-mono">
+                <ShieldCheck size={14} />
+                {formatAddress(walletAddress || '')}
+              </div>
+            ) : (
+              <AnimatedButton variant="primary" size="sm" onClick={connectWallet}>
+                <Wallet size={14} />
+                Connect Wallet
+              </AnimatedButton>
+            )}
+          </div>
         </div>
 
         {/* Wallet gate banner */}
@@ -94,10 +115,22 @@ export default function FaucetPage() {
                 </p>
               </div>
             </div>
-            <AnimatedButton variant="primary" size="sm" onClick={connectWallet} className="flex-shrink-0">
-              <Wallet size={14} />
-              Connect Wallet
-            </AnimatedButton>
+
+            {/* Supported networks */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <span className="text-[9px] text-text-secondary uppercase tracking-widest hidden sm:inline">Networks</span>
+              <div className="flex items-center -space-x-1.5">
+                {SUPPORTED_CHAINS.slice(0, 6).map((chain) => (
+                  <img
+                    key={chain.slug}
+                    src={networkIcon(chain.slug)}
+                    alt={chain.name}
+                    title={chain.name}
+                    className="h-6 w-6 rounded-full ring-2 ring-bg-base bg-surface"
+                  />
+                ))}
+              </div>
+            </div>
           </GlassCard>
         )}
 
@@ -113,11 +146,11 @@ export default function FaucetPage() {
                 <GlassCard className="p-5 flex flex-col h-full">
                   {/* Token identity */}
                   <div className="flex items-center gap-3 mb-5">
-                    <div className="h-10 w-10 rounded-full border border-border-custom bg-surface/40 flex items-center justify-center flex-shrink-0">
-                      <span className={`font-mono text-[10px] font-bold ${token.accent}`}>
-                        {token.symbol.slice(0, 2)}
-                      </span>
-                    </div>
+                    <img
+                      src={tokenIcon(token.icon)}
+                      alt={token.symbol}
+                      className="h-10 w-10 rounded-full bg-surface/40 border border-border-custom flex-shrink-0"
+                    />
                     <div className="min-w-0">
                       <div className="font-mono text-sm font-bold text-text-primary">{token.symbol}</div>
                       <div className="text-[10px] text-text-secondary uppercase tracking-wider truncate">{token.name}</div>

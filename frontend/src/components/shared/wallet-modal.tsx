@@ -4,12 +4,16 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useConnect, useDisconnect, useAccount } from 'wagmi';
 import { X, Wallet, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { walletIcon, networkIcon, CONNECTOR_ICONS, SUPPORTED_CHAINS } from '@/lib/icons';
 
-const WALLET_META: Record<string, { icon: string; label: string }> = {
-  metaMask:      { icon: '🦊', label: 'MetaMask' },
-  coinbaseWallet:{ icon: '🔵', label: 'Coinbase Wallet' },
-  walletConnect: { icon: '🔗', label: 'WalletConnect' },
-  injected:      { icon: '💡', label: 'Browser Wallet' },
+const WALLET_META: Record<string, { label: string }> = {
+  metaMask:      { label: 'MetaMask' },
+  coinbaseWallet:{ label: 'Coinbase Wallet' },
+  walletConnect: { label: 'WalletConnect' },
+  rabby:         { label: 'Rabby' },
+  trust:         { label: 'Trust Wallet' },
+  phantom:       { label: 'Phantom' },
+  injected:      { label: 'Browser Wallet' },
 };
 
 interface WalletModalProps {
@@ -43,13 +47,16 @@ export function WalletModal({ open, onClose, onConnected }: WalletModalProps) {
     onClose();
   };
 
-  // Deduplicate connectors by id (injected may appear twice)
+  // Targeted injected connectors carry their own id (rabby, trust, …); the bare
+  // injected() fallback and EIP-6963 discovery can still surface the same wallet twice.
   const unique = React.useMemo(() => {
     const seen = new Set<string>();
     return connectors.filter(c => {
-      const key = c.id === 'injected' && c.name !== 'MetaMask' ? 'browser' : c.id;
-      if (seen.has(key)) return false;
+      const key = c.id === 'injected' ? 'browser' : c.id.toLowerCase();
+      const nameKey = c.name.toLowerCase();
+      if (seen.has(key) || seen.has(nameKey)) return false;
       seen.add(key);
+      seen.add(nameKey);
       return true;
     });
   }, [connectors]);
@@ -122,10 +129,8 @@ export function WalletModal({ open, onClose, onConnected }: WalletModalProps) {
                     </p>
 
                     {unique.map((connector) => {
-                      const meta = WALLET_META[connector.id] ?? {
-                        icon: '🔑',
-                        label: connector.name,
-                      };
+                      const meta = WALLET_META[connector.id] ?? { label: connector.name };
+                      const iconSlug = CONNECTOR_ICONS[connector.id];
                       const isLoading = isPending && pendingConnectorId === connector.id;
 
                       return (
@@ -135,7 +140,17 @@ export function WalletModal({ open, onClose, onConnected }: WalletModalProps) {
                           disabled={isPending}
                           className="flex items-center gap-4 w-full px-4 py-3.5 rounded-xl border border-border-custom/60 bg-surface/10 hover:bg-surface/30 hover:border-accent-primary/40 transition-all duration-200 text-left disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer group"
                         >
-                          <span className="text-2xl leading-none w-8 text-center flex-shrink-0">{meta.icon}</span>
+                          {iconSlug ? (
+                            <img
+                              src={walletIcon(iconSlug)}
+                              alt={meta.label}
+                              className="h-8 w-8 rounded-lg flex-shrink-0"
+                            />
+                          ) : (
+                            <div className="h-8 w-8 rounded-lg border border-border-custom bg-surface/40 flex items-center justify-center flex-shrink-0">
+                              <Wallet size={15} className="text-text-secondary" />
+                            </div>
+                          )}
                           <div className="flex-1 min-w-0">
                             <div className="text-sm font-semibold text-text-primary font-display">{meta.label}</div>
                             <div className="text-[10px] text-text-secondary uppercase tracking-widest mt-0.5">{connector.name}</div>
@@ -161,8 +176,27 @@ export function WalletModal({ open, onClose, onConnected }: WalletModalProps) {
                       </div>
                     )}
 
+                    {/* Supported networks */}
+                    <div className="mt-4 pt-4 border-t border-border-custom/40">
+                      <p className="text-[9px] text-text-secondary uppercase tracking-widest mb-2.5 text-center">
+                        Supported Networks
+                      </p>
+                      <div className="flex items-center justify-center flex-wrap gap-2">
+                        {SUPPORTED_CHAINS.map((chain) => (
+                          <div
+                            key={chain.slug}
+                            title={chain.name}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border-custom/50 bg-surface/20"
+                          >
+                            <img src={networkIcon(chain.slug)} alt={chain.name} className="h-4 w-4 rounded-full" />
+                            <span className="text-[9px] text-text-secondary">{chain.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
                     <p className="text-[9px] text-text-secondary/50 text-center mt-3 leading-relaxed">
-                      By connecting a wallet you agree to Umbra Protocol's Terms of Service. This is a testnet application.
+                      By connecting a wallet you agree to Umbra Protocol&apos;s Terms of Service. This is a testnet application.
                     </p>
                   </div>
                 )}
