@@ -10,6 +10,8 @@ UMBRA/
 │   │   ├── dark-engine/
 │   │   │   ├── dark-engine.routes.ts
 │   │   │   └── matcher.ts
+│   │   ├── docs/
+│   │   │   └── openapi.ts
 │   │   ├── portfolio/
 │   │   │   ├── portfolio.routes.ts
 │   │   │   └── portfolio.service.ts
