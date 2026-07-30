@@ -1,0 +1,145 @@
+import type { PublicClient } from "viem";
+import { SHIELDED_VAULT_ABI } from "./vaultAbi";
+
+// Only these two methods are used — narrowing to them (rather than the full
+// PublicClient) sidesteps a real but irrelevant type mismatch: wagmi's
+// config includes op-stack chains whose Block/transaction shape doesn't
+// structurally match viem's default PublicClient generic, which otherwise
+// blocks passing wagmi's usePublicClient() result in directly. getLogs/
+// readContract's own signatures don't involve that Block type at all.
+type ScanClient = Pick<PublicClient, "getLogs" | "readContract">;
+
+const LEAF_EVENTS = ["Shielded", "Paid", "OrderPlaced", "OrderCancelled"] as const;
+
+interface LeafEvent {
+  commitment: bigint;
+  leafIndex: number;
+  blockNumber: bigint;
+  logIndex: number;
+}
+
+/**
+ * Thrown when the reconstructed leaf order disagrees with the leafIndex a
+ * contract event actually emitted. Distinguished from other errors
+ * specifically so `fetchAllLeaves` can retry on it — the five separate
+ * getLogs calls (one per event type) aren't atomic, so a chain reorg or an
+ * RPC node that hasn't finished indexing between them can produce a
+ * genuinely inconsistent snapshot with no logic bug involved. A second,
+ * fresh fetch resolves that on its own; if it doesn't, this is very unlikely
+ * to be transient and should be treated as fatal.
+ */
+export class LeafOrderingMismatchError extends Error {}
+
+/** Does the actual fetch-and-reconstruct — see `fetchAllLeaves` for the retry wrapper around this. */
+async function fetchAllLeavesOnce(client: ScanClient, vaultAddress: `0x${string}`, fromBlock: bigint) {
+  const perEventLogs = await Promise.all(
+    LEAF_EVENTS.map((eventName) => {
+      const abiEvent = SHIELDED_VAULT_ABI.find((e) => e.type === "event" && e.name === eventName);
+      return client.getLogs({
+        address: vaultAddress,
+        event: abiEvent as never,
+        fromBlock,
+        toBlock: "latest",
+      });
+    })
+  );
+
+  // OrdersMatched inserts two leaves in one event — handle separately since
+  // its arg names differ (outCommitmentA/outCommitmentB, no single leafIndex).
+  const matchedAbiEvent = SHIELDED_VAULT_ABI.find((e) => e.type === "event" && e.name === "OrdersMatched");
+  const matchedLogs = await client.getLogs({
+    address: vaultAddress,
+    event: matchedAbiEvent as never,
+    fromBlock,
+    toBlock: "latest",
+  });
+
+  const events: LeafEvent[] = [];
+  for (const logs of perEventLogs) {
+    for (const log of logs as unknown as { args: { commitment?: bigint; orderCommitment?: bigint; refundCommitment?: bigint; outCommitment?: bigint; leafIndex: number }; blockNumber: bigint; logIndex: number }[]) {
+      const commitment = log.args.commitment ?? log.args.orderCommitment ?? log.args.refundCommitment ?? log.args.outCommitment;
+      if (commitment === undefined) continue;
+      events.push({ commitment, leafIndex: log.args.leafIndex, blockNumber: log.blockNumber, logIndex: log.logIndex });
+    }
+  }
+  // OrdersMatched doesn't emit leafIndex directly — the two leaves it inserts
+  // are always the two immediately after whatever nextLeafIndex was at the
+  // time. Cheapest correct approach: sort everything else first, then slot
+  // matched-pairs in by block/log order and infer indices from position.
+  for (const log of matchedLogs as unknown as { args: { outCommitmentA: bigint; outCommitmentB: bigint }; blockNumber: bigint; logIndex: number }[]) {
+    events.push({ commitment: log.args.outCommitmentA, leafIndex: -1, blockNumber: log.blockNumber, logIndex: log.logIndex });
+    events.push({ commitment: log.args.outCommitmentB, leafIndex: -1, blockNumber: log.blockNumber, logIndex: log.logIndex + 0.5 });
+  }
+
+  events.sort((a, b) => (a.blockNumber !== b.blockNumber ? Number(a.blockNumber - b.blockNumber) : a.logIndex - b.logIndex));
+
+  // Fill in the -1 placeholders (OrdersMatched leaves) by position, then
+  // sanity-check every other event's on-chain leafIndex agrees with its
+  // position in this reconstructed order — if it doesn't, something is
+  // inconsistent (see LeafOrderingMismatchError for why that isn't
+  // necessarily a logic bug) and callers should not trust the result.
+  const leaves: bigint[] = [];
+  for (const event of events) {
+    if (event.leafIndex !== -1 && event.leafIndex !== leaves.length) {
+      throw new LeafOrderingMismatchError(
+        `Leaf ordering mismatch: event claims index ${event.leafIndex} but reconstructed position is ${leaves.length}`
+      );
+    }
+    leaves.push(event.commitment);
+  }
+
+  return leaves;
+}
+
+/**
+ * Every leaf ever inserted into the tree, in on-chain order. Needed to build
+ * a local MerkleTree instance for proof generation — this legitimately does
+ * need every leaf (not just "mine"), since a Merkle proof's siblings can be
+ * anyone's commitments.
+ *
+ * Not a note-recovery mechanism: knowing every commitment on-chain doesn't
+ * tell you which ones are yours unless you already know their amount/
+ * assetId/blinding (the spending key alone is re-derivable from a wallet
+ * signature, but blinding/amount/assetId are chosen at creation time —
+ * there's no way to "guess" them by scanning; a note paid to you arrives via
+ * announcer.ts's announcement, not this scan). True cross-device recovery of
+ * self-created notes needs an encrypted export/import of the local note
+ * store (see store.ts), not scanning.
+ *
+ * Retries once on LeafOrderingMismatchError (a fresh fetch resolves a
+ * reorg/indexing-lag artifact on its own) before surfacing it as fatal.
+ * Any other error (network failure, etc.) propagates immediately —
+ * retrying is this function's job only for the specific inconsistency it
+ * knows how to self-correct, not general RPC flakiness.
+ */
+export async function fetchAllLeaves(client: ScanClient, vaultAddress: `0x${string}`, fromBlock: bigint = BigInt(0)) {
+  try {
+    return await fetchAllLeavesOnce(client, vaultAddress, fromBlock);
+  } catch (err) {
+    if (!(err instanceof LeafOrderingMismatchError)) throw err;
+    try {
+      return await fetchAllLeavesOnce(client, vaultAddress, fromBlock);
+    } catch (retryErr) {
+      if (retryErr instanceof LeafOrderingMismatchError) {
+        throw new LeafOrderingMismatchError(
+          `${retryErr.message} (persisted after retry — likely a real bug, not a transient reorg/indexing-lag artifact)`
+        );
+      }
+      throw retryErr;
+    }
+  }
+}
+
+/** Marks a locally-known note's `spent` flag current with on-chain state — covers the note having been spent from a different session/device. */
+export async function isNullifierSpentOnChain(
+  client: ScanClient,
+  vaultAddress: `0x${string}`,
+  nullifierHash: bigint
+): Promise<boolean> {
+  return client.readContract({
+    address: vaultAddress,
+    abi: SHIELDED_VAULT_ABI,
+    functionName: "isSpentNullifier",
+    args: [nullifierHash],
+  }) as Promise<boolean>;
+}

@@ -17,7 +17,10 @@ export const wagmiConfig = createConfig({
     injected(), // catches any other injected wallet
   ],
   transports: {
-    [flareTestnet.id]: http('https://coston2-api.flare.network/ext/C/rpc'),
+    // The official coston2-api.flare.network RPC caps eth_getLogs to a
+    // 30-block range per request, which breaks the note wallet's full-
+    // history scan (scan.ts) outright — drpc.org doesn't impose that limit.
+    [flareTestnet.id]: http('https://flare-testnet.drpc.org'),
     [flare.id]:        http('https://flare-api.flare.network/ext/C/rpc'),
     [mainnet.id]:      http(),
     [bsc.id]:          http(),

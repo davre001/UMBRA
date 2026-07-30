@@ -1,0 +1,8 @@
+[package]
+name = "place_order"
+type = "bin"
+authors = [""]
+
+[dependencies]
+poseidon = { tag = "v0.3.0", git = "https://github.com/noir-lang/poseidon" }
+umbra_lib = { path = "../lib" }

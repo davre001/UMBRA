@@ -9,9 +9,11 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@zkpassport/poseidon2": "^0.6.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "viem": "^2.55.10"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

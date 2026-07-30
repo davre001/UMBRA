@@ -1,7 +1,16 @@
 import { Router } from "express";
-import { getMidpointRate } from "./ftso.client";
+import { getAllUsdPrices, getMidpointRate } from "./ftso.client";
 
 export const pricingRouter = Router();
+
+/** Real FTSOv2 USD prices for every supported asset. */
+pricingRouter.get("/", async (_req, res, next) => {
+  try {
+    res.json(await getAllUsdPrices());
+  } catch (err) {
+    next(err);
+  }
+});
 
 pricingRouter.get("/:fromAsset/:toAsset", async (req, res, next) => {
   try {

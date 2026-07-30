@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '@/providers/app-provider';
 import { Navbar } from '@/components/shared/navbar';
 import { Sidebar } from '@/components/shared/sidebar';
@@ -12,47 +11,36 @@ import {
   Droplets,
   Wallet,
   Check,
-  RefreshCw,
   Info,
   ArrowLeft,
   ShieldCheck,
+  ExternalLink,
+  Clock,
 } from 'lucide-react';
 import Link from 'next/link';
-import { tokenIcon, networkIcon, SUPPORTED_CHAINS } from '@/lib/icons';
+import { tokenIcon, SUPPORTED_CHAINS } from '@/lib/icons';
 import { formatAddress } from '@/lib/utils';
 
-const MINT_AMOUNT = 10;
+const FLARE_FAUCET_URL = 'https://faucet.flare.network/';
 
-// Contract wiring lands here once the faucet tokens are deployed.
-// `icon` is the web3icons token slug, which differs from the wrapped symbol.
-const TOKENS = [
-  { symbol: 'WFLR', name: 'Wrapped Flare', icon: 'FLR' },
-  { symbol: 'WXRP', name: 'Wrapped XRP',   icon: 'XRP' },
-  { symbol: 'USDT', name: 'Tether USD',    icon: 'USDT' },
-  { symbol: 'USDC', name: 'USD Coin',      icon: 'USDC' },
+// These are real assets minted by Flare's own Coston2 faucet — we deep-link
+// rather than simulate a mint, since the whole point of this app is genuine
+// FAssets integration, not a fake token.
+const REAL_ASSETS = [
+  { symbol: 'C2FLR', name: 'Coston2 Flare (native gas)', icon: 'FLR' },
+  { symbol: 'FXRP', name: 'FAssets XRP (real bridge)', icon: 'XRP' },
+  { symbol: 'USDT0', name: 'Tether USD (testnet)', icon: 'USDT' },
 ] as const;
 
-type MintStatus = 'idle' | 'minting' | 'minted';
-
 export default function FaucetPage() {
-  const { isEntered, isWalletConnected, walletAddress, connectWallet, addNotification } = useApp();
-  const [statuses, setStatuses] = useState<Record<string, MintStatus>>({});
+  const { isEntered, isWalletConnected, walletAddress, connectWallet } = useApp();
+  const [copied, setCopied] = useState(false);
 
-  const handleMint = (symbol: string) => {
-    if (!isWalletConnected) {
-      connectWallet();
-      return;
-    }
-    setStatuses((prev) => ({ ...prev, [symbol]: 'minting' }));
-
-    setTimeout(() => {
-      setStatuses((prev) => ({ ...prev, [symbol]: 'minted' }));
-      addNotification(
-        'Test Tokens Minted',
-        `${MINT_AMOUNT} ${symbol} sent to your wallet.`,
-        'success'
-      );
-    }, 1600);
+  const handleCopyAddress = () => {
+    if (!walletAddress) return;
+    navigator.clipboard.writeText(walletAddress);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   // Reachable from the landing header too, so no vault gate — only a wallet gate.
@@ -81,17 +69,21 @@ export default function FaucetPage() {
               Testnet Faucet
             </h1>
             <p className="text-text-secondary text-xs font-light mt-1 tracking-wider uppercase">
-              Mint free test tokens to explore the protocol — no real value, testnet only
+              Real Coston2 testnet assets, straight from Flare — no simulated mints
             </p>
           </div>
 
           {/* Wallet action — pinned top right */}
           <div className="flex-shrink-0">
             {isWalletConnected ? (
-              <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-success-state/20 bg-success-state/5 text-xs text-success-state font-mono">
-                <ShieldCheck size={14} />
+              <button
+                onClick={handleCopyAddress}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-success-state/20 bg-success-state/5 text-xs text-success-state font-mono cursor-pointer hover:bg-success-state/10 transition-colors"
+              >
+                {copied ? <Check size={14} /> : <ShieldCheck size={14} />}
                 {formatAddress(walletAddress || '')}
-              </div>
+                {copied ? '· Copied' : ''}
+              </button>
             ) : (
               <AnimatedButton variant="primary" size="sm" onClick={connectWallet}>
                 <Wallet size={14} />
@@ -111,120 +103,81 @@ export default function FaucetPage() {
               <div>
                 <h2 className="text-xs font-semibold uppercase tracking-wider text-text-primary font-display">Wallet Required</h2>
                 <p className="text-[11px] text-text-secondary font-light mt-0.5 leading-relaxed">
-                  Connect an EVM wallet to receive test tokens at your address.
+                  Connect an EVM wallet so you can copy your address into Flare&apos;s official faucet.
                 </p>
               </div>
             </div>
 
-            {/* Supported networks */}
             <div className="flex items-center gap-2 flex-shrink-0">
-              <span className="text-[9px] text-text-secondary uppercase tracking-widest hidden sm:inline">Networks</span>
-              <div className="flex items-center -space-x-1.5">
-                {SUPPORTED_CHAINS.slice(0, 6).map((chain) => (
-                  <img
-                    key={chain.slug}
-                    src={networkIcon(chain.slug)}
-                    alt={chain.name}
-                    title={chain.name}
-                    className="h-6 w-6 rounded-full ring-2 ring-bg-base bg-surface"
-                  />
-                ))}
-              </div>
+              <span className="text-[9px] text-text-secondary uppercase tracking-widest hidden sm:inline">Network</span>
+              <img
+                src={`https://cdn.jsdelivr.net/gh/0xa3k5/web3icons@main/packages/core/src/svgs/networks/branded/${SUPPORTED_CHAINS[0].slug}.svg`}
+                alt={SUPPORTED_CHAINS[0].name}
+                title="Flare — Coston2 Testnet"
+                className="h-6 w-6 rounded-full ring-2 ring-bg-base bg-surface"
+              />
             </div>
           </GlassCard>
         )}
 
-        {/* Token grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {TOKENS.map((token) => {
-            const status = statuses[token.symbol] ?? 'idle';
-            const isMinting = status === 'minting';
-            const isMinted = status === 'minted';
+        {/* Asset grid — real Coston2 assets, deep-linked to Flare's faucet */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+          {REAL_ASSETS.map((asset) => (
+            <GlassCard key={asset.symbol} className="p-5 flex flex-col h-full" hoverGlow={false}>
+              <div className="flex items-center gap-3 mb-5">
+                <img
+                  src={tokenIcon(asset.icon)}
+                  alt={asset.symbol}
+                  className="h-10 w-10 rounded-full bg-surface/40 border border-border-custom flex-shrink-0"
+                />
+                <div className="min-w-0">
+                  <div className="font-mono text-sm font-bold text-text-primary">{asset.symbol}</div>
+                  <div className="text-[10px] text-text-secondary uppercase tracking-wider truncate">{asset.name}</div>
+                </div>
+              </div>
 
-            return (
-              <GlowBorder key={token.symbol} active={isMinted} glowColor="success">
-                <GlassCard className="p-5 flex flex-col h-full">
-                  {/* Token identity */}
-                  <div className="flex items-center gap-3 mb-5">
-                    <img
-                      src={tokenIcon(token.icon)}
-                      alt={token.symbol}
-                      className="h-10 w-10 rounded-full bg-surface/40 border border-border-custom flex-shrink-0"
-                    />
-                    <div className="min-w-0">
-                      <div className="font-mono text-sm font-bold text-text-primary">{token.symbol}</div>
-                      <div className="text-[10px] text-text-secondary uppercase tracking-wider truncate">{token.name}</div>
-                    </div>
-                  </div>
+              <div className="rounded-lg border border-border-custom bg-surface/20 px-3 py-3 mb-5">
+                <span className="text-[9px] text-text-secondary uppercase tracking-widest block mb-1">Source</span>
+                <span className="font-mono text-xs font-semibold text-accent-primary">Official Flare Faucet</span>
+              </div>
 
-                  {/* Amount */}
-                  <div className="rounded-lg border border-border-custom bg-surface/20 px-3 py-3 mb-5">
-                    <span className="text-[9px] text-text-secondary uppercase tracking-widest block mb-1">Mint Amount</span>
-                    <span className="font-mono text-lg font-bold text-text-primary">
-                      {MINT_AMOUNT} <span className="text-xs text-text-secondary font-normal">{token.symbol}</span>
+              <div className="mt-auto">
+                <a href={FLARE_FAUCET_URL} target="_blank" rel="noopener noreferrer">
+                  <AnimatedButton variant="primary" size="sm" fullWidth className="rounded-lg">
+                    <span className="flex items-center gap-1.5">
+                      <ExternalLink size={13} />
+                      Open Faucet
                     </span>
-                  </div>
-
-                  {/* Action */}
-                  <div className="mt-auto">
-                    <AnimatedButton
-                      variant={isMinted ? 'glass' : 'primary'}
-                      size="sm"
-                      fullWidth
-                      disabled={isMinting}
-                      onClick={() => handleMint(token.symbol)}
-                      className="rounded-lg"
-                    >
-                      <AnimatePresence mode="wait" initial={false}>
-                        {isMinting ? (
-                          <motion.span
-                            key="minting"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex items-center gap-1.5"
-                          >
-                            <RefreshCw size={13} className="animate-spin" />
-                            Minting...
-                          </motion.span>
-                        ) : isMinted ? (
-                          <motion.span
-                            key="minted"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex items-center gap-1.5 text-success-state"
-                          >
-                            <Check size={13} />
-                            Mint Again
-                          </motion.span>
-                        ) : (
-                          <motion.span
-                            key="idle"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex items-center gap-1.5"
-                          >
-                            <Droplets size={13} />
-                            Mint {MINT_AMOUNT}
-                          </motion.span>
-                        )}
-                      </AnimatePresence>
-                    </AnimatedButton>
-                  </div>
-                </GlassCard>
-              </GlowBorder>
-            );
-          })}
+                  </AnimatedButton>
+                </a>
+              </div>
+            </GlassCard>
+          ))}
         </div>
+
+        {/* USDC — not yet available on Coston2 */}
+        <GlowBorder active={false} glowColor="cyan">
+          <GlassCard className="p-5 mt-5 flex items-center gap-4" hoverGlow={false}>
+            <div className="p-2 rounded-lg border border-border-custom bg-surface/20 flex-shrink-0">
+              <Clock size={18} className="text-text-secondary" />
+            </div>
+            <div>
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-text-primary font-display">USDC — Coming Soon</h2>
+              <p className="text-[10px] text-text-secondary font-light mt-0.5 leading-relaxed max-w-xl">
+                There&apos;s no official USDC on Coston2 yet. We&apos;ll ship a clearly-labeled testnet mock once the vault
+                contracts deploy, rather than fake a mint for it here.
+              </p>
+            </div>
+          </GlassCard>
+        </GlowBorder>
 
         {/* Footnote */}
         <div className="mt-8 flex items-start gap-2.5 rounded-lg border border-border-custom/60 bg-surface/10 p-4">
           <Info size={14} className="text-text-secondary flex-shrink-0 mt-0.5" />
           <p className="text-[10px] text-text-secondary font-light leading-relaxed">
-            Faucet tokens exist solely on the Flare test network and carry no monetary value. Use them to trial shielding,
-            private payments and dark swaps before moving to mainnet.
+            These are real assets issued on the Coston2 test network by Flare&apos;s own faucet — FXRP comes from the actual
+            FAssets bridge, not a simulated mint. Use them to trial shielding, private payments and dark swaps before
+            moving to mainnet.
           </p>
         </div>
       </div>

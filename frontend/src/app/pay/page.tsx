@@ -1,86 +1,260 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useMemo, useState } from 'react';
+import { formatUnits, isAddress, parseEventLogs } from 'viem';
+import { useChainId, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '@/providers/app-provider';
+import { useNoteWallet } from '@/lib/noteWallet/useNoteWallet';
+import { getDeployment } from '@/lib/noteWallet/deployments';
+import { SHIELDED_VAULT_ABI } from '@/lib/noteWallet/vaultAbi';
+import { OWNER_KEY_REGISTRY_ABI } from '@/lib/noteWallet/ownerKeyRegistryAbi';
+import { STEALTH_ANNOUNCER_ABI } from '@/lib/noteWallet/stealthAnnouncerAbi';
+import { encodeNoteMetadata, OWNER_KEY_NOTE_SCHEME_ID } from '@/lib/noteWallet/announcer';
+import { nullifierHash as computeNullifierHash } from '@/lib/noteWallet/poseidon2';
+import { provePay } from '@/lib/proving/prove';
+import type { StoredNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
 import { Sidebar } from '@/components/shared/sidebar';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { GlowBorder } from '@/components/ui/glow-border';
-import { 
-  Send, 
-  User, 
-  Fingerprint, 
-  ShieldCheck, 
-  AlertTriangle, 
-  Check, 
-  HelpCircle,
+import {
+  Send,
+  ShieldCheck,
+  Check,
+  Clock,
   Lock,
   RefreshCw,
-  Search,
-  Sparkles
+  KeyRound,
+  Inbox,
+  ChevronRight,
+  CheckCircle2,
 } from 'lucide-react';
 import Link from 'next/link';
 
-type RecipientType = 'ens' | 'wallet' | 'stealth';
-type PayState = 'idle' | 'aml_scan' | 'aml_verified' | 'passkey_prompt' | 'sending' | 'success';
+type Tab = 'send' | 'incoming';
+type AssetSymbol = 'WFLR' | 'FXRP' | 'USDT0';
+type SendStep = 'idle' | 'proving' | 'submitting' | 'confirming' | 'announcing' | 'finalized';
+
+const COSTON2_CHAIN_ID = 114;
+const ASSET_OPTIONS: { sym: AssetSymbol; name: string }[] = [
+  { sym: 'WFLR', name: 'Wrapped Flare' },
+  { sym: 'FXRP', name: 'FAssets XRP' },
+  { sym: 'USDT0', name: 'Tether USD' },
+];
+
+const SEND_TIMELINE = [
+  { key: 'proving', label: 'Generate ZK Proof' },
+  { key: 'submitting', label: 'Submit Payment' },
+  { key: 'confirming', label: 'Confirm On-Chain' },
+  { key: 'announcing', label: 'Notify Recipient' },
+  { key: 'finalized', label: 'Settlement' },
+] as const;
 
 export default function PrivatePayPage() {
-  const { isEntered, isWalletConnected, connectWallet, addNotification } = useApp();
-  const [recipientType, setRecipientType] = useState<RecipientType>('ens');
-  const [recipient, setRecipient] = useState('vitalik.eth');
-  const [amount, setAmount] = useState('250');
-  const [asset, setAsset] = useState('USDC');
-  const [memo, setMemo] = useState('Secure reimbursement');
-  const [payState, setPayState] = useState<PayState>('idle');
-  const [amlProgress, setAmlProgress] = useState(0);
+  const { isEntered, isWalletConnected, walletAddress, connectWallet, addNotification } = useApp();
+  const queryClient = useQueryClient();
+  const chainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
+  const publicClient = usePublicClient();
+  const { writeContractAsync } = useWriteContract();
 
-  // Recipient input details helper
-  const placeholder = {
-    ens: 'e.g. user.eth or name.sgb',
-    wallet: 'e.g. 0x742d...f44e',
-    stealth: 'e.g. st_flare_9f83...a2cd'
-  }[recipientType];
+  const deployment = useMemo(() => getDeployment(chainId), [chainId]);
+  const vaultAddress = deployment?.vault;
+  const registryAddress = deployment?.ownerKeyRegistry;
+  const announcerAddress = deployment?.stealthAnnouncer;
+  const noteWallet = useNoteWallet(vaultAddress, deployment?.deployBlock !== undefined ? BigInt(deployment.deployBlock) : undefined);
+  const onCoston2 = chainId === COSTON2_CHAIN_ID;
 
-  useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (payState === 'aml_scan') {
-      let progress = 0;
-      const interval = setInterval(() => {
-        progress += 8;
-        setAmlProgress(Math.min(progress, 100));
-        if (progress >= 100) {
-          clearInterval(interval);
-          setPayState('aml_verified');
-        }
-      }, 100);
-      return () => clearInterval(interval);
-    } else if (payState === 'aml_verified') {
-      timer = setTimeout(() => {
-        setPayState('passkey_prompt');
-      }, 1200);
-    } else if (payState === 'sending') {
-      timer = setTimeout(() => {
-        setPayState('success');
-        addNotification("Private Payment Sent", `Paid ${amount} ${asset} securely.`, "success");
-      }, 2500);
+  const [activeTab, setActiveTab] = useState<Tab>('send');
+  const [asset, setAsset] = useState<AssetSymbol>('WFLR');
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [recipient, setRecipient] = useState('');
+  const [step, setStep] = useState<SendStep>('idle');
+  const [lastTxHash, setLastTxHash] = useState<string | null>(null);
+
+  const assetConfig = deployment?.assets[asset];
+
+  const notesQuery = useQuery({
+    queryKey: ['unspentNotes', walletAddress],
+    queryFn: () => noteWallet.listUnspentNotes(),
+    enabled: !!walletAddress,
+  });
+
+  const assetNotes: StoredNote[] = useMemo(() => {
+    if (!notesQuery.data || !assetConfig) return [];
+    return notesQuery.data.filter((n) => n.kind === 'note' && n.assetId === String(assetConfig.assetId));
+  }, [notesQuery.data, assetConfig]);
+
+  const recipientIsAddress = isAddress(recipient);
+
+  const recipientOwnerKeyQuery = useQuery({
+    queryKey: ['ownerKeyOf', chainId, recipient],
+    queryFn: () =>
+      publicClient!.readContract({
+        address: registryAddress!,
+        abi: OWNER_KEY_REGISTRY_ABI,
+        functionName: 'ownerKeyOf',
+        args: [recipient as `0x${string}`],
+      }),
+    enabled: !!publicClient && !!registryAddress && recipientIsAddress,
+  });
+  const recipientRegistered = (recipientOwnerKeyQuery.data ?? BigInt(0)) !== BigInt(0);
+
+  const ownRegistrationQuery = useQuery({
+    queryKey: ['ownerKeyOf', chainId, walletAddress],
+    queryFn: () =>
+      publicClient!.readContract({
+        address: registryAddress!,
+        abi: OWNER_KEY_REGISTRY_ABI,
+        functionName: 'ownerKeyOf',
+        args: [walletAddress as `0x${string}`],
+      }),
+    enabled: !!publicClient && !!registryAddress && !!walletAddress,
+  });
+  const ownRegistered = (ownRegistrationQuery.data ?? BigInt(0)) !== BigInt(0);
+
+  const incomingQuery = useQuery({
+    queryKey: ['incomingAnnouncements', chainId, walletAddress],
+    queryFn: () => noteWallet.scanIncomingNotes(announcerAddress!),
+    enabled: !!announcerAddress && !!walletAddress && activeTab === 'incoming',
+  });
+
+  const [claimingCommitment, setClaimingCommitment] = useState<bigint | null>(null);
+
+  const handleRegister = async () => {
+    if (!registryAddress) return;
+    try {
+      const ownOwnerKey = await noteWallet.getOwnerKey();
+      const hash = await writeContractAsync({
+        address: registryAddress,
+        abi: OWNER_KEY_REGISTRY_ABI,
+        functionName: 'register',
+        args: [ownOwnerKey],
+      });
+      await publicClient!.waitForTransactionReceipt({ hash });
+      queryClient.invalidateQueries({ queryKey: ['ownerKeyOf', chainId, walletAddress] });
+      addNotification('Payment Key Registered', 'Others can now pay you privately.', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Registration failed.';
+      addNotification('Registration Failed', message, 'error');
     }
-    return () => clearTimeout(timer);
-  }, [payState]);
+  };
 
-  const handleStartPay = (e: React.FormEvent) => {
+  const handleClaim = async (candidate: { assetId: bigint; amount: bigint; blinding: bigint; commitment: bigint }) => {
+    setClaimingCommitment(candidate.commitment);
+    try {
+      await noteWallet.claimIncomingNote(candidate);
+      queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
+      queryClient.invalidateQueries({ queryKey: ['incomingAnnouncements', chainId, walletAddress] });
+      addNotification('Payment Claimed', 'Saved to your shielded notes.', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Claim failed.';
+      addNotification('Claim Failed', message, 'error');
+    } finally {
+      setClaimingCommitment(null);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!walletAddress || !publicClient || !deployment || !assetConfig || !vaultAddress || !registryAddress || !announcerAddress) return;
+    const note = assetNotes.find((n) => n.id === selectedNoteId);
+    if (!note || note.kind !== 'note') {
+      addNotification('No Note Selected', 'Choose a shielded note to pay with.', 'error');
+      return;
+    }
+    if (!recipientIsAddress) {
+      addNotification('Invalid Recipient', 'Enter a valid recipient address.', 'error');
+      return;
+    }
+    if (!recipientRegistered || recipientOwnerKeyQuery.data === undefined) {
+      addNotification('Recipient Not Registered', "This address hasn't published a payment key yet.", 'error');
+      return;
+    }
+
+    try {
+      setStep('proving');
+      const merklePath = await noteWallet.getMerkleProof(note);
+      const spendingKey = await noteWallet.getSpendingKey();
+      const amountValue = BigInt(note.amount);
+      const assetIdValue = BigInt(note.assetId);
+      const nullifierHashValue = computeNullifierHash(BigInt(note.commitment), spendingKey);
+      const outNote = noteWallet.buildRecipientNote(amountValue, assetIdValue, recipientOwnerKeyQuery.data);
+
+      const proofHex = await provePay({
+        root: merklePath.root,
+        nullifierHash: nullifierHashValue,
+        amount: amountValue,
+        assetId: assetIdValue,
+        outCommitment: outNote.commitment,
+        note: {
+          spendingKey,
+          blinding: BigInt(note.blinding),
+          merklePath: { pathElements: merklePath.pathElements, pathIndices: merklePath.pathIndices },
+        },
+      });
+
+      setStep('submitting');
+      const payHash = await writeContractAsync({
+        address: vaultAddress,
+        abi: SHIELDED_VAULT_ABI,
+        functionName: 'pay',
+        args: [proofHex, merklePath.root, nullifierHashValue, amountValue, assetIdValue, outNote.commitment],
+      });
+
+      setStep('confirming');
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: payHash });
+      const [paidLog] = parseEventLogs({ abi: SHIELDED_VAULT_ABI, eventName: 'Paid', logs: receipt.logs });
+      if (!paidLog) throw new Error('Paid event not found in transaction receipt.');
+
+      setStep('announcing');
+      const metadata = encodeNoteMetadata({
+        assetId: assetIdValue,
+        amount: amountValue,
+        blinding: outNote.blinding,
+        commitment: outNote.commitment,
+      });
+      const announceHash = await writeContractAsync({
+        address: announcerAddress,
+        abi: STEALTH_ANNOUNCER_ABI,
+        functionName: 'announce',
+        args: [OWNER_KEY_NOTE_SCHEME_ID, recipient as `0x${string}`, '0x', metadata],
+      });
+      await publicClient.waitForTransactionReceipt({ hash: announceHash });
+
+      await noteWallet.refreshSpentStatus();
+
+      setLastTxHash(payHash);
+      setStep('finalized');
+      setSelectedNoteId(null);
+      queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
+      addNotification(
+        'Payment Sent',
+        `Privately paid ${formatUnits(amountValue, assetConfig.decimals)} ${asset} to ${recipient.slice(0, 6)}...${recipient.slice(-4)}.`,
+        'success'
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Payment failed.';
+      addNotification('Payment Failed', message, 'error');
+      setStep('idle');
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isWalletConnected) {
       connectWallet();
       return;
     }
-    setPayState('aml_scan');
-    setAmlProgress(0);
-  };
-
-  const handleSimulatePasskey = () => {
-    setPayState('sending');
+    if (!onCoston2) {
+      switchChainAsync({ chainId: COSTON2_CHAIN_ID }).catch(() => {
+        addNotification('Network Switch Failed', 'Please switch your wallet to the Coston2 testnet manually.', 'error');
+      });
+      return;
+    }
+    setLastTxHash(null);
+    handleSend();
   };
 
   // If user hasn't entered the vault, redirect to Landing index
@@ -97,6 +271,39 @@ export default function PrivatePayPage() {
     );
   }
 
+  const currentStepIdx = SEND_TIMELINE.findIndex((t) => t.key === step);
+
+  const stepLabel: Record<Exclude<SendStep, 'idle' | 'finalized'>, string> = {
+    proving: 'Generating ZK proof in browser...',
+    submitting: 'Submitting payment...',
+    confirming: 'Confirming on-chain...',
+    announcing: 'Notifying recipient...',
+  };
+
+  const buttonLabel = (() => {
+    if (!isWalletConnected) return 'Connect Wallet to Pay';
+    if (!onCoston2) return 'Switch to Coston2 Testnet';
+    if (step !== 'idle' && step !== 'finalized') {
+      return (
+        <span className="flex items-center gap-2">
+          <RefreshCw className="animate-spin" size={14} />
+          {stepLabel[step]}
+        </span>
+      );
+    }
+    if (assetNotes.length === 0) return 'No Shielded Notes Available';
+    if (!selectedNoteId) return 'Select a Note to Pay With';
+    if (!recipientIsAddress) return 'Enter Recipient Address';
+    if (!recipientRegistered) return 'Recipient Has No Payment Key';
+    return 'Send Private Payment';
+  })();
+
+  const submitDisabled =
+    (step !== 'idle' && step !== 'finalized') ||
+    (isWalletConnected &&
+      onCoston2 &&
+      (assetNotes.length === 0 || !selectedNoteId || !recipientIsAddress || !recipientRegistered));
+
   return (
     <div className="flex min-h-screen flex-col pt-16 md:pl-16 z-10 relative">
       <Navbar />
@@ -109,222 +316,306 @@ export default function PrivatePayPage() {
             Private Payments
           </h1>
           <p className="text-text-secondary text-xs font-light mt-1 tracking-wider uppercase">
-            Send shielded capital to ENS domains, standard wallets, or stealth seeds
+            Pay a registered shielded address, or claim payments sent to you
           </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Pay Setup Panel (Span 7) */}
-          <div className="lg:col-span-7">
-            <GlassCard className="p-6" hoverGlow={false}>
-              <form onSubmit={handleStartPay} className="space-y-6">
-                
-                {/* Recipient Type Choice */}
-                <div>
-                  <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Recipient Destination Type</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { key: 'ens', label: 'ENS Name' },
-                      { key: 'wallet', label: 'Standard Address' },
-                      { key: 'stealth', label: 'Stealth Key' }
-                    ].map((t) => (
-                      <button
-                        key={t.key}
-                        type="button"
-                        onClick={() => { setRecipientType(t.key as RecipientType); setRecipient(''); }}
-                        className={`py-2 px-3 text-xs rounded-lg border text-center transition-all cursor-pointer ${
-                          recipientType === t.key 
-                            ? 'border-accent-primary bg-accent-primary/5 text-accent-primary font-semibold' 
-                            : 'border-border-custom bg-surface/20 text-text-secondary hover:text-text-primary hover:border-border-custom/80'
-                        }`}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+        {/* Payment key status banner */}
+        {isWalletConnected && onCoston2 && registryAddress && (
+          <GlassCard className="p-4 mb-6 flex items-center justify-between gap-4" hoverGlow={false}>
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-lg border ${ownRegistered ? 'border-success-state/20 bg-success-state/5' : 'border-accent-secondary/30 bg-accent-secondary/5'}`}>
+                <KeyRound size={16} className={ownRegistered ? 'text-success-state' : 'text-accent-secondary'} />
+              </div>
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-wide text-text-primary block">
+                  {ownRegistered ? 'Payment key published' : 'Payment key not published'}
+                </span>
+                <span className="text-[10px] text-text-secondary">
+                  {ownRegistered ? 'Others can pay you privately.' : 'Publish your key once so others can pay you.'}
+                </span>
+              </div>
+            </div>
+            {!ownRegistered && (
+              <AnimatedButton variant="secondary" size="sm" onClick={handleRegister}>
+                Publish Payment Key
+              </AnimatedButton>
+            )}
+          </GlassCard>
+        )}
 
-                {/* Recipient Input */}
-                <div>
-                  <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Recipient ID</label>
-                  <div className="relative">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          {/* Main Panel (Span 7) */}
+          <div className="lg:col-span-7">
+            <GlassCard className="overflow-hidden" hoverGlow={false}>
+              {/* Tab Selector */}
+              <div className="flex border-b border-border-custom bg-surface/10">
+                <button
+                  onClick={() => setActiveTab('send')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-4 text-xs font-display font-semibold uppercase tracking-wider transition-all cursor-pointer ${
+                    activeTab === 'send'
+                      ? 'border-b-2 border-accent-primary text-accent-primary bg-surface/20'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  <Send size={14} />
+                  Send
+                </button>
+                <button
+                  onClick={() => setActiveTab('incoming')}
+                  className={`flex-1 flex items-center justify-center gap-2 py-4 text-xs font-display font-semibold uppercase tracking-wider transition-all cursor-pointer ${
+                    activeTab === 'incoming'
+                      ? 'border-b-2 border-accent-secondary text-accent-secondary bg-surface/20'
+                      : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  <Inbox size={14} />
+                  Incoming
+                </button>
+              </div>
+
+              {activeTab === 'send' ? (
+                <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                  {/* Asset Selection */}
+                  <div>
+                    <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Select Asset Pool</label>
+                    <div className="grid grid-cols-3 gap-3">
+                      {ASSET_OPTIONS.map((item) => (
+                        <button
+                          key={item.sym}
+                          type="button"
+                          onClick={() => { setAsset(item.sym); setSelectedNoteId(null); }}
+                          className={`flex flex-col items-start p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                            asset === item.sym
+                              ? 'border-accent-primary bg-accent-primary/5 shadow-[0_0_10px_rgba(0,240,255,0.05)]'
+                              : 'border-border-custom bg-surface/20 hover:border-border-custom/80'
+                          }`}
+                        >
+                          <span className="text-xs font-bold text-text-primary font-display">{item.sym}</span>
+                          <span className="text-[9px] text-text-secondary mt-0.5">{item.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Note Picker */}
+                  <div>
+                    <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Select Shielded Note</label>
+                    {assetNotes.length === 0 ? (
+                      <div className="rounded-lg border border-border-custom bg-surface/20 p-4 text-center">
+                        <p className="text-[10px] text-text-secondary leading-relaxed">
+                          No shielded {asset} notes found in this browser. Shield a deposit first.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {assetNotes.map((n) => (
+                          <button
+                            key={n.id}
+                            type="button"
+                            onClick={() => setSelectedNoteId(n.id)}
+                            className={`w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                              selectedNoteId === n.id
+                                ? 'border-accent-primary bg-accent-primary/5'
+                                : 'border-border-custom bg-surface/20 hover:border-border-custom/80'
+                            }`}
+                          >
+                            <span className="text-xs font-mono font-bold text-text-primary">
+                              {formatUnits(BigInt(n.amount), assetConfig?.decimals ?? 18)} {asset}
+                            </span>
+                            <span className="text-[9px] text-text-secondary">note #{n.derivationIndex}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Recipient */}
+                  <div>
+                    <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Recipient Address</label>
                     <input
                       type="text"
                       value={recipient}
                       onChange={(e) => setRecipient(e.target.value)}
-                      placeholder={placeholder}
-                      className="w-full bg-surface/30 border border-border-custom rounded-lg pl-10 pr-4 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60 font-mono"
-                      required
-                    />
-                    <User size={14} className="absolute left-3.5 top-4.5 text-text-secondary/60" />
-                  </div>
-                </div>
-
-                {/* Amount / Asset */}
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="col-span-2">
-                    <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Amount</label>
-                    <input
-                      type="number"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      placeholder="0.00"
+                      placeholder="0x..."
                       className="w-full bg-surface/30 border border-border-custom rounded-lg px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60 font-mono"
                       required
                     />
+                    {recipientIsAddress && recipientOwnerKeyQuery.data !== undefined && (
+                      <span className={`text-[10px] mt-1.5 block ${recipientRegistered ? 'text-success-state' : 'text-accent-secondary'}`}>
+                        {recipientRegistered ? 'Payment key found — ready to pay privately.' : "This address hasn't published a payment key yet."}
+                      </span>
+                    )}
                   </div>
-                  <div>
-                    <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Asset</label>
-                    <select
-                      value={asset}
-                      onChange={(e) => setAsset(e.target.value)}
-                      className="w-full bg-surface/30 border border-border-custom rounded-lg px-3 py-3.5 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60 cursor-pointer"
-                    >
-                      <option value="USDC">USDC</option>
-                      <option value="USDT">USDT</option>
-                      <option value="WFLR">WFLR</option>
-                    </select>
-                  </div>
-                </div>
 
-                {/* Private Memo */}
-                <div>
-                  <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Private Memo (Encrypted)</label>
-                  <input
-                    type="text"
-                    value={memo}
-                    onChange={(e) => setMemo(e.target.value)}
-                    placeholder="Enter private metadata..."
-                    className="w-full bg-surface/30 border border-border-custom rounded-lg px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60"
-                  />
-                  <span className="text-[9px] text-text-secondary/50 mt-1 block">Memo is visible only to sender and receiver under Diffie-Hellman keys.</span>
-                </div>
-
-                {/* Submit Action */}
-                <AnimatedButton
-                  variant="primary"
-                  type="submit"
-                  disabled={payState !== 'idle'}
-                  fullWidth
-                  className="rounded-xl py-3.5"
-                >
-                  {!isWalletConnected ? (
-                    'Connect Wallet'
-                  ) : payState !== 'idle' ? (
-                    <span className="flex items-center gap-2">
-                      <RefreshCw className="animate-spin" size={14} />
-                      Locking Payment parameters...
-                    </span>
-                  ) : (
-                    'Initiate Private Payment'
+                  {/* Wrong network notice */}
+                  {isWalletConnected && !onCoston2 && (
+                    <div className="rounded-lg border border-accent-secondary/30 bg-accent-secondary/5 p-3 text-[10px] text-accent-secondary">
+                      Umbra&apos;s vault is deployed on the Coston2 testnet. Switch networks to continue.
+                    </div>
                   )}
-                </AnimatedButton>
 
-              </form>
+                  <div className="space-y-1.5 text-[10px] uppercase font-mono tracking-wider text-text-secondary border-b border-border-custom/40 pb-4">
+                    <div className="flex justify-between">
+                      <span>Network:</span>
+                      <span className="text-text-primary">Flare Coston2 Testnet</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Proof System:</span>
+                      <span className="text-text-primary">Noir / UltraHonk (in-browser)</span>
+                    </div>
+                  </div>
+
+                  <AnimatedButton
+                    variant="primary"
+                    type="submit"
+                    disabled={submitDisabled}
+                    fullWidth
+                    className="rounded-xl py-3.5"
+                  >
+                    {buttonLabel}
+                  </AnimatedButton>
+                </form>
+              ) : (
+                <div className="p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] text-text-secondary leading-relaxed max-w-sm">
+                      Payments announced to your address, not yet saved to your shielded notes.
+                    </p>
+                    <AnimatedButton
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => incomingQuery.refetch()}
+                      disabled={incomingQuery.isFetching || !announcerAddress}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <RefreshCw size={12} className={incomingQuery.isFetching ? 'animate-spin' : ''} />
+                        Scan
+                      </span>
+                    </AnimatedButton>
+                  </div>
+
+                  {!announcerAddress ? (
+                    <div className="rounded-lg border border-border-custom bg-surface/20 p-4 text-center text-[10px] text-text-secondary">
+                      Not available on this network.
+                    </div>
+                  ) : incomingQuery.data && incomingQuery.data.length > 0 ? (
+                    <div className="space-y-2">
+                      {incomingQuery.data.map((candidate) => (
+                        <div
+                          key={candidate.commitment.toString()}
+                          className="flex items-center justify-between p-3 rounded-lg border border-border-custom bg-surface/20"
+                        >
+                          <span className="text-xs font-mono font-bold text-text-primary">
+                            {formatUnits(candidate.amount, 18)} (asset {candidate.assetId.toString()})
+                          </span>
+                          <AnimatedButton
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleClaim(candidate)}
+                            disabled={claimingCommitment === candidate.commitment}
+                          >
+                            {claimingCommitment === candidate.commitment ? 'Claiming...' : 'Claim'}
+                          </AnimatedButton>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-border-custom bg-surface/20 p-4 text-center text-[10px] text-text-secondary">
+                      {incomingQuery.isFetching ? 'Scanning...' : 'Nothing to claim right now.'}
+                    </div>
+                  )}
+                </div>
+              )}
             </GlassCard>
           </div>
 
-          {/* Compliance & Verification panel (Span 5) */}
+          {/* Timeline Panel (Span 5) */}
           <div className="lg:col-span-5">
-            <GlowBorder active={payState !== 'idle'} glowColor={payState === 'success' ? 'success' : 'purple'}>
-              <GlassCard className="p-6 min-h-[360px] flex flex-col justify-between" hoverGlow={false}>
+            <GlowBorder active={step !== 'idle'} glowColor={step === 'finalized' ? 'success' : 'purple'}>
+              <GlassCard className="p-6 min-h-[380px] flex flex-col justify-between" hoverGlow={false}>
                 <div>
                   <div className="flex items-center gap-2 border-b border-border-custom pb-4 mb-6">
-                    <ShieldCheck size={18} className="text-accent-secondary" />
-                    <h2 className="text-sm uppercase tracking-wider font-display font-bold">Secure Compliance Check</h2>
+                    <Clock size={16} className="text-accent-secondary" />
+                    <h2 className="text-sm uppercase tracking-wider font-display font-bold">Execution Timeline</h2>
                   </div>
 
-                  {payState === 'idle' && (
-                    <div className="flex flex-col items-center justify-center py-12 text-center text-text-secondary">
-                      <Sparkles size={36} className="text-border-custom mb-3" />
-                      <span className="text-xs uppercase tracking-widest">Compliance verification ready</span>
-                      <p className="text-[10px] text-text-secondary/60 mt-1 leading-relaxed max-w-[220px]">
-                        Payments are automatically screened against local sanction registries via trustless ZK proofs before execution.
+                  {step === 'idle' ? (
+                    <div className="flex flex-col items-center justify-center py-10 text-center text-text-secondary">
+                      <ShieldCheck size={36} className="text-border-custom mb-3" />
+                      <span className="text-xs uppercase tracking-widest">Awaiting execution</span>
+                      <p className="text-[10px] text-text-secondary/60 mt-1 max-w-[200px] leading-relaxed">
+                        Submit the form to send a private payment on Coston2.
                       </p>
                     </div>
-                  )}
-
-                  {payState === 'aml_scan' && (
-                    <div className="space-y-4">
-                      <span className="text-[11px] font-mono text-accent-primary uppercase tracking-widest block animate-pulse">
-                        Scanning database registries...
-                      </span>
-                      <div className="w-full bg-border-custom/50 rounded-full h-1.5">
-                        <div className="bg-accent-primary h-1.5 rounded-full" style={{ width: `${amlProgress}%` }} />
-                      </div>
-                      <p className="text-[10px] text-text-secondary leading-normal font-mono">
-                        Checking target receiver {recipient} against: <br />
-                        - OFAC Sanctioned Pools<br />
-                        - EU Restricted Addresses<br />
-                        - Flare Compliance Oracles
-                      </p>
+                  ) : (
+                    <div className="relative pl-6 space-y-6">
+                      <div className="absolute left-2.5 top-2 bottom-2 w-0.5 bg-border-custom z-0" />
+                      {SEND_TIMELINE.map((t, idx) => {
+                        const isDone = currentStepIdx > idx;
+                        const isCurrent = currentStepIdx === idx;
+                        return (
+                          <div key={t.key} className="relative z-10 flex items-start gap-4">
+                            <div className={`h-6.5 w-6.5 rounded-full border-2 flex items-center justify-center bg-bg-base transition-colors duration-300 flex-shrink-0 ${
+                              isDone
+                                ? 'border-success-state text-success-state'
+                                : isCurrent
+                                  ? 'border-accent-primary text-accent-primary animate-pulse'
+                                  : 'border-border-custom text-text-secondary'
+                            }`}>
+                              {isDone ? (
+                                <CheckCircle2 size={12} className="fill-success-state/15" />
+                              ) : (
+                                <span className="text-[9px] font-bold font-mono">{idx + 1}</span>
+                              )}
+                            </div>
+                            <div>
+                              <span className={`text-xs font-semibold block uppercase tracking-wide ${
+                                isDone ? 'text-text-primary' : isCurrent ? 'text-accent-primary' : 'text-text-secondary'
+                              }`}>
+                                {t.label}
+                              </span>
+                              {isDone && (
+                                <span className="text-[9px] text-success-state/60 mt-0.5 block leading-none">Completed</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
-
-                  {payState === 'aml_verified' && (
-                    <div className="bg-success-state/5 border border-success-state/20 p-4 rounded-lg space-y-2 animate-fade-in">
-                      <div className="flex items-center gap-2 text-success-state">
-                        <Check size={16} />
-                        <span className="text-xs font-semibold uppercase tracking-wider">Sanction Screen Clear</span>
-                      </div>
-                      <p className="text-[10px] text-text-secondary leading-normal font-light">
-                        Verification check generated successfully. Recipient is clear. Cryptographic proof hash attached to payment envelope.
-                      </p>
-                    </div>
-                  )}
-
-                  {(payState === 'passkey_prompt' || payState === 'sending') && (
-                    <div className="text-center py-6">
-                      <Fingerprint size={36} className="text-accent-secondary animate-bounce mx-auto mb-2" />
-                      <span className="text-xs font-bold text-text-primary uppercase tracking-wider block">Passkey Authentication Required</span>
-                      <p className="text-[10px] text-text-secondary mt-1 max-w-[200px] mx-auto leading-normal">
-                        Confirm biometric details via WebAuthn client to unlock private signing keys.
-                      </p>
-                      {payState === 'passkey_prompt' && (
-                        <AnimatedButton
-                          variant="secondary"
-                          size="sm"
-                          onClick={handleSimulatePasskey}
-                          className="mt-4"
-                        >
-                          Authenticate with TouchID
-                        </AnimatedButton>
-                      )}
-                    </div>
-                  )}
-
-                  {payState === 'success' && (
-                    <div className="bg-success-state/5 border border-success-state/20 p-4 rounded-lg space-y-3">
-                      <div className="flex items-center gap-2 text-success-state">
-                        <Check size={16} />
-                        <span className="text-xs font-semibold uppercase tracking-wider">Payment Settled Privately</span>
-                      </div>
-                      <p className="text-[10px] text-text-secondary leading-normal font-light font-mono">
-                        Asset: {amount} {asset}<br />
-                        Memo: u_enc({memo.slice(0, 15)}...)<br />
-                        Relayer Hash: 0x9f83...a2cd
-                      </p>
-                      <div className="text-[9px] text-success-state/70">
-                        Funds credited anonymously to stealth key derived for recipient. Transaction unlinkable.
-                      </div>
-                    </div>
-                  )}
-
                 </div>
 
-                {payState === 'success' && (
-                  <button
-                    onClick={() => setPayState('idle')}
-                    className="text-[9px] text-text-secondary hover:text-text-primary underline cursor-pointer text-left"
-                  >
-                    Send another payment
-                  </button>
+                {step === 'finalized' && (
+                  <div className="mt-6 border-t border-border-custom/40 pt-4 flex flex-col gap-2 bg-success-state/5 p-3 rounded-lg border border-success-state/10 animate-fade-in">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <Check className="text-success-state" size={16} />
+                        <span className="text-[10px] font-bold text-success-state uppercase tracking-wider">Payment settled privately</span>
+                      </div>
+                      <button
+                        onClick={() => setStep('idle')}
+                        className="text-[9px] text-text-secondary hover:text-text-primary underline cursor-pointer"
+                      >
+                        Clear State
+                      </button>
+                    </div>
+                    {lastTxHash && (
+                      <a
+                        href={`https://coston2-explorer.flare.network/tx/${lastTxHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[9px] text-text-secondary/70 font-mono break-all hover:text-accent-primary flex items-center gap-1"
+                      >
+                        Tx: {lastTxHash.slice(0, 18)}… <ChevronRight size={10} />
+                      </a>
+                    )}
+                  </div>
                 )}
               </GlassCard>
             </GlowBorder>
           </div>
         </div>
-
       </div>
     </div>
   );

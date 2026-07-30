@@ -1,0 +1,23 @@
+{
+  "chainId": 31337,
+  "rpcUrl": "http://127.0.0.1:8545",
+  "vault": "0xE3011A37A904aB90C8881a99BD1F6E21401f1522",
+  "compliance": "0x40918Ba7f132E0aCba2CE4de4c4baF9BD2D7D849",
+  "assets": {
+    "WFLR": {
+      "assetId": 0,
+      "token": "0x1f10F3Ba7ACB61b2F50B9d6DdCf91a6f787C0E82",
+      "decimals": 18
+    },
+    "FXRP": {
+      "assetId": 1,
+      "token": "0x38a024C0b412B9d1db8BC398140D00F5Af3093D4",
+      "decimals": 18
+    },
+    "USDT0": {
+      "assetId": 2,
+      "token": "0x2a810409872AfC346F9B5b26571Fd6eC42EA4849",
+      "decimals": 18
+    }
+  }
+}

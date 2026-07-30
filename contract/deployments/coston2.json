@@ -1,0 +1,25 @@
+{
+  "network": "coston2",
+  "chainId": 114,
+  "rpcUrl": "https://flare-testnet.drpc.org",
+  "deployer": "0x2d671A0D877B206fcd7A103335ee8173f50A1d06",
+  "deployBlock": 33433625,
+  "contracts": {
+    "Poseidon2_BN254": "0x919374E87Ad26ADf9ad52E31E983747B9EC7d458",
+    "WithdrawHonkVerifier": "0x6c1A539e284b25Dc6c2cDA2bAbb8C27D163D9ee8",
+    "PayHonkVerifier": "0x20cB6A0B0AADd01dD9F39A35CFf2D961a321B36c",
+    "PlaceOrderHonkVerifier": "0xae66B23d9ac5085F240ce77c4ca33bFFEdc54F88",
+    "CancelOrderHonkVerifier": "0x06f9B6318488d12441448Ef0FA050e67EA5509Ea",
+    "MatchOrdersHonkVerifier": "0xd72996BA8fa26547e1e2827B49ea18e94ffEA2C7",
+    "ShieldedVault": "0xC10fbb6bcF4a404185cAc74AD670BFA31992F6b6",
+    "ComplianceRegistry": "0xC9aD83D3004275b3e7D520dd338e7564fbbeD228",
+    "StealthAnnouncer": "0x68b1F23ac0B9C7128df68D6E72EcfE7D46DBd240",
+    "OwnerKeyRegistry": "0x9c30aD071629879172C29AAc3A166E6f43563AA7"
+  },
+  "assets": {
+    "WFLR": { "assetId": 0, "token": "0xC67DCE33D7A8efA5FfEB961899C73fe01bCe9273", "decimals": 18 },
+    "FXRP": { "assetId": 1, "token": "0x0b6A3645c240605887a5532109323A3E12273dc7", "decimals": 6 },
+    "USDT0": { "assetId": 2, "token": "0xC1A5B41512496B80903D1f32d6dEa3a73212E71F", "decimals": 6 }
+  },
+  "note": "Redeployed to pick up the owner_key note-commitment scheme (circuits/DESIGN.md) — earlier addresses from this same file are stale; this vault's Merkle tree starts empty again."
+}

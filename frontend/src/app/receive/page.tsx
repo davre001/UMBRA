@@ -1,82 +1,106 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useMemo, useState } from 'react';
+import { formatUnits } from 'viem';
+import { useChainId, usePublicClient, useWriteContract } from 'wagmi';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '@/providers/app-provider';
+import { useNoteWallet } from '@/lib/noteWallet/useNoteWallet';
+import { getDeployment } from '@/lib/noteWallet/deployments';
+import { OWNER_KEY_REGISTRY_ABI } from '@/lib/noteWallet/ownerKeyRegistryAbi';
 import { Navbar } from '@/components/shared/navbar';
 import { Sidebar } from '@/components/shared/sidebar';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
-import { GlowBorder } from '@/components/ui/glow-border';
-import { 
-  QrCode, 
-  Copy, 
-  Check, 
-  Share2, 
-  RefreshCw, 
-  Lock, 
-  Info,
-  HelpCircle,
-  Coins,
-  Cpu
+import {
+  KeyRound,
+  Copy,
+  Check,
+  RefreshCw,
+  Lock,
+  Inbox,
+  ShieldCheck,
 } from 'lucide-react';
 import Link from 'next/link';
 
-type DerivationState = 'idle' | 'deriving' | 'ready';
-
 export default function ReceivePage() {
-  const { isEntered, isWalletConnected, connectWallet } = useApp();
-  const [asset, setAsset] = useState('USDC');
-  const [amount, setAmount] = useState('');
-  const [memo, setMemo] = useState('');
-  const [derivationState, setDerivationState] = useState<DerivationState>('idle');
-  const [copiedAddress, setCopiedAddress] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
-  const [stealthAddress, setStealthAddress] = useState('');
-  const [paymentLink, setPaymentLink] = useState('');
+  const { isEntered, isWalletConnected, walletAddress, connectWallet, addNotification } = useApp();
+  const queryClient = useQueryClient();
+  const chainId = useChainId();
+  const publicClient = usePublicClient();
+  const { writeContractAsync } = useWriteContract();
 
-  const handleGenerateInvoice = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isWalletConnected) {
-      connectWallet();
-      return;
+  const deployment = useMemo(() => getDeployment(chainId), [chainId]);
+  const vaultAddress = deployment?.vault;
+  const registryAddress = deployment?.ownerKeyRegistry;
+  const announcerAddress = deployment?.stealthAnnouncer;
+  const noteWallet = useNoteWallet(vaultAddress, deployment?.deployBlock !== undefined ? BigInt(deployment.deployBlock) : undefined);
+
+  const [copiedAddress, setCopiedAddress] = useState(false);
+  const [claimingCommitment, setClaimingCommitment] = useState<bigint | null>(null);
+  const [registering, setRegistering] = useState(false);
+
+  const ownRegistrationQuery = useQuery({
+    queryKey: ['ownerKeyOf', chainId, walletAddress],
+    queryFn: () =>
+      publicClient!.readContract({
+        address: registryAddress!,
+        abi: OWNER_KEY_REGISTRY_ABI,
+        functionName: 'ownerKeyOf',
+        args: [walletAddress as `0x${string}`],
+      }),
+    enabled: !!publicClient && !!registryAddress && !!walletAddress,
+  });
+  const ownRegistered = (ownRegistrationQuery.data ?? BigInt(0)) !== BigInt(0);
+
+  const incomingQuery = useQuery({
+    queryKey: ['incomingAnnouncements', chainId, walletAddress],
+    queryFn: () => noteWallet.scanIncomingNotes(announcerAddress!),
+    enabled: !!announcerAddress && !!walletAddress,
+  });
+
+  const handleRegister = async () => {
+    if (!registryAddress) return;
+    setRegistering(true);
+    try {
+      const ownOwnerKey = await noteWallet.getOwnerKey();
+      const hash = await writeContractAsync({
+        address: registryAddress,
+        abi: OWNER_KEY_REGISTRY_ABI,
+        functionName: 'register',
+        args: [ownOwnerKey],
+      });
+      await publicClient!.waitForTransactionReceipt({ hash });
+      queryClient.invalidateQueries({ queryKey: ['ownerKeyOf', chainId, walletAddress] });
+      addNotification('Payment Key Registered', 'Others can now pay you privately.', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Registration failed.';
+      addNotification('Registration Failed', message, 'error');
+    } finally {
+      setRegistering(false);
     }
-    setDerivationState('deriving');
   };
 
-  useEffect(() => {
-    if (derivationState === 'deriving') {
-      const timer = setTimeout(() => {
-        // Derive standard mock stealth address
-        const randomHex = Array.from({ length: 20 }, () => 
-          Math.floor(Math.random() * 256).toString(16).padStart(2, '0')
-        ).join('');
-        const derivedStealth = `st_flare_0x${randomHex}`;
-        setStealthAddress(derivedStealth);
-
-        // Generate query links
-        const params = new URLSearchParams();
-        if (amount) params.set('amount', amount);
-        if (asset) params.set('asset', asset);
-        params.set('stealth', derivedStealth);
-        setPaymentLink(`https://umbra.finance/pay?${params.toString()}`);
-
-        setDerivationState('ready');
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [derivationState]);
-
   const handleCopyAddress = () => {
-    navigator.clipboard.writeText(stealthAddress);
+    if (!walletAddress) return;
+    navigator.clipboard.writeText(walletAddress);
     setCopiedAddress(true);
     setTimeout(() => setCopiedAddress(false), 2000);
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(paymentLink);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+  const handleClaim = async (candidate: { assetId: bigint; amount: bigint; blinding: bigint; commitment: bigint }) => {
+    setClaimingCommitment(candidate.commitment);
+    try {
+      await noteWallet.claimIncomingNote(candidate);
+      queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
+      queryClient.invalidateQueries({ queryKey: ['incomingAnnouncements', chainId, walletAddress] });
+      addNotification('Payment Claimed', 'Saved to your shielded notes.', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Claim failed.';
+      addNotification('Claim Failed', message, 'error');
+    } finally {
+      setClaimingCommitment(null);
+    }
   };
 
   // If user hasn't entered the vault, redirect to Landing index
@@ -102,185 +126,136 @@ export default function ReceivePage() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-2xl font-extrabold tracking-tight text-text-primary font-display uppercase">
-            Stealth Invoice Gateway
+            Receive
           </h1>
           <p className="text-text-secondary text-xs font-light mt-1 tracking-wider uppercase">
-            Derive clean, one-time stealth destination parameters to receive private capital
+            Publish your payment key once, then claim payments sent to your address
           </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Form Setup (Span 7) */}
-          <div className="lg:col-span-7">
-            <GlassCard className="p-6" hoverGlow={false}>
-              <form onSubmit={handleGenerateInvoice} className="space-y-6">
-                
-                {/* Asset Choice */}
-                <div>
-                  <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Select Asset Pool</label>
-                  <div className="grid grid-cols-3 gap-3">
-                    {['WFLR', 'USDC', 'USDT'].map((sym) => (
-                      <button
-                        key={sym}
-                        type="button"
-                        onClick={() => setAsset(sym)}
-                        className={`py-3 px-4 rounded-lg border text-xs font-mono font-bold transition-all cursor-pointer ${
-                          asset === sym 
-                            ? 'border-accent-primary bg-accent-primary/5 text-accent-primary' 
-                            : 'border-border-custom bg-surface/20 text-text-secondary hover:text-text-primary hover:border-border-custom/80'
-                        }`}
+        {!isWalletConnected ? (
+          <GlassCard className="p-10 flex flex-col items-center text-center" hoverGlow={false}>
+            <Lock size={36} className="text-border-custom mb-3" />
+            <span className="text-xs uppercase tracking-widest text-text-secondary">Wallet not connected</span>
+            <p className="text-[10px] text-text-secondary/60 mt-1 max-w-sm mb-6 leading-relaxed">
+              Connect a wallet to publish your payment key and see incoming private payments.
+            </p>
+            <AnimatedButton variant="primary" onClick={connectWallet}>Connect Wallet</AnimatedButton>
+          </GlassCard>
+        ) : !registryAddress ? (
+          <GlassCard className="p-10 flex flex-col items-center text-center" hoverGlow={false}>
+            <p className="text-[10px] text-text-secondary">Not available on this network. Switch to Coston2.</p>
+          </GlassCard>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            {/* Payment key + address (Span 5) */}
+            <div className="lg:col-span-5 space-y-6">
+              <GlassCard className="p-6" hoverGlow={false}>
+                <div className="flex items-center gap-2 border-b border-border-custom pb-4 mb-4">
+                  <KeyRound size={16} className={ownRegistered ? 'text-success-state' : 'text-accent-secondary'} />
+                  <h2 className="text-sm uppercase tracking-wider font-display font-bold">Payment Key</h2>
+                </div>
+                <p className="text-[10px] text-text-secondary leading-relaxed mb-4">
+                  Publishing your payment key lets a sender build a private note only you can spend, without ever
+                  learning your spending key. This is a one-time action per wallet.
+                </p>
+                {ownRegistrationQuery.isLoading ? (
+                  <span className="text-[10px] text-text-secondary">Checking status...</span>
+                ) : ownRegistered ? (
+                  <div className="flex items-center gap-2 text-success-state">
+                    <ShieldCheck size={16} />
+                    <span className="text-xs font-semibold uppercase tracking-wide">Published — ready to receive</span>
+                  </div>
+                ) : (
+                  <AnimatedButton variant="primary" fullWidth onClick={handleRegister} disabled={registering}>
+                    {registering ? (
+                      <span className="flex items-center gap-2">
+                        <RefreshCw className="animate-spin" size={14} /> Publishing...
+                      </span>
+                    ) : (
+                      'Publish Payment Key'
+                    )}
+                  </AnimatedButton>
+                )}
+              </GlassCard>
+
+              <GlassCard className="p-6" hoverGlow={false}>
+                <div className="flex items-center gap-2 border-b border-border-custom pb-4 mb-4">
+                  <Copy size={16} className="text-accent-primary" />
+                  <h2 className="text-sm uppercase tracking-wider font-display font-bold">Your Address</h2>
+                </div>
+                <p className="text-[10px] text-text-secondary leading-relaxed mb-3">
+                  Share this with whoever wants to pay you. They&apos;ll enter it on the Pay page, which looks up your
+                  published payment key automatically.
+                </p>
+                <div className="flex items-center gap-2 p-2.5 rounded-lg border border-border-custom bg-surface/20 font-mono text-[10px] break-all">
+                  <span className="text-accent-primary select-all flex-1">{walletAddress}</span>
+                  <button
+                    type="button"
+                    onClick={handleCopyAddress}
+                    className="p-1.5 rounded bg-surface/40 hover:bg-surface border border-border-custom text-text-secondary hover:text-text-primary transition-all cursor-pointer flex-shrink-0"
+                  >
+                    {copiedAddress ? <Check size={12} className="text-success-state" /> : <Copy size={12} />}
+                  </button>
+                </div>
+              </GlassCard>
+            </div>
+
+            {/* Incoming payments (Span 7) */}
+            <div className="lg:col-span-7">
+              <GlassCard className="p-6" hoverGlow={false}>
+                <div className="flex items-center justify-between border-b border-border-custom pb-4 mb-4">
+                  <div className="flex items-center gap-2">
+                    <Inbox size={16} className="text-accent-secondary" />
+                    <h2 className="text-sm uppercase tracking-wider font-display font-bold">Incoming Payments</h2>
+                  </div>
+                  <AnimatedButton
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => incomingQuery.refetch()}
+                    disabled={incomingQuery.isFetching || !announcerAddress}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <RefreshCw size={12} className={incomingQuery.isFetching ? 'animate-spin' : ''} />
+                      Scan
+                    </span>
+                  </AnimatedButton>
+                </div>
+
+                {!announcerAddress ? (
+                  <div className="rounded-lg border border-border-custom bg-surface/20 p-6 text-center text-[10px] text-text-secondary">
+                    Not available on this network.
+                  </div>
+                ) : incomingQuery.data && incomingQuery.data.length > 0 ? (
+                  <div className="space-y-2">
+                    {incomingQuery.data.map((candidate) => (
+                      <div
+                        key={candidate.commitment.toString()}
+                        className="flex items-center justify-between p-3 rounded-lg border border-border-custom bg-surface/20"
                       >
-                        {sym}
-                      </button>
+                        <span className="text-xs font-mono font-bold text-text-primary">
+                          {formatUnits(candidate.amount, 18)} (asset {candidate.assetId.toString()})
+                        </span>
+                        <AnimatedButton
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handleClaim(candidate)}
+                          disabled={claimingCommitment === candidate.commitment}
+                        >
+                          {claimingCommitment === candidate.commitment ? 'Claiming...' : 'Claim'}
+                        </AnimatedButton>
+                      </div>
                     ))}
                   </div>
-                </div>
-
-                {/* Amount (Optional) */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light">Requested Amount (Optional)</label>
-                  </div>
-                  <input
-                    type="number"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder="0.00 (Any Amount)"
-                    className="w-full bg-surface/30 border border-border-custom rounded-lg px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60 font-mono"
-                  />
-                </div>
-
-                {/* Description / Memo */}
-                <div>
-                  <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Request Memo (Encrypted)</label>
-                  <input
-                    type="text"
-                    value={memo}
-                    onChange={(e) => setMemo(e.target.value)}
-                    placeholder="Enter private metadata details..."
-                    className="w-full bg-surface/30 border border-border-custom rounded-lg px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60"
-                  />
-                  <span className="text-[9px] text-text-secondary/50 mt-1 block">Included in QR/Payment parameters under Diffie-Hellman encryption.</span>
-                </div>
-
-                {/* Submit */}
-                <AnimatedButton
-                  variant="primary"
-                  type="submit"
-                  disabled={derivationState === 'deriving'}
-                  fullWidth
-                  className="rounded-xl py-3"
-                >
-                  {derivationState === 'deriving' ? (
-                    <span className="flex items-center gap-2">
-                      <RefreshCw className="animate-spin" size={14} />
-                      Deriving Cryptographic keys...
-                    </span>
-                  ) : (
-                    'Generate Stealth Parameters'
-                  )}
-                </AnimatedButton>
-
-              </form>
-            </GlassCard>
-          </div>
-
-          {/* QR Code and link export panel (Span 5) */}
-          <div className="lg:col-span-5">
-            <GlowBorder active={derivationState === 'ready'} glowColor="cyan">
-              <GlassCard className="p-6 min-h-[380px] flex flex-col justify-between items-center text-center" hoverGlow={false}>
-                
-                <div className="w-full">
-                  <div className="flex items-center gap-2 border-b border-border-custom pb-3 mb-6 text-left">
-                    <QrCode size={16} className="text-accent-primary" />
-                    <h2 className="text-xs uppercase tracking-wider font-display font-semibold">Payment Destination</h2>
-                  </div>
-
-                  {derivationState === 'idle' && (
-                    <div className="py-12 flex flex-col items-center justify-center text-text-secondary">
-                      <Lock size={36} className="text-border-custom mb-3" />
-                      <span className="text-xs uppercase tracking-widest">Parameters not initialized</span>
-                      <p className="text-[10px] text-text-secondary/50 mt-1 max-w-[200px] leading-relaxed">
-                        Input requested variables to derive a secure, single-use stealth payment code.
-                      </p>
-                    </div>
-                  )}
-
-                  {derivationState === 'deriving' && (
-                    <div className="py-12 flex flex-col items-center justify-center text-text-secondary">
-                      <Cpu size={28} className="text-accent-primary animate-spin mb-3" />
-                      <span className="text-xs uppercase tracking-widest font-mono text-accent-primary">Deriving address...</span>
-                      <p className="text-[9px] text-text-secondary/60 mt-1 max-w-[180px]">
-                        Running Elliptic Curve Diffie-Hellman math checks locally.
-                      </p>
-                    </div>
-                  )}
-
-                  {derivationState === 'ready' && (
-                    <div className="space-y-6 flex flex-col items-center w-full">
-                      {/* Interactive CSS QR code */}
-                      <motion.div
-                        initial={{ scale: 0.8, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        className="p-3 bg-white rounded-xl border border-border-custom inline-block shadow-xl relative"
-                      >
-                        {/* Simulated high-fidelity QR Code blocks */}
-                        <div className="h-36 w-36 bg-bg-base flex flex-wrap p-2 gap-1 rounded-lg">
-                          {Array.from({ length: 49 }).map((_, i) => {
-                            const isFilled = (i * 7 + i % 3) % 2 === 0 || i % 6 === 0;
-                            return (
-                              <div
-                                key={i}
-                                className={`h-[16px] w-[16px] rounded-sm transition-all duration-300 ${
-                                  isFilled ? 'bg-accent-primary' : 'bg-surface/10'
-                                }`}
-                              />
-                            );
-                          })}
-                        </div>
-                        {/* Centered lock overlay */}
-                        <div className="absolute inset-0 m-auto h-7 w-7 bg-bg-base border border-border-custom rounded-full flex items-center justify-center">
-                          <Lock size={12} className="text-accent-secondary" />
-                        </div>
-                      </motion.div>
-
-                      {/* Display derived stealth address */}
-                      <div className="w-full text-left space-y-1.5">
-                        <span className="text-[9px] text-text-secondary uppercase tracking-widest font-mono">One-Time Stealth Address</span>
-                        <div className="flex items-center gap-2 p-2.5 rounded-lg border border-border-custom bg-surface/20 font-mono text-[10px] break-all">
-                          <span className="text-accent-primary select-all flex-1">{stealthAddress}</span>
-                          <button
-                            type="button"
-                            onClick={handleCopyAddress}
-                            className="p-1.5 rounded bg-surface/40 hover:bg-surface border border-border-custom text-text-secondary hover:text-text-primary transition-all cursor-pointer"
-                          >
-                            {copiedAddress ? <Check size={12} className="text-success-state" /> : <Copy size={12} />}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {derivationState === 'ready' && (
-                  <div className="w-full pt-4 border-t border-border-custom/30 mt-6 flex justify-between items-center">
-                    <span className="text-[9px] text-text-secondary font-mono">STEALTH DESTINATION INITIALIZED</span>
-                    <button
-                      type="button"
-                      onClick={handleCopyLink}
-                      className="text-xs text-accent-primary hover:text-accent-primary/80 inline-flex items-center gap-1 cursor-pointer font-semibold"
-                    >
-                      {copiedLink ? <Check size={12} /> : <Share2 size={12} />}
-                      {copiedLink ? "Copied Link" : "Copy Payment Link"}
-                    </button>
+                ) : (
+                  <div className="rounded-lg border border-border-custom bg-surface/20 p-6 text-center text-[10px] text-text-secondary">
+                    {incomingQuery.isFetching ? 'Scanning...' : 'Nothing to claim right now.'}
                   </div>
                 )}
-
               </GlassCard>
-            </GlowBorder>
+            </div>
           </div>
-        </div>
-
+        )}
       </div>
     </div>
   );

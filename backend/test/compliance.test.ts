@@ -4,17 +4,28 @@ import { createApp } from "../src/app";
 
 const app = createApp();
 
+// Real on-chain writes against ComplianceRegistry on Coston2 via the
+// backend's ATTESTER_ROLE key — needs PRIVATE_KEY set (see .env.example)
+// and that key funded with C2FLR for gas.
 describe("compliance routes", () => {
-  it("screens an address against sanction lists", async () => {
-    const res = await request(app).post("/api/compliance/screen").send({ address: "0xpay" });
-    expect(res.status).toBe(200);
-    expect(res.body.clear).toBe(true);
-    expect(res.body.screenedLists.length).toBeGreaterThan(0);
+  it("rejects an invalid address", async () => {
+    const res = await request(app).post("/api/compliance/screen").send({ address: "not-an-address" });
+    expect(res.status).toBe(400);
   });
 
-  it("exports a masked viewing key", async () => {
-    const res = await request(app).get("/api/compliance/viewing-key/0xabc123");
-    expect(res.status).toBe(200);
-    expect(res.body.viewingKey).toContain("umbra_vkey_flare_");
-  });
+  it(
+    "screens a real address on-chain and reflects it back on read",
+    async () => {
+      const address = "0xc25565154630860aE48B9C94c9704Bf04ee6808b";
+      const screenRes = await request(app).post("/api/compliance/screen").send({ address });
+      expect(screenRes.status).toBe(200);
+      expect(screenRes.body.clear).toBe(true);
+      expect(screenRes.body.txHash).toMatch(/^0x[0-9a-f]{64}$/);
+
+      const readRes = await request(app).get(`/api/compliance/${address}`);
+      expect(readRes.status).toBe(200);
+      expect(readRes.body.clear).toBe(true);
+    },
+    30_000
+  );
 });

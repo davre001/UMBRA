@@ -1,17 +1,44 @@
-function randomHex(bytes: number): string {
-  let out = "";
-  for (let i = 0; i < bytes; i++) {
-    out += Math.floor(Math.random() * 256)
-      .toString(16)
-      .padStart(2, "0");
-  }
-  return out;
+import { SHIELDED_VAULT_ABI } from "../shared/vaultAbi";
+import { CONTRACTS, getWalletClient, publicClient } from "../shared/chain";
+
+/**
+ * Real gasless relaying: every ShieldedVault write here is already
+ * authorized by its own ZK proof (proof = authorization, see
+ * ShieldedVault.sol's NatSpec), not by who calls the function — so this
+ * backend wallet can pay gas and submit on a user's behalf without ever
+ * needing their signature, an ERC-2771 forwarder, or any pre-signed
+ * transaction. `shield` isn't relayable this way (it needs a real
+ * `transferFrom` from the depositor), so it isn't in `RELAYABLE_ACTIONS`.
+ */
+const RELAYABLE_ACTIONS = {
+  withdraw: { functionName: "withdraw" as const, argCount: 6 },
+  pay: { functionName: "pay" as const, argCount: 6 },
+  placeOrder: { functionName: "placeOrder" as const, argCount: 4 },
+  cancelOrder: { functionName: "cancelOrder" as const, argCount: 4 },
+};
+
+export type RelayableAction = keyof typeof RELAYABLE_ACTIONS;
+
+export function isRelayableAction(action: unknown): action is RelayableAction {
+  return typeof action === "string" && action in RELAYABLE_ACTIONS;
 }
 
-// Simulates a gasless relayer broadcasting a pre-signed transaction.
-export async function relay(
-  payload: Record<string, unknown>
-): Promise<string> {
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  return `0x${randomHex(32)}`;
+/** Submits a pre-proven vault action, paying gas from the backend's own wallet. Returns the confirmed tx hash. */
+export async function relay(action: RelayableAction, args: unknown[]): Promise<`0x${string}`> {
+  const spec = RELAYABLE_ACTIONS[action];
+  if (args.length !== spec.argCount) {
+    throw new Error(`${action} expects ${spec.argCount} arguments, got ${args.length}`);
+  }
+
+  const wallet = getWalletClient();
+  const txHash = await wallet.writeContract({
+    address: CONTRACTS.ShieldedVault as `0x${string}`,
+    abi: SHIELDED_VAULT_ABI,
+    functionName: spec.functionName,
+    args: args as never,
+    chain: wallet.chain,
+    account: wallet.account!,
+  });
+  await publicClient.waitForTransactionReceipt({ hash: txHash });
+  return txHash;
 }

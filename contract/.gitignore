@@ -1,0 +1,24 @@
+# dependencies
+/node_modules
+
+# hardhat
+/artifacts
+/cache
+/typechain-types
+/deployments/localhost
+
+# env
+.env
+.env.local
+
+# misc
+*.tsbuildinfo
+npm-debug.log*
+coverage/
+coverage.json
+
+# circuits — local compiler binaries + regeneratable build output, never
+# committed. circuits/noir/*/fixtures/ (proof + public_inputs used by the
+# test suite) are NOT ignored — see circuits/README.md.
+/tools/
+/circuits/noir/*/target/

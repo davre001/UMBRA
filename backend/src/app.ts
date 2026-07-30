@@ -1,12 +1,8 @@
 import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
-import { vaultRouter } from "./vault/vault.routes";
-import { portfolioRouter } from "./portfolio/portfolio.routes";
 import { darkEngineRouter } from "./dark-engine/dark-engine.routes";
 import { pricingRouter } from "./pricing/pricing.routes";
 import { complianceRouter } from "./compliance/compliance.routes";
-import { stealthRouter } from "./stealth/stealth.routes";
-import { proverRouter } from "./prover/prover.routes";
 import { relayerRouter } from "./relayer/relayer.routes";
 import { authRouter } from "./auth/auth.routes";
 
@@ -17,13 +13,9 @@ export function createApp() {
 
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
-  app.use("/api/vault", vaultRouter);
-  app.use("/api/portfolio", portfolioRouter);
-  app.use("/api/swap", darkEngineRouter);
+  app.use("/api/dark-engine", darkEngineRouter);
   app.use("/api/pricing", pricingRouter);
   app.use("/api/compliance", complianceRouter);
-  app.use("/api/stealth", stealthRouter);
-  app.use("/api/prover", proverRouter);
   app.use("/api/relayer", relayerRouter);
   app.use("/api/auth", authRouter);
 
