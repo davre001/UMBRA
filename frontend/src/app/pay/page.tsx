@@ -187,6 +187,8 @@ export default function PrivatePayPage() {
         amount: amountValue,
         assetId: assetIdValue,
         outCommitment: outNote.commitment,
+        outOwnerKey: outNote.ownerKey,
+        outBlinding: outNote.blinding,
         note: {
           spendingKey,
           blinding: BigInt(note.blinding),
@@ -199,7 +201,7 @@ export default function PrivatePayPage() {
         address: vaultAddress,
         abi: SHIELDED_VAULT_ABI,
         functionName: 'pay',
-        args: [proofHex, merklePath.root, nullifierHashValue, amountValue, assetIdValue, outNote.commitment],
+        args: [proofHex, merklePath.root, nullifierHashValue, assetIdValue, outNote.commitment],
       });
 
       setStep('confirming');

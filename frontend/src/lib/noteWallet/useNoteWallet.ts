@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef } from "react";
 import { useAccount, usePublicClient, useSignMessage } from "wagmi";
 import type { Hex } from "viem";
-import { DERIVATION_MESSAGE, deriveBlinding, deriveOrderKeypair, deriveSpendingKey, randomBlinding } from "./keys";
+import { DERIVATION_MESSAGE, deriveBlinding, deriveSpendingKey, randomBlinding } from "./keys";
 import {
   commitment as computeCommitment,
   nullifierHash as computeNullifierHash,
@@ -17,9 +17,10 @@ import {
   saveNote,
   setNoteLeafIndex,
   type StoredNote,
+  type StoredOrderNote,
 } from "./store";
 import { fetchAllLeaves, isNullifierSpentOnChain } from "./scan";
-import { fetchIncomingAnnouncements } from "./announcer";
+import { fetchIncomingAnnouncements, fetchIncomingOrderAnnouncements, type AnnouncedOrder } from "./announcer";
 import { MerkleTree, type MerkleProof } from "./merkleTree";
 
 function toHex(value: bigint): `0x${string}` {
@@ -37,8 +38,7 @@ interface PreparedNote {
 
 interface PreparedOrder {
   kind: "order";
-  secret: bigint;
-  nullifier: bigint;
+  blinding: bigint;
   commitment: bigint;
   amount: bigint;
   assetId: bigint;
@@ -95,18 +95,23 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
     [address, getSignature]
   );
 
-  /** Derives a fresh order-note keypair + its order commitment, ready to use in a `placeOrder` call. */
+  /**
+   * Derives a fresh order commitment, ready to use in a `placeOrder` call.
+   * Owned by this wallet's same persistent spendingKey as a regular note
+   * (circuits/DESIGN.md's "an order" section) — only the blinding is fresh
+   * per order, same role as a note's own blinding.
+   */
   const prepareOrderNote = useCallback(
     async (amountIn: bigint, assetIn: bigint, assetOut: bigint, minAmountOut: bigint): Promise<PreparedOrder> => {
       if (!address) throw new Error("Wallet not connected");
       const signature = await getSignature();
+      const spendingKey = deriveSpendingKey(signature);
       const index = await getNextDerivationIndex(address);
-      const { secret, nullifier } = deriveOrderKeypair(signature, index);
-      const commitment = computeOrderCommitment(nullifier, secret, amountIn, assetIn, assetOut, minAmountOut);
+      const blinding = deriveBlinding(signature, index);
+      const commitment = computeOrderCommitment(computeOwnerKey(spendingKey), blinding, amountIn, assetIn, assetOut, minAmountOut);
       return {
         kind: "order",
-        secret,
-        nullifier,
+        blinding,
         commitment,
         amount: amountIn,
         assetId: assetIn,
@@ -146,10 +151,11 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
           : {
               ...base,
               kind: "order",
-              secret: prepared.secret.toString(),
-              nullifier: prepared.nullifier.toString(),
+              blinding: prepared.blinding.toString(),
               assetOut: prepared.assetOut.toString(),
               minAmountOut: prepared.minAmountOut.toString(),
+              // A freshly-placed order hasn't been filled at all yet.
+              originalAmountIn: prepared.amount.toString(),
             };
       await saveNote(stored);
       return stored;
@@ -168,13 +174,12 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
     if (!address || !publicClient || !vaultAddress) return;
     const notes = await listUnspentNotes();
     if (notes.length === 0) return;
-    const spendingKey = notes.some((n) => n.kind === "note") ? deriveSpendingKey(await getSignature()) : null;
+    // Orders now use this wallet's same persistent spendingKey as a regular
+    // note (circuits/DESIGN.md's "an order" section) — one key covers both.
+    const spendingKey = deriveSpendingKey(await getSignature());
     await Promise.all(
       notes.map(async (note) => {
-        const nh =
-          note.kind === "note"
-            ? computeNullifierHash(BigInt(note.commitment), spendingKey!)
-            : computeNullifierHash(BigInt(note.commitment), BigInt(note.nullifier));
+        const nh = computeNullifierHash(BigInt(note.commitment), spendingKey);
         const spent = await isNullifierSpentOnChain(publicClient, vaultAddress, nh);
         if (spent) await markNoteSpent(note.id);
       })
@@ -240,6 +245,66 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
     [address, publicClient, vaultAddress, deployBlock]
   );
 
+  /**
+   * Residual orders announced (via StealthAnnouncer) to this wallet's
+   * address that aren't already saved locally — a partial fill's leftover
+   * (circuits/DESIGN.md's "an order" section), delivered the same way a
+   * matched note is. Verified the same way: recomputes the order commitment
+   * from the announced fields against this wallet's own ownerKey.
+   */
+  const scanIncomingOrders = useCallback(
+    async (announcerAddress: `0x${string}`): Promise<AnnouncedOrder[]> => {
+      if (!address || !publicClient) return [];
+      const [announcements, ownOwnerKey, known] = await Promise.all([
+        fetchIncomingOrderAnnouncements(publicClient, announcerAddress, address as `0x${string}`, deployBlock),
+        getOwnerKey(),
+        getUnspentNotesForWallet(address),
+      ]);
+      const knownCommitments = new Set(known.map((n) => n.commitment.toLowerCase()));
+
+      const claimable: AnnouncedOrder[] = [];
+      for (const order of announcements) {
+        if (knownCommitments.has(toHex(order.commitment).toLowerCase())) continue;
+        const expected = computeOrderCommitment(ownOwnerKey, order.blinding, order.amountIn, order.assetIn, order.assetOut, order.minAmountOut);
+        if (expected !== order.commitment) continue; // not really addressed to us, or corrupted metadata
+        claimable.push(order);
+      }
+      return claimable;
+    },
+    [address, publicClient, getOwnerKey, deployBlock]
+  );
+
+  /** Saves a residual order verified by `scanIncomingOrders` into local storage, so it shows up in "My Orders" like any other owned order. Looks up its on-chain leafIndex the same way `claimIncomingNote` does. */
+  const claimIncomingOrder = useCallback(
+    async (order: AnnouncedOrder): Promise<StoredOrderNote> => {
+      if (!address || !publicClient || !vaultAddress) throw new Error("Wallet or vault not ready");
+      const leaves = await fetchAllLeaves(publicClient, vaultAddress, deployBlock);
+      const leafIndex = leaves.findIndex((leaf) => leaf === order.commitment);
+      if (leafIndex === -1) throw new Error("Announced order's commitment wasn't found on-chain yet");
+
+      const index = await getNextDerivationIndex(address);
+      const stored: StoredOrderNote = {
+        id: `${address}:${index}`,
+        walletAddress: address,
+        derivationIndex: index,
+        kind: "order",
+        blinding: order.blinding.toString(),
+        commitment: toHex(order.commitment),
+        amount: order.amountIn.toString(),
+        assetId: order.assetIn.toString(),
+        assetOut: order.assetOut.toString(),
+        minAmountOut: order.minAmountOut.toString(),
+        originalAmountIn: order.originalAmountIn.toString(),
+        leafIndex,
+        spent: false,
+        createdAt: Date.now(),
+      };
+      await saveNote(stored);
+      return stored;
+    },
+    [address, publicClient, vaultAddress, deployBlock]
+  );
+
   /** Merkle proof for a note that's already known to be on-chain (leafIndex set). Rebuilds the tree from the full on-chain leaf history each call — see scan.ts for why that's the deliberate, self-checking tradeoff. */
   const getMerkleProof = useCallback(
     async (note: StoredNote, asOfLeafIndex?: number): Promise<MerkleProof & { root: bigint }> => {
@@ -266,6 +331,8 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       refreshSpentStatus,
       scanIncomingNotes,
       claimIncomingNote,
+      scanIncomingOrders,
+      claimIncomingOrder,
       getMerkleProof,
       setNoteLeafIndex,
     }),
@@ -281,6 +348,8 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       refreshSpentStatus,
       scanIncomingNotes,
       claimIncomingNote,
+      scanIncomingOrders,
+      claimIncomingOrder,
       getMerkleProof,
     ]
   );

@@ -256,6 +256,18 @@ export const SHIELDED_VAULT_ABI = [
       {
         "indexed": false,
         "internalType": "uint256",
+        "name": "residualCommitmentA",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "residualCommitmentB",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
         "name": "newRoot",
         "type": "uint256"
       }
@@ -756,6 +768,16 @@ export const SHIELDED_VAULT_ABI = [
         "internalType": "uint256",
         "name": "outCommitmentB",
         "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "residualCommitmentA",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "residualCommitmentB",
+        "type": "uint256"
       }
     ],
     "name": "matchOrders",
@@ -804,11 +826,6 @@ export const SHIELDED_VAULT_ABI = [
       {
         "internalType": "uint256",
         "name": "nullifierHash",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "amount",
         "type": "uint256"
       },
       {

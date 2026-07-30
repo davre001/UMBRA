@@ -52,6 +52,47 @@ function decodeNoteMetadata(metadata: `0x${string}`, blockNumber: bigint): Annou
   }
 }
 
+/**
+ * Delivers a partial fill's residual order (contract/circuits/noir/
+ * match_orders — see circuits/DESIGN.md) to the trader who still owns it —
+ * same mechanism as `OWNER_KEY_NOTE_SCHEME_ID` above, a different scheme id
+ * only because the metadata shape (order fields, not a note's) differs.
+ */
+export const ORDER_SCHEME_ID = BigInt(3);
+
+const ORDER_METADATA_PARAMS = [
+  { type: "uint256", name: "assetIn" },
+  { type: "uint256", name: "assetOut" },
+  { type: "uint256", name: "amountIn" },
+  { type: "uint256", name: "minAmountOut" },
+  { type: "uint256", name: "blinding" },
+  { type: "uint256", name: "commitment" },
+  { type: "uint256", name: "originalAmountIn" },
+] as const;
+
+export interface AnnouncedOrder {
+  assetIn: bigint;
+  assetOut: bigint;
+  amountIn: bigint;
+  minAmountOut: bigint;
+  blinding: bigint;
+  commitment: bigint;
+  originalAmountIn: bigint;
+  blockNumber: bigint;
+}
+
+function decodeOrderMetadata(metadata: `0x${string}`, blockNumber: bigint): AnnouncedOrder | null {
+  try {
+    const [assetIn, assetOut, amountIn, minAmountOut, blinding, commitment, originalAmountIn] = decodeAbiParameters(
+      ORDER_METADATA_PARAMS,
+      metadata
+    );
+    return { assetIn, assetOut, amountIn, minAmountOut, blinding, commitment, originalAmountIn, blockNumber };
+  } catch {
+    return null;
+  }
+}
+
 type AnnouncerClient = Pick<PublicClient, "getLogs">;
 
 const ANNOUNCEMENT_EVENT = {
@@ -87,4 +128,27 @@ export async function fetchIncomingAnnouncements(
     if (decoded) notes.push(decoded);
   }
   return notes;
+}
+
+/** Every residual order ever announced to `recipient` on this announcer — a partial fill's leftover, delivered the same way a matched note is. */
+export async function fetchIncomingOrderAnnouncements(
+  client: AnnouncerClient,
+  announcerAddress: `0x${string}`,
+  recipient: `0x${string}`,
+  fromBlock: bigint = BigInt(0)
+): Promise<AnnouncedOrder[]> {
+  const logs = await client.getLogs({
+    address: announcerAddress,
+    event: ANNOUNCEMENT_EVENT,
+    args: { schemeId: ORDER_SCHEME_ID, stealthAddress: recipient },
+    fromBlock,
+    toBlock: "latest",
+  });
+
+  const orders: AnnouncedOrder[] = [];
+  for (const log of logs) {
+    const decoded = decodeOrderMetadata(log.args.metadata as `0x${string}`, log.blockNumber);
+    if (decoded) orders.push(decoded);
+  }
+  return orders;
 }

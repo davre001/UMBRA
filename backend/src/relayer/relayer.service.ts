@@ -12,7 +12,7 @@ import { CONTRACTS, getWalletClient, publicClient } from "../shared/chain";
  */
 const RELAYABLE_ACTIONS = {
   withdraw: { functionName: "withdraw" as const, argCount: 6 },
-  pay: { functionName: "pay" as const, argCount: 6 },
+  pay: { functionName: "pay" as const, argCount: 5 },
   placeOrder: { functionName: "placeOrder" as const, argCount: 4 },
   cancelOrder: { functionName: "cancelOrder" as const, argCount: 4 },
 };

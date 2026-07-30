@@ -23,26 +23,9 @@ export function deriveSpendingKey(walletSignature: Hex): bigint {
   return deriveField(walletSignature, "spending-key", "");
 }
 
-/** Fresh per-note blinding factor — index 0, 1, 2, ... one per note this wallet creates for itself. */
+/** Fresh blinding factor — index 0, 1, 2, ... shared across every note and order this wallet creates for itself (one persistent derivation-index counter, not a separate one per kind). */
 export function deriveBlinding(walletSignature: Hex, index: number): bigint {
   return deriveField(walletSignature, "blinding", index);
-}
-
-/**
- * Order commitments don't use the spendingKey/blinding split (see
- * circuits/DESIGN.md's "Paying a different recipient") — each order still
- * needs its own fresh {secret, nullifier} pair, derived per order index.
- */
-export interface OrderKeypair {
-  secret: bigint;
-  nullifier: bigint;
-}
-
-export function deriveOrderKeypair(walletSignature: Hex, index: number): OrderKeypair {
-  return {
-    secret: deriveField(walletSignature, "order-secret", index),
-    nullifier: deriveField(walletSignature, "order-nullifier", index),
-  };
 }
 
 /** A fresh random blinding for a note credited to someone else's ownerKey — not reproducible, doesn't need to be. */

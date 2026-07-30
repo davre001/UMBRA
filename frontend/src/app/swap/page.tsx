@@ -8,8 +8,9 @@ import { useApp } from '@/providers/app-provider';
 import { useNoteWallet } from '@/lib/noteWallet/useNoteWallet';
 import { getDeployment } from '@/lib/noteWallet/deployments';
 import { SHIELDED_VAULT_ABI } from '@/lib/noteWallet/vaultAbi';
-import { nullifierHash as computeNullifierHash } from '@/lib/noteWallet/poseidon2';
+import { nullifierHash as computeNullifierHash, ownerKey as computeOwnerKey } from '@/lib/noteWallet/poseidon2';
 import { provePlaceOrder, proveCancelOrder } from '@/lib/proving/prove';
+import { submitOrderToMatcher } from '@/lib/api';
 import type { StoredNote, StoredOrderNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -122,8 +123,7 @@ export default function DarkPoolPage() {
           blinding: BigInt(note.blinding),
           merklePath: { pathElements: merklePath.pathElements, pathIndices: merklePath.pathIndices },
         },
-        orderSecret: orderPrepared.secret,
-        orderNullifier: orderPrepared.nullifier,
+        orderBlinding: orderPrepared.blinding,
         assetOut: assetOutId,
         minAmountOut: minOutBaseUnits,
       });
@@ -148,7 +148,32 @@ export default function DarkPoolPage() {
       setSelectedNoteId(null);
       setMinAmountOut('');
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
-      addNotification('Order Placed', 'Your dark-pool order is live and waiting to be matched.', 'success');
+
+      // Hand the order's private details to the matcher — the on-chain
+      // placeOrder above already fully authorized and placed it; this just
+      // makes it findable for matching. A failure here doesn't undo the
+      // placement, so it's surfaced separately, not as an "Order Failed" error.
+      try {
+        await submitOrderToMatcher({
+          commitment: `0x${orderPrepared.commitment.toString(16)}`,
+          leafIndex: placedLog.args.leafIndex,
+          spendingKey: spendingKey.toString(),
+          orderBlinding: orderPrepared.blinding.toString(),
+          amountIn: amountIn.toString(),
+          assetIn: Number(assetInId),
+          assetOut: Number(assetOutId),
+          minAmountOut: minOutBaseUnits.toString(),
+          ownerKey: computeOwnerKey(spendingKey).toString(),
+          walletAddress,
+        });
+        addNotification('Order Placed', 'Your dark-pool order is live and waiting to be matched.', 'success');
+      } catch {
+        addNotification(
+          'Order Placed',
+          'Order is on-chain, but the matcher could not be reached — it will need to be resubmitted for matching.',
+          'error'
+        );
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Placing the order failed.';
       addNotification('Order Failed', message, 'error');
@@ -161,25 +186,23 @@ export default function DarkPoolPage() {
     setCancelingId(order.id);
     try {
       const merklePath = await noteWallet.getMerkleProof(order);
-      const ownOwnerKey = await noteWallet.getOwnerKey();
+      const spendingKey = await noteWallet.getSpendingKey();
       const amountIn = BigInt(order.amount);
       const assetInId = BigInt(order.assetId);
-      const orderNullifier = BigInt(order.nullifier);
-      const nullifierHashValue = computeNullifierHash(BigInt(order.commitment), orderNullifier);
+      const nullifierHashValue = computeNullifierHash(BigInt(order.commitment), spendingKey);
       const refundPrepared = await noteWallet.prepareNote(amountIn, assetInId);
 
       const proofHex = await proveCancelOrder({
         root: merklePath.root,
         nullifierHash: nullifierHashValue,
         refundCommitment: refundPrepared.commitment,
-        orderSecret: BigInt(order.secret),
-        orderNullifier,
+        spendingKey,
+        orderBlinding: BigInt(order.blinding),
         amountIn,
         assetIn: assetInId,
         assetOut: BigInt(order.assetOut),
         minAmountOut: BigInt(order.minAmountOut),
         merklePath: { pathElements: merklePath.pathElements, pathIndices: merklePath.pathIndices },
-        refundOwnerKey: ownOwnerKey,
         refundBlinding: refundPrepared.blinding,
       });
 
@@ -281,14 +304,15 @@ export default function DarkPoolPage() {
           </p>
         </div>
 
-        {/* No-matcher disclosure */}
+        {/* Matcher disclosure */}
         <GlassCard className="p-4 mb-6 flex items-start gap-3" hoverGlow={false}>
           <Info size={16} className="text-accent-secondary flex-shrink-0 mt-0.5" />
           <p className="text-[10px] text-text-secondary leading-relaxed">
-            Placing and cancelling orders is real — both settle on-chain against a real Noir/UltraHonk proof. Matching
-            them isn&apos;t: the dark-pool matcher (the off-chain service that pairs two compatible orders and submits a
-            <code className="mx-1 text-text-primary">matchOrders</code> proof) doesn&apos;t exist yet. An order placed
-            here will sit unmatched until it is — cancel any time to get your funds back as a fresh note.
+            Placing, cancelling, and matching orders are all real — each settles on-chain against a real Noir/UltraHonk
+            proof. Matches can be partial: a large order may only be filled in part, with the remainder staying live on
+            the book at the same terms. The matcher only ever sees what it needs to pair two compatible orders — it
+            can&apos;t redirect funds or spend on your behalf. Cancel any open order any time to get your funds back as
+            a fresh note.
           </p>
         </GlassCard>
 
@@ -432,7 +456,7 @@ export default function DarkPoolPage() {
                     </div>
                     <div className="flex justify-between">
                       <span>Order Type:</span>
-                      <span className="text-text-primary">Exact bilateral cross, no partial fills</span>
+                      <span className="text-text-primary">Dark pool, partial fills supported</span>
                     </div>
                   </div>
 
@@ -460,13 +484,23 @@ export default function DarkPoolPage() {
                       const assetOutSym = ASSET_OPTIONS.find((a) => deployment?.assets[a.sym]?.assetId === Number(order.assetOut))?.sym ?? `asset ${order.assetOut}`;
                       const inDecimals = deployment?.assets[assetInSym as AssetSymbol]?.decimals ?? 18;
                       const outDecimals = deployment?.assets[assetOutSym as AssetSymbol]?.decimals ?? 18;
+                      const original = BigInt(order.originalAmountIn);
+                      const remaining = BigInt(order.amount);
+                      const filled = original - remaining;
+                      const isPartiallyFilled = filled > BigInt(0);
                       return (
                         <div key={order.id} className="flex items-center justify-between p-4 rounded-lg border border-border-custom bg-surface/20">
                           <div>
                             <span className="text-xs font-mono font-bold text-text-primary block">
-                              {formatUnits(BigInt(order.amount), inDecimals)} {assetInSym} → min {formatUnits(BigInt(order.minAmountOut), outDecimals)} {assetOutSym}
+                              {formatUnits(remaining, inDecimals)} {assetInSym} → min {formatUnits(BigInt(order.minAmountOut), outDecimals)} {assetOutSym}
                             </span>
-                            <span className="text-[9px] text-text-secondary">Pending match — order #{order.derivationIndex}</span>
+                            {isPartiallyFilled ? (
+                              <span className="text-[9px] text-accent-primary">
+                                {formatUnits(filled, inDecimals)} / {formatUnits(original, inDecimals)} {assetInSym} filled — rest still open
+                              </span>
+                            ) : (
+                              <span className="text-[9px] text-text-secondary">Pending match — order #{order.derivationIndex}</span>
+                            )}
                           </div>
                           <AnimatedButton
                             variant="secondary"

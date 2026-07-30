@@ -8,6 +8,7 @@ import { useApp } from '@/providers/app-provider';
 import { useNoteWallet } from '@/lib/noteWallet/useNoteWallet';
 import { getDeployment } from '@/lib/noteWallet/deployments';
 import { OWNER_KEY_REGISTRY_ABI } from '@/lib/noteWallet/ownerKeyRegistryAbi';
+import type { AnnouncedOrder } from '@/lib/noteWallet/announcer';
 import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
@@ -58,6 +59,15 @@ export default function ReceivePage() {
     enabled: !!announcerAddress && !!walletAddress,
   });
 
+  // Residual orders (a partial fill's leftover — see circuits/DESIGN.md)
+  // arrive the same way a payment does, just via a different announcement
+  // shape — surfaced in the same "Incoming" list below.
+  const incomingOrdersQuery = useQuery({
+    queryKey: ['incomingOrderAnnouncements', chainId, walletAddress],
+    queryFn: () => noteWallet.scanIncomingOrders(announcerAddress!),
+    enabled: !!announcerAddress && !!walletAddress,
+  });
+
   const handleRegister = async () => {
     if (!registryAddress) return;
     setRegistering(true);
@@ -94,6 +104,21 @@ export default function ReceivePage() {
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
       queryClient.invalidateQueries({ queryKey: ['incomingAnnouncements', chainId, walletAddress] });
       addNotification('Payment Claimed', 'Saved to your shielded notes.', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Claim failed.';
+      addNotification('Claim Failed', message, 'error');
+    } finally {
+      setClaimingCommitment(null);
+    }
+  };
+
+  const handleClaimOrder = async (candidate: AnnouncedOrder) => {
+    setClaimingCommitment(candidate.commitment);
+    try {
+      await noteWallet.claimIncomingOrder(candidate);
+      queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
+      queryClient.invalidateQueries({ queryKey: ['incomingOrderAnnouncements', chainId, walletAddress] });
+      addNotification('Order Claimed', 'Saved to your open orders — see it on the Swap page.', 'success');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Claim failed.';
       addNotification('Claim Failed', message, 'error');
@@ -199,22 +224,25 @@ export default function ReceivePage() {
               </GlassCard>
             </div>
 
-            {/* Incoming payments (Span 7) */}
+            {/* Incoming payments (Span 7) — payments and residual dark-pool orders both land here */}
             <div className="lg:col-span-7">
               <GlassCard className="p-6" hoverGlow={false}>
                 <div className="flex items-center justify-between border-b border-border-custom pb-4 mb-4">
                   <div className="flex items-center gap-2">
                     <Inbox size={16} className="text-accent-secondary" />
-                    <h2 className="text-sm uppercase tracking-wider font-display font-bold">Incoming Payments</h2>
+                    <h2 className="text-sm uppercase tracking-wider font-display font-bold">Incoming</h2>
                   </div>
                   <AnimatedButton
                     variant="secondary"
                     size="sm"
-                    onClick={() => incomingQuery.refetch()}
-                    disabled={incomingQuery.isFetching || !announcerAddress}
+                    onClick={() => {
+                      incomingQuery.refetch();
+                      incomingOrdersQuery.refetch();
+                    }}
+                    disabled={(incomingQuery.isFetching || incomingOrdersQuery.isFetching) || !announcerAddress}
                   >
                     <span className="flex items-center gap-1.5">
-                      <RefreshCw size={12} className={incomingQuery.isFetching ? 'animate-spin' : ''} />
+                      <RefreshCw size={12} className={incomingQuery.isFetching || incomingOrdersQuery.isFetching ? 'animate-spin' : ''} />
                       Scan
                     </span>
                   </AnimatedButton>
@@ -224,16 +252,19 @@ export default function ReceivePage() {
                   <div className="rounded-lg border border-border-custom bg-surface/20 p-6 text-center text-[10px] text-text-secondary">
                     Not available on this network.
                   </div>
-                ) : incomingQuery.data && incomingQuery.data.length > 0 ? (
+                ) : (incomingQuery.data && incomingQuery.data.length > 0) || (incomingOrdersQuery.data && incomingOrdersQuery.data.length > 0) ? (
                   <div className="space-y-2">
-                    {incomingQuery.data.map((candidate) => (
+                    {incomingQuery.data?.map((candidate) => (
                       <div
                         key={candidate.commitment.toString()}
                         className="flex items-center justify-between p-3 rounded-lg border border-border-custom bg-surface/20"
                       >
-                        <span className="text-xs font-mono font-bold text-text-primary">
-                          {formatUnits(candidate.amount, 18)} (asset {candidate.assetId.toString()})
-                        </span>
+                        <div>
+                          <span className="text-[9px] text-text-secondary uppercase tracking-wide block">Payment</span>
+                          <span className="text-xs font-mono font-bold text-text-primary">
+                            {formatUnits(candidate.amount, 18)} (asset {candidate.assetId.toString()})
+                          </span>
+                        </div>
                         <AnimatedButton
                           variant="primary"
                           size="sm"
@@ -244,10 +275,31 @@ export default function ReceivePage() {
                         </AnimatedButton>
                       </div>
                     ))}
+                    {incomingOrdersQuery.data?.map((candidate) => (
+                      <div
+                        key={candidate.commitment.toString()}
+                        className="flex items-center justify-between p-3 rounded-lg border border-border-custom bg-surface/20"
+                      >
+                        <div>
+                          <span className="text-[9px] text-text-secondary uppercase tracking-wide block">Open order (partial fill)</span>
+                          <span className="text-xs font-mono font-bold text-text-primary">
+                            {formatUnits(candidate.amountIn, 18)} (asset {candidate.assetIn.toString()})
+                          </span>
+                        </div>
+                        <AnimatedButton
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handleClaimOrder(candidate)}
+                          disabled={claimingCommitment === candidate.commitment}
+                        >
+                          {claimingCommitment === candidate.commitment ? 'Claiming...' : 'Claim'}
+                        </AnimatedButton>
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div className="rounded-lg border border-border-custom bg-surface/20 p-6 text-center text-[10px] text-text-secondary">
-                    {incomingQuery.isFetching ? 'Scanning...' : 'Nothing to claim right now.'}
+                    {incomingQuery.isFetching || incomingOrdersQuery.isFetching ? 'Scanning...' : 'Nothing to claim right now.'}
                   </div>
                 )}
               </GlassCard>

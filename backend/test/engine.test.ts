@@ -6,8 +6,8 @@ function order(overrides: Partial<OrderIntent>): OrderIntent {
   return {
     commitment: "0x1",
     leafIndex: 0,
-    nullifier: "1",
-    secret: "1",
+    spendingKey: "1",
+    orderBlinding: "1",
     amountIn: "1000",
     assetIn: 0,
     assetOut: 1,
@@ -19,53 +19,51 @@ function order(overrides: Partial<OrderIntent>): OrderIntent {
   };
 }
 
-// Mirrors the exact match_orders circuit test vectors (contract/circuits/
-// noir/match_orders/src/main.nr's #[test] fn test_match_orders /
-// test_match_orders_rejects_incompatible_assets).
+// isCompatible is now just the asset-cross pre-filter — whether a valid
+// fill actually exists (clearing both sides' pro-rata minimums) needs live
+// FTSO data, see fillSizing.test.ts's computeFill tests.
 describe("isCompatible", () => {
-  it("accepts orders that cross exactly like the circuit's own passing test vector", () => {
-    const a = order({ commitment: "0xa", amountIn: "1000", assetIn: 0, assetOut: 1, minAmountOut: "900" });
-    const b = order({ commitment: "0xb", amountIn: "950", assetIn: 1, assetOut: 0, minAmountOut: "800" });
+  it("accepts orders that cross on the same asset pair", () => {
+    const a = order({ commitment: "0xa", assetIn: 0, assetOut: 1 });
+    const b = order({ commitment: "0xb", assetIn: 1, assetOut: 0 });
     expect(isCompatible(a, b)).toBe(true);
   });
 
-  it("rejects orders on mismatched assets, like the circuit's should_fail vector", () => {
-    const a = order({ commitment: "0xa", amountIn: "1000", assetIn: 0, assetOut: 1, minAmountOut: "900" });
-    const b = order({ commitment: "0xb", amountIn: "950", assetIn: 2, assetOut: 0, minAmountOut: "800" });
-    expect(isCompatible(a, b)).toBe(false);
-  });
-
-  it("rejects when a side wouldn't clear its counterparty's minimum", () => {
-    const a = order({ commitment: "0xa", amountIn: "1000", assetIn: 0, assetOut: 1, minAmountOut: "9999" });
-    const b = order({ commitment: "0xb", amountIn: "950", assetIn: 1, assetOut: 0, minAmountOut: "800" });
+  it("rejects orders on mismatched assets", () => {
+    const a = order({ commitment: "0xa", assetIn: 0, assetOut: 1 });
+    const b = order({ commitment: "0xb", assetIn: 2, assetOut: 0 });
     expect(isCompatible(a, b)).toBe(false);
   });
 });
 
 describe("OrderBook", () => {
-  it("rests an order with no compatible counterparty", () => {
+  it("rest() adds an order that list() then reports", () => {
     const book = new OrderBook();
-    const result = book.submit(order({ commitment: "0xa" }));
-    expect(result).toBeNull();
+    book.rest(order({ commitment: "0xa" }));
     expect(book.list().map((o) => o.commitment)).toEqual(["0xa"]);
   });
 
-  it("matches a new order against a resting compatible one and removes both from the book", () => {
+  it("findCandidates() finds a resting order compatible with a new one, without removing it", () => {
     const book = new OrderBook();
-    const a = order({ commitment: "0xa", amountIn: "1000", assetIn: 0, assetOut: 1, minAmountOut: "900" });
-    const b = order({ commitment: "0xb", amountIn: "950", assetIn: 1, assetOut: 0, minAmountOut: "800" });
-    expect(book.submit(a)).toBeNull();
-    const match = book.submit(b);
-    expect(match?.commitment).toBe("0xa");
-    expect(book.list()).toEqual([]);
+    const a = order({ commitment: "0xa", assetIn: 0, assetOut: 1 });
+    const b = order({ commitment: "0xb", assetIn: 1, assetOut: 0 });
+    book.rest(a);
+    expect(book.findCandidates(b).map((o) => o.commitment)).toEqual(["0xa"]);
+    expect(book.list().map((o) => o.commitment)).toEqual(["0xa"]); // untouched
   });
 
-  it("does not match an incompatible resting order", () => {
+  it("findCandidates() excludes an incompatible resting order", () => {
     const book = new OrderBook();
-    const a = order({ commitment: "0xa", amountIn: "1000", assetIn: 0, assetOut: 1, minAmountOut: "900" });
-    const c = order({ commitment: "0xc", amountIn: "950", assetIn: 2, assetOut: 0, minAmountOut: "800" });
-    book.submit(a);
-    expect(book.submit(c)).toBeNull();
-    expect(book.list().map((o) => o.commitment).sort()).toEqual(["0xa", "0xc"]);
+    const a = order({ commitment: "0xa", assetIn: 0, assetOut: 1 });
+    const c = order({ commitment: "0xc", assetIn: 2, assetOut: 0 });
+    book.rest(a);
+    expect(book.findCandidates(c)).toEqual([]);
+  });
+
+  it("remove() takes an order off the book", () => {
+    const book = new OrderBook();
+    book.rest(order({ commitment: "0xa" }));
+    book.remove("0xa");
+    expect(book.list()).toEqual([]);
   });
 });

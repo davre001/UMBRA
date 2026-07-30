@@ -7,6 +7,13 @@ use umbra_lib::{commitment, merkle_root, nullifier_hash, order_commitment, owner
 // receives the order details off-chain (encrypted, same as the existing
 // intent-submission flow), knows what's actually in the order. See
 // circuits/DESIGN.md.
+//
+// The order is owned by this wallet's own persistent owner_key(spending_key)
+// — the same key that owns the note being spent — rather than a fresh
+// per-order secret/nullifier pair. That's what lets a partial fill's
+// leftover re-commit under an owner_key the trader already controls (see
+// match_orders), without the matcher needing anything from the trader that
+// would let it spend on their behalf.
 fn main(
     // Public
     root: pub Field,
@@ -20,8 +27,7 @@ fn main(
     path_elements: [Field; LEVELS],
     path_indices: [bool; LEVELS],
     // Private — the order being placed
-    order_secret: Field,
-    order_nullifier: Field,
+    order_blinding: Field,
     asset_out: Field,
     min_amount_out: Field,
 ) {
@@ -29,7 +35,7 @@ fn main(
     assert(merkle_root(leaf, path_elements, path_indices) == root);
     assert(nullifier_hash(leaf, spending_key) == nullifier_hash_pub);
 
-    let out = order_commitment(order_nullifier, order_secret, amount_in, asset_in, asset_out, min_amount_out);
+    let out = order_commitment(owner_key(spending_key), order_blinding, amount_in, asset_in, asset_out, min_amount_out);
     assert(out == order_commitment_pub);
 }
 
@@ -52,15 +58,44 @@ fn test_place_order() {
     let root = merkle_root(leaf, path_elements, path_indices);
     let nh = nullifier_hash(leaf, spending_key);
 
-    let order_secret = 555;
-    let order_nullifier = 666;
+    let order_blinding = 555;
     let asset_out = 1;
     let min_amount_out = 900;
     let order_commitment_pub =
-        order_commitment(order_nullifier, order_secret, amount_in, asset_in, asset_out, min_amount_out);
+        order_commitment(owner_key(spending_key), order_blinding, amount_in, asset_in, asset_out, min_amount_out);
 
     main(
         root, nh, order_commitment_pub, spending_key, blinding, amount_in, asset_in, path_elements, path_indices,
-        order_secret, order_nullifier, asset_out, min_amount_out,
+        order_blinding, asset_out, min_amount_out,
+    );
+}
+
+#[test(should_fail)]
+fn test_place_order_rejects_mismatched_order_commitment() {
+    // An order commitment built under a different owner_key than the note's
+    // own spending_key must be rejected — otherwise a prover could place an
+    // order nobody (not even themselves) can later cancel or have matched.
+    let spending_key = 111;
+    let blinding = 999;
+    let amount_in = 1000;
+    let asset_in = 0;
+    let leaf = commitment(asset_in, amount_in, owner_key(spending_key), blinding);
+
+    let mut path_elements: [Field; LEVELS] = [ZERO_VALUE; LEVELS];
+    let path_indices: [bool; LEVELS] = [false; LEVELS];
+    let mut zero = ZERO_VALUE;
+    for i in 0..LEVELS {
+        path_elements[i] = zero;
+        zero = umbra_lib::hash_left_right(zero, zero);
+    }
+
+    let root = merkle_root(leaf, path_elements, path_indices);
+    let nh = nullifier_hash(leaf, spending_key);
+
+    let wrong_owner_commitment = order_commitment(owner_key(999), 555, amount_in, asset_in, 1, 900);
+
+    main(
+        root, nh, wrong_owner_commitment, spending_key, blinding, amount_in, asset_in, path_elements, path_indices,
+        555, 1, 900,
     );
 }

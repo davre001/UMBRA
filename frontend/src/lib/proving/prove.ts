@@ -13,7 +13,7 @@ import type { CompiledCircuit, InputMap } from "@noir-lang/types";
  * typed calldata args — only the raw proof bytes need to be submitted.
  */
 
-export type CircuitName = "withdraw" | "pay" | "place_order" | "cancel_order" | "match_orders";
+export type CircuitName = "withdraw" | "pay" | "place_order" | "cancel_order";
 
 const circuitCache = new Map<CircuitName, Promise<CompiledCircuit>>();
 
@@ -101,18 +101,22 @@ export async function provePay(params: {
   amount: bigint;
   assetId: bigint;
   outCommitment: bigint;
+  outOwnerKey: bigint;
+  outBlinding: bigint;
   note: SpentNoteInput;
 }): Promise<`0x${string}`> {
   const { proof } = await proveCircuit("pay", {
     root: params.root.toString(),
     nullifier_hash_pub: params.nullifierHash.toString(),
-    amount: params.amount.toString(),
     asset_id: params.assetId.toString(),
     out_commitment: params.outCommitment.toString(),
     spending_key: params.note.spendingKey.toString(),
     blinding: params.note.blinding.toString(),
+    amount: params.amount.toString(),
     path_elements: fieldsOf(params.note.merklePath.pathElements),
     path_indices: params.note.merklePath.pathIndices,
+    out_owner_key: params.outOwnerKey.toString(),
+    out_blinding: params.outBlinding.toString(),
   });
   return toHex(proof);
 }
@@ -124,8 +128,7 @@ export async function provePlaceOrder(params: {
   amountIn: bigint;
   assetIn: bigint;
   note: SpentNoteInput;
-  orderSecret: bigint;
-  orderNullifier: bigint;
+  orderBlinding: bigint;
   assetOut: bigint;
   minAmountOut: bigint;
 }): Promise<`0x${string}`> {
@@ -139,8 +142,7 @@ export async function provePlaceOrder(params: {
     asset_in: params.assetIn.toString(),
     path_elements: fieldsOf(params.note.merklePath.pathElements),
     path_indices: params.note.merklePath.pathIndices,
-    order_secret: params.orderSecret.toString(),
-    order_nullifier: params.orderNullifier.toString(),
+    order_blinding: params.orderBlinding.toString(),
     asset_out: params.assetOut.toString(),
     min_amount_out: params.minAmountOut.toString(),
   });
@@ -151,76 +153,32 @@ export async function proveCancelOrder(params: {
   root: bigint;
   nullifierHash: bigint;
   refundCommitment: bigint;
-  orderSecret: bigint;
-  orderNullifier: bigint;
+  spendingKey: bigint;
+  orderBlinding: bigint;
   amountIn: bigint;
   assetIn: bigint;
   assetOut: bigint;
   minAmountOut: bigint;
   merklePath: MerkleProofInput;
-  refundOwnerKey: bigint;
   refundBlinding: bigint;
 }): Promise<`0x${string}`> {
   const { proof } = await proveCircuit("cancel_order", {
     root: params.root.toString(),
     nullifier_hash_pub: params.nullifierHash.toString(),
     refund_commitment_pub: params.refundCommitment.toString(),
-    order_secret: params.orderSecret.toString(),
-    order_nullifier: params.orderNullifier.toString(),
+    spending_key: params.spendingKey.toString(),
+    order_blinding: params.orderBlinding.toString(),
     amount_in: params.amountIn.toString(),
     asset_in: params.assetIn.toString(),
     asset_out: params.assetOut.toString(),
     min_amount_out: params.minAmountOut.toString(),
     path_elements: fieldsOf(params.merklePath.pathElements),
     path_indices: params.merklePath.pathIndices,
-    refund_owner_key: params.refundOwnerKey.toString(),
     refund_blinding: params.refundBlinding.toString(),
   });
   return toHex(proof);
 }
 
-interface MatchOrderSide {
-  secret: bigint;
-  nullifier: bigint;
-  amountIn: bigint;
-  assetIn: bigint;
-  assetOut: bigint;
-  minAmountOut: bigint;
-  merklePath: MerkleProofInput;
-  outOwnerKey: bigint;
-  outBlinding: bigint;
-}
-
-export async function proveMatchOrders(params: {
-  root: bigint;
-  nullifierHashA: bigint;
-  nullifierHashB: bigint;
-  outCommitmentA: bigint;
-  outCommitmentB: bigint;
-  a: MatchOrderSide;
-  b: MatchOrderSide;
-}): Promise<`0x${string}`> {
-  const side = (s: MatchOrderSide, prefix: "a" | "b") => ({
-    [`${prefix}_secret`]: s.secret.toString(),
-    [`${prefix}_nullifier`]: s.nullifier.toString(),
-    [`${prefix}_amount_in`]: s.amountIn.toString(),
-    [`${prefix}_asset_in`]: s.assetIn.toString(),
-    [`${prefix}_asset_out`]: s.assetOut.toString(),
-    [`${prefix}_min_amount_out`]: s.minAmountOut.toString(),
-    [`${prefix}_path_elements`]: fieldsOf(s.merklePath.pathElements),
-    [`${prefix}_path_indices`]: s.merklePath.pathIndices,
-    [`${prefix}_out_owner_key`]: s.outOwnerKey.toString(),
-    [`${prefix}_out_blinding`]: s.outBlinding.toString(),
-  });
-
-  const { proof } = await proveCircuit("match_orders", {
-    root: params.root.toString(),
-    nullifier_hash_a: params.nullifierHashA.toString(),
-    nullifier_hash_b: params.nullifierHashB.toString(),
-    out_commitment_a: params.outCommitmentA.toString(),
-    out_commitment_b: params.outCommitmentB.toString(),
-    ...side(params.a, "a"),
-    ...side(params.b, "b"),
-  });
-  return toHex(proof);
-}
+// match_orders proving happens in matcher-worker/ (a separate package, kept
+// off this constrained deployment's dependency tree — see that package's
+// own prove.ts), never in the browser, so there's no proveMatchOrders here.

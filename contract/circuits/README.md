@@ -101,4 +101,8 @@ alone at leaf index 0, a state the vault's real functions can't reach in one
 step (`placeOrder` always spends a *prior* note first). Chaining fixtures to
 match a real multi-step sequence needs live in-test proving — see the
 comment above `ShieldedVault.test.ts`'s `matchOrders` note for the full
-reasoning.
+reasoning. `matchOrders` specifically (including a genuine partial fill) has
+been verified through a real multi-step sequence manually — two real
+`placeOrder`s, matched, proven, submitted, settling with a correct residual
+on-chain — see `matcher-worker/README.md`'s "Verified" section; that
+verification just isn't part of this repo's checked-in automated suite.

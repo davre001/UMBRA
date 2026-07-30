@@ -39,13 +39,11 @@ const PAY_COMMITMENT = "0x1929824ee9247cdc3276330ad6e4fdc5f9050f4c040c6f6942284f
 const PAY_AMOUNT = 250n;
 const PAY_ASSET_ID = 1n;
 
-// place_order fixture spends the *same* note as the withdraw fixture
-// (spendingKey=111, blinding=999, amount=1000, assetId=0) — the underlying
-// note is identical, only what's done with it differs. Fine since each
-// `it()` gets a fresh vault deployment.
-const PLACE_ORDER_COMMITMENT = WITHDRAW_COMMITMENT;
-const PLACE_ORDER_AMOUNT = WITHDRAW_AMOUNT;
-const PLACE_ORDER_ASSET_ID = WITHDRAW_ASSET_ID;
+// place_order fixture: spendingKey=5002, blinding=6002, amount=450, assetId=1
+// — its own note, independent of the withdraw/pay fixtures above.
+const PLACE_ORDER_COMMITMENT = "0x129c6250bd178cae0c407b4120f70582f3a12166d20f40f3182b62aca8a0348e";
+const PLACE_ORDER_AMOUNT = 450n;
+const PLACE_ORDER_ASSET_ID = 1n;
 
 async function deployHasher() {
   const Poseidon2 = await ethers.getContractFactory("Poseidon2_BN254");
@@ -173,13 +171,13 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     await token.connect(alice).approve(await vault.getAddress(), PAY_AMOUNT);
     await vault.connect(alice).shield(PAY_ASSET_ID, PAY_AMOUNT, PAY_COMMITMENT);
 
-    const { proof, publicInputs } = loadFixture("pay", 5);
+    const { proof, publicInputs } = loadFixture("pay", 4);
     expect(await vault.currentRoot()).to.equal(publicInputs[0], "on-chain root must match the fixture's tree state");
 
     const vaultBalanceBefore = await token.balanceOf(await vault.getAddress());
-    const outCommitment = publicInputs[4];
+    const outCommitment = publicInputs[3];
 
-    await expect(vault.pay(proof, publicInputs[0], publicInputs[1], PAY_AMOUNT, PAY_ASSET_ID, outCommitment)).to.emit(
+    await expect(vault.pay(proof, publicInputs[0], publicInputs[1], PAY_ASSET_ID, outCommitment)).to.emit(
       vault,
       "Paid"
     );

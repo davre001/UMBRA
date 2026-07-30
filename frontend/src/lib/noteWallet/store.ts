@@ -25,17 +25,17 @@ export interface StoredRegularNote extends StoredNoteBase {
 }
 
 /**
- * A dark-pool order commitment. Unlike a regular note, an order's
- * nullifier/secret pair is per-order (not split into a persistent
- * spendingKey + owner_key) — see circuits/DESIGN.md's "Paying a different
- * recipient" section for why orders don't need that split.
+ * A dark-pool order commitment. Owned by this wallet's same persistent
+ * spendingKey as a regular note (circuits/DESIGN.md's "an order" section) —
+ * `blinding` here is the order's own, separate from any note's.
  */
 export interface StoredOrderNote extends StoredNoteBase {
   kind: "order";
-  secret: string;
-  nullifier: string;
+  blinding: string;
   assetOut: string;
   minAmountOut: string;
+  /** This order's size before any partial fills ever reduced it — equal to `amount` for a freshly-placed order, larger than it for a residual. Lets the UI show fill progress. */
+  originalAmountIn: string;
 }
 
 export type StoredNote = StoredRegularNote | StoredOrderNote;

@@ -61,6 +61,8 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
         uint256 indexed nullifierHashB,
         uint256 outCommitmentA,
         uint256 outCommitmentB,
+        uint256 residualCommitmentA,
+        uint256 residualCommitmentB,
         uint256 newRoot
     );
 
@@ -157,25 +159,23 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     ///         hidden note, computed client-side) as a new leaf — funds never
     ///         leave the shielded pool. Compliance screening doesn't apply
     ///         here on purpose: there's no plaintext recipient to screen until
-    ///         `withdraw` brings funds back into the open.
-    function pay(
-        bytes calldata proof,
-        uint256 root,
-        uint256 nullifierHash,
-        uint256 amount,
-        uint256 assetId,
-        uint256 outCommitment
-    ) external nonReentrant {
+    ///         `withdraw` brings funds back into the open. Amount is private —
+    ///         the circuit itself recomputes `outCommitment` from the spent
+    ///         note's real amount and asserts equality, so this contract never
+    ///         needs to see or pass it through.
+    function pay(bytes calldata proof, uint256 root, uint256 nullifierHash, uint256 assetId, uint256 outCommitment)
+        external
+        nonReentrant
+    {
         if (!isKnownRoot[root]) revert UnknownRoot(root);
         if (isSpentNullifier[nullifierHash]) revert NullifierAlreadySpent(nullifierHash);
         if (!isAllowedAsset[assetId]) revert AssetNotAllowed(assetId);
 
-        bytes32[] memory publicInputs = new bytes32[](5);
+        bytes32[] memory publicInputs = new bytes32[](4);
         publicInputs[0] = bytes32(root);
         publicInputs[1] = bytes32(nullifierHash);
-        publicInputs[2] = bytes32(amount);
-        publicInputs[3] = bytes32(assetId);
-        publicInputs[4] = bytes32(outCommitment);
+        publicInputs[2] = bytes32(assetId);
+        publicInputs[3] = bytes32(outCommitment);
         if (!payVerifier.verify(proof, publicInputs)) revert InvalidProof();
 
         isSpentNullifier[nullifierHash] = true;
@@ -229,35 +229,48 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
         emit OrderCancelled(nullifierHash, refundCommitment, leafIndex, currentRoot);
     }
 
-    /// @notice Spend two compatible hidden order commitments and insert the two
-    ///         matched output notes. No matcher role: the proof itself already
-    ///         establishes both orders are valid, cross on assets, and clear
-    ///         each side's minimum acceptable amount (circuits/noir/match_orders).
-    ///         Exact bilateral cross only — no partial fills, see circuits/DESIGN.md.
+    /// @notice Spend two compatible hidden order commitments and insert the
+    ///         matched output notes, supporting partial fills: the proof
+    ///         itself already establishes both orders are valid, cross on
+    ///         assets, at least one side is fully consumed, and each side's
+    ///         contribution clears the other's pro-rata minimum acceptable
+    ///         amount for however much was actually filled
+    ///         (circuits/noir/match_orders). `residualCommitmentA/B` are
+    ///         `ZERO_VALUE` (the domain-separated empty-leaf constant — see
+    ///         MerkleTreeWithHistory) when that side was fully consumed and
+    ///         has no leftover; a real order commitment can never equal it,
+    ///         so the sentinel is unambiguous and only a genuine leftover
+    ///         ever gets inserted as a new leaf. See circuits/DESIGN.md.
     function matchOrders(
         bytes calldata proof,
         uint256 root,
         uint256 nullifierHashA,
         uint256 nullifierHashB,
         uint256 outCommitmentA,
-        uint256 outCommitmentB
+        uint256 outCommitmentB,
+        uint256 residualCommitmentA,
+        uint256 residualCommitmentB
     ) external nonReentrant {
         if (!isKnownRoot[root]) revert UnknownRoot(root);
         if (isSpentNullifier[nullifierHashA]) revert NullifierAlreadySpent(nullifierHashA);
         if (isSpentNullifier[nullifierHashB]) revert NullifierAlreadySpent(nullifierHashB);
 
-        bytes32[] memory publicInputs = new bytes32[](5);
+        bytes32[] memory publicInputs = new bytes32[](7);
         publicInputs[0] = bytes32(root);
         publicInputs[1] = bytes32(nullifierHashA);
         publicInputs[2] = bytes32(nullifierHashB);
         publicInputs[3] = bytes32(outCommitmentA);
         publicInputs[4] = bytes32(outCommitmentB);
+        publicInputs[5] = bytes32(residualCommitmentA);
+        publicInputs[6] = bytes32(residualCommitmentB);
         if (!matchOrdersVerifier.verify(proof, publicInputs)) revert InvalidProof();
 
         isSpentNullifier[nullifierHashA] = true;
         isSpentNullifier[nullifierHashB] = true;
         _insert(outCommitmentA);
         _insert(outCommitmentB);
-        emit OrdersMatched(nullifierHashA, nullifierHashB, outCommitmentA, outCommitmentB, currentRoot);
+        if (residualCommitmentA != ZERO_VALUE) _insert(residualCommitmentA);
+        if (residualCommitmentB != ZERO_VALUE) _insert(residualCommitmentB);
+        emit OrdersMatched(nullifierHashA, nullifierHashB, outCommitmentA, outCommitmentB, residualCommitmentA, residualCommitmentB, currentRoot);
     }
 }

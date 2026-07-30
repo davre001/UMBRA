@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
-import { commitment, nullifierHash, orderCommitment } from "../src/shared/poseidon2";
-import { MerkleTree } from "../src/shared/merkleTree";
+import { commitment, nullifierHash, orderCommitment, ownerKey } from "../src/shared/poseidon2";
+import { MerkleTree, ZERO_VALUE } from "../src/shared/merkleTree";
 
 /**
  * Cross-checks the exact commitment/Merkle/nullifier math dark-engine's
@@ -11,57 +11,75 @@ import { MerkleTree } from "../src/shared/merkleTree";
  * that fixture's proof was independently confirmed to verify on-chain).
  * If this test passes, the TS assembly logic here produces byte-identical
  * public inputs to what the real Noir circuit and on-chain verifier expect
- * — checked without touching the chain or running any proving.
+ * — checked without touching the chain or running any proving. Fixture is a
+ * genuine partial fill at realistic 18-decimal scale (50 WFLR fully fills
+ * against a larger FXRP order, which keeps a residual) — see the circuit's
+ * own #[test] fn test_match_orders_partial_fill_at_realistic_18_decimal_scale,
+ * the exact magnitude that first exposed assert_64 as too tight for this
+ * project's real asset decimals (caught via a real end-to-end matcher-worker
+ * run, not a unit test — see contract/deployments/coston2.json's own note).
  */
 const FIXTURES = path.join(__dirname, "../../contract/circuits/noir/match_orders/fixtures");
 
 function loadFixturePublicInputs(): bigint[] {
   const raw = readFileSync(path.join(FIXTURES, "public_inputs"));
   const values: bigint[] = [];
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 7; i++) {
     values.push(BigInt("0x" + raw.subarray(i * 32, (i + 1) * 32).toString("hex")));
   }
   return values;
 }
 
 describe("match_orders commitment/Merkle assembly vs. the real circuit fixture", () => {
-  it("reproduces the fixture's root, nullifier hashes, and output commitments exactly", () => {
-    const [fixtureRoot, fixtureNullifierA, fixtureNullifierB, fixtureOutA, fixtureOutB] = loadFixturePublicInputs();
+  it("reproduces the fixture's root, nullifier hashes, output commitments, and residual exactly", () => {
+    const [fixtureRoot, fixtureNullifierA, fixtureNullifierB, fixtureOutA, fixtureOutB, fixtureResidualA, fixtureResidualB] =
+      loadFixturePublicInputs();
 
-    // Same order preimages as the fixture's Prover.toml / the circuit's own #[test] fn test_match_orders.
-    const aSecret = BigInt(111);
-    const aNullifier = BigInt(222);
-    const aAmountIn = BigInt(1000);
+    // Same order preimages as the fixture's Prover.toml / the circuit's own
+    // #[test] fn test_match_orders_partial_fill_at_realistic_18_decimal_scale.
+    const aSpendingKey = BigInt(111);
+    const aOrderBlinding = BigInt(222);
+    const aAmountIn = BigInt("50000000000000000000"); // 50 WFLR
     const aAssetIn = BigInt(0);
     const aAssetOut = BigInt(1);
-    const aMinAmountOut = BigInt(900);
+    const aMinAmountOut = BigInt(1);
 
-    const bSecret = BigInt(333);
-    const bNullifier = BigInt(444);
-    const bAmountIn = BigInt(950);
+    const bSpendingKey = BigInt(333);
+    const bOrderBlinding = BigInt(444);
+    const bAmountIn = BigInt(578349); // ~0.578349 FXRP
     const bAssetIn = BigInt(1);
     const bAssetOut = BigInt(0);
-    const bMinAmountOut = BigInt(800);
+    const bMinAmountOut = BigInt(1);
 
-    const leafA = orderCommitment(aNullifier, aSecret, aAmountIn, aAssetIn, aAssetOut, aMinAmountOut);
-    const leafB = orderCommitment(bNullifier, bSecret, bAmountIn, bAssetIn, bAssetOut, bMinAmountOut);
+    const leafA = orderCommitment(ownerKey(aSpendingKey), aOrderBlinding, aAmountIn, aAssetIn, aAssetOut, aMinAmountOut);
+    const leafB = orderCommitment(ownerKey(bSpendingKey), bOrderBlinding, bAmountIn, bAssetIn, bAssetOut, bMinAmountOut);
 
     const tree = new MerkleTree([leafA, leafB], 1);
     expect(tree.root).toBe(fixtureRoot);
 
-    expect(nullifierHash(leafA, aNullifier)).toBe(fixtureNullifierA);
-    expect(nullifierHash(leafB, bNullifier)).toBe(fixtureNullifierB);
+    expect(nullifierHash(leafA, aSpendingKey)).toBe(fixtureNullifierA);
+    expect(nullifierHash(leafB, bSpendingKey)).toBe(fixtureNullifierB);
 
-    // Same output owner_key/blinding as the fixture.
-    const aOutOwnerKey = BigInt("0x2c2ce65a11269a22ec91515b59f0b41406d1fffd1693bd36134c9e254f7bbc52");
-    const aOutBlinding = BigInt(666);
-    const bOutOwnerKey = BigInt("0x1459b8a6efe80cd7ca6423e4aead5ee456bc94f2944317d66a3821e472d9cc1c");
-    const bOutBlinding = BigInt(888);
+    const fillA = aAmountIn; // A fully fills
+    const fillB = BigInt(289175); // about half of B's amount
 
-    const outCommitmentA = commitment(bAssetIn, bAmountIn, aOutOwnerKey, aOutBlinding);
-    const outCommitmentB = commitment(aAssetIn, aAmountIn, bOutOwnerKey, bOutBlinding);
+    const aOutBlinding = BigInt(555);
+    const bOutBlinding = BigInt(666);
+    const outCommitmentA = commitment(bAssetIn, fillB, ownerKey(aSpendingKey), aOutBlinding);
+    const outCommitmentB = commitment(aAssetIn, fillA, ownerKey(bSpendingKey), bOutBlinding);
 
     expect(outCommitmentA).toBe(fixtureOutA);
     expect(outCommitmentB).toBe(fixtureOutB);
+
+    // A is fully filled — no residual.
+    expect(fixtureResidualA).toBe(ZERO_VALUE);
+
+    // B has a residual, min_amount_out scaled pro-rata (floor(remaining * 1 / 578349) = 0 here since bMinAmountOut is 1).
+    const bResidualBlinding = BigInt(999);
+    const bResidualAmount = bAmountIn - fillB;
+    const bResidualMin = (bResidualAmount * bMinAmountOut) / bAmountIn;
+    const residualCommitmentB = orderCommitment(ownerKey(bSpendingKey), bResidualBlinding, bResidualAmount, bAssetIn, bAssetOut, bResidualMin);
+
+    expect(residualCommitmentB).toBe(fixtureResidualB);
   });
 });

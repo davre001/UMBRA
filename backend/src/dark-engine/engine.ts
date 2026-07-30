@@ -1,46 +1,34 @@
 import type { OrderIntent, PublicOrderView } from "./types";
 
 /**
- * Real order book + compatibility check — a direct mirror of
- * `match_orders`'s own constraints (contract/circuits/noir/match_orders/
- * src/main.nr), not an approximation: assets must actually cross, and each
- * side must clear the other's minimum acceptable amount. There's no
- * partial-fill or price-improvement logic to mirror beyond that — unlike
- * Wraith's matcher, our circuit does an exact bilateral cross only (see
- * circuits/DESIGN.md's "known simplification, v1"), so any two orders
- * satisfying these four inequalities are a complete, valid match as-is.
+ * Cheap, synchronous pre-filter: do these two orders even trade the same
+ * asset pair in opposite directions? Necessary but not sufficient — whether
+ * a *valid* fill actually exists (clearing both sides' pro-rata minimums at
+ * a fair rate) needs live FTSO data and real arithmetic, see
+ * fillSizing.ts's `computeFill`. Kept separate so the book can filter its
+ * full candidate list synchronously before paying for any async price
+ * lookups.
  */
 export function isCompatible(a: OrderIntent, b: OrderIntent): boolean {
-  return (
-    a.assetOut === b.assetIn &&
-    b.assetOut === a.assetIn &&
-    BigInt(b.amountIn) >= BigInt(a.minAmountOut) &&
-    BigInt(a.amountIn) >= BigInt(b.minAmountOut)
-  );
+  return a.assetOut === b.assetIn && b.assetOut === a.assetIn;
 }
 
 export class OrderBook {
   private readonly open = new Map<string, OrderIntent>();
 
-  /** Adds `order` to the book and returns the first compatible resting order, if any (submission-order priority — first opened, first matched). */
-  submit(order: OrderIntent): OrderIntent | null {
-    for (const resting of this.open.values()) {
-      if (isCompatible(order, resting)) {
-        this.open.delete(resting.commitment);
-        return resting;
-      }
-    }
-    this.open.set(order.commitment, order);
-    return null;
+  /** All resting orders compatible with `order` by the pure asset-cross pre-filter, in submission-order priority — doesn't remove or add anything, so a caller can apply an additional async check (fillSizing.ts's `computeFill`) before committing to one. */
+  findCandidates(order: OrderIntent): OrderIntent[] {
+    return [...this.open.values()].filter((resting) => isCompatible(order, resting));
   }
 
-  /** Removes an order without matching it — used when a match's proof/submission ultimately fails and the order needs to go back on the book, or for operator cleanup. */
+  /** Adds `order` to the book without attempting to match it — used both for a genuinely new order and to re-list a partial fill's residual. */
+  rest(order: OrderIntent): void {
+    this.open.set(order.commitment, order);
+  }
+
+  /** Removes an order without matching it — used when a candidate is claimed for a match, or for operator cleanup. */
   remove(commitment: string): void {
     this.open.delete(commitment);
-  }
-
-  requeue(order: OrderIntent): void {
-    this.open.set(order.commitment, order);
   }
 
   list(): PublicOrderView[] {

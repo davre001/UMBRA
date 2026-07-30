@@ -69,19 +69,21 @@ nullifier scheme. Short version:
 
 ### Known simplification, v1
 
-`withdraw`/`pay` amounts are public (visible in their circuits' public
-signals) — `withdraw`'s payout is unavoidably public anyway (a plain ERC20
-transfer), and `pay` could hide its amount too but that needs
-value-conservation + range-proof constraints over private amounts (Zcash
-Sapling/Orchard-style), deliberately deferred. Order amounts *are* already
-private — `placeOrder`/`cancelOrder`/`matchOrders` never expose them. See
-`circuits/DESIGN.md`. `matchOrders` also only supports an exact bilateral
-cross (one order's full output exactly fills the other's), not partial
-fills.
+`withdraw`'s amount is public — unavoidably, since it's a plain ERC20
+transfer and the contract needs the real value to move real tokens. `pay`'s
+amount is private (a straight 1-in-1-out passthrough needs no
+value-conservation/range-proof machinery, unlike a real multi-note
+join-split). Order amounts are private too — `placeOrder`/`cancelOrder`/
+`matchOrders` never expose them. `matchOrders` supports real partial fills
+(a fill can consume less than an order's full `amountIn`, leaving a smaller
+residual order still on the book) but only matches two orders at a time —
+no N-way matching in a single proof. See `circuits/DESIGN.md`.
 
 ## Network
 
-- **Coston2** (chain id `114`) — RPC `https://coston2-api.flare.network/ext/C/rpc`
+- **Coston2** (chain id `114`) — RPC `https://flare-testnet.drpc.org` (the
+  official `coston2-api.flare.network` endpoint caps `eth_getLogs` at 30
+  blocks per query, too small for this app's leaf-history scans)
 - Explorer: https://coston2-explorer.flare.network
 - Faucet (real C2FLR / FXRP / USDT0): https://faucet.flare.network/
 - Real FXRP/WFLR/USDT0 addresses aren't hardcoded anywhere in this repo —

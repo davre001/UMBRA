@@ -1,6 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import request from "supertest";
+import { erc20Abi } from "viem";
 import { createApp } from "../src/app";
+import { CONTRACTS, ASSETS, getWalletClient, publicClient } from "../src/shared/chain";
+import { SHIELDED_VAULT_ABI } from "../src/shared/vaultAbi";
+import { getMidpointRate } from "../src/pricing/ftso.client";
 
 const app = createApp();
 
@@ -8,8 +12,8 @@ function orderBody(overrides: Record<string, unknown>) {
   return {
     commitment: "0x1",
     leafIndex: 0,
-    nullifier: "1",
-    secret: "1",
+    spendingKey: "1",
+    orderBlinding: "1",
     amountIn: "1000",
     assetIn: 0,
     assetOut: 1,
@@ -20,10 +24,62 @@ function orderBody(overrides: Record<string, unknown>) {
   };
 }
 
+/**
+ * assembleMatchProofInputs needs at least one real on-chain leaf to build a
+ * Merkle proof against (the test order commitments below aren't real order
+ * leaves — this only exercises the matching/assembly pipeline, not on-chain
+ * verification, so reusing any existing leaf index is fine). Self-contained
+ * rather than assuming another test file already shielded something first —
+ * dark-engine.test.ts runs before relayer.test.ts alphabetically, so it
+ * can't rely on that.
+ */
+let existingLeafIndex = 0;
+
+beforeAll(async () => {
+  const nextLeafIndex = await publicClient.readContract({
+    address: CONTRACTS.ShieldedVault as `0x${string}`,
+    abi: SHIELDED_VAULT_ABI,
+    functionName: "nextLeafIndex",
+  });
+  if (nextLeafIndex > 0) {
+    existingLeafIndex = nextLeafIndex - 1;
+    return;
+  }
+
+  const wallet = getWalletClient();
+  const account = wallet.account!;
+  const wflr = ASSETS.WFLR.token as `0x${string}`;
+  const dustAmount = BigInt(1);
+
+  const wrapHash = await wallet.sendTransaction({ to: wflr, data: "0xd0e30db0", value: dustAmount, chain: wallet.chain, account });
+  await publicClient.waitForTransactionReceipt({ hash: wrapHash });
+
+  const approveHash = await wallet.writeContract({
+    address: wflr,
+    abi: erc20Abi,
+    functionName: "approve",
+    args: [CONTRACTS.ShieldedVault as `0x${string}`, dustAmount],
+    chain: wallet.chain,
+    account,
+  });
+  await publicClient.waitForTransactionReceipt({ hash: approveHash });
+
+  const shieldHash = await wallet.writeContract({
+    address: CONTRACTS.ShieldedVault as `0x${string}`,
+    abi: SHIELDED_VAULT_ABI,
+    functionName: "shield",
+    args: [BigInt(0), dustAmount, BigInt(1)],
+    chain: wallet.chain,
+    account,
+  });
+  await publicClient.waitForTransactionReceipt({ hash: shieldHash });
+  existingLeafIndex = 0;
+}, 60_000);
+
 // Order submission and matching are real (real book, real Merkle-path
 // assembly against the live Coston2 vault, real Poseidon2 commitments) —
 // only proof generation is stubbed (UnavailableMatchProver, see prover.ts),
-// so a genuine match here lands as "awaiting_proof", not "submitted".
+// so a genuine match here lands as "awaiting_proof", not "settled".
 describe("dark-engine routes", () => {
   it("rejects an order missing required fields", async () => {
     const res = await request(app).post("/api/dark-engine/orders").send({ commitment: "0x1" });
@@ -31,7 +87,7 @@ describe("dark-engine routes", () => {
   });
 
   it("rests an order with no compatible counterparty", async () => {
-    const res = await request(app).post("/api/dark-engine/orders").send(orderBody({ commitment: "0xaa" }));
+    const res = await request(app).post("/api/dark-engine/orders").send(orderBody({ commitment: "0xaa", leafIndex: existingLeafIndex }));
     expect(res.status).toBe(201);
     expect(res.body.status).toBe("resting");
 
@@ -40,13 +96,26 @@ describe("dark-engine routes", () => {
   });
 
   it(
-    "matches a compatible order against a real resting one and assembles real proof inputs",
+    "matches a compatible, realistically-priced order against a real resting one and assembles real proof inputs",
     async () => {
+      // "0xaa" (submitted earlier, still resting) is compatible by asset/
+      // minimum but priced with unrealistic dust amounts — the new price
+      // sanity check (priceCheck.ts) should skip it and match "0xbb"
+      // instead, which is priced at the live FTSO rate.
+      const fairRate = await getMidpointRate("WFLR", "FXRP"); // 1 WFLR in FXRP
+      const wflrAmountHuman = 1000;
+      const fxrpAmountHuman = fairRate * wflrAmountHuman;
+      // BigInt exponentiation for the (integer) WFLR side — 1000 * 10^18
+      // overflows Number's non-exponential-notation range, and
+      // BigInt(String(...)) can't parse "1e+21".
+      const wflrAmountRaw = (BigInt(wflrAmountHuman) * BigInt(10) ** BigInt(18)).toString();
+      const fxrpAmountRaw = String(Math.round(fxrpAmountHuman * 10 ** 6));
+
       await request(app).post("/api/dark-engine/orders").send(
-        orderBody({ commitment: "0xbb", leafIndex: 1, amountIn: "1000", assetIn: 0, assetOut: 1, minAmountOut: "900" })
+        orderBody({ commitment: "0xbb", leafIndex: existingLeafIndex, amountIn: wflrAmountRaw, assetIn: 0, assetOut: 1, minAmountOut: "1" })
       );
       const res = await request(app).post("/api/dark-engine/orders").send(
-        orderBody({ commitment: "0xcc", leafIndex: 2, amountIn: "950", assetIn: 1, assetOut: 0, minAmountOut: "800" })
+        orderBody({ commitment: "0xcc", leafIndex: existingLeafIndex, amountIn: fxrpAmountRaw, assetIn: 1, assetOut: 0, minAmountOut: "1" })
       );
       expect(res.status).toBe(201);
       expect(res.body.status).toBe("matched");

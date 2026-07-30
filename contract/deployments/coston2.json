@@ -3,23 +3,23 @@
   "chainId": 114,
   "rpcUrl": "https://flare-testnet.drpc.org",
   "deployer": "0x2d671A0D877B206fcd7A103335ee8173f50A1d06",
-  "deployBlock": 33433625,
+  "deployBlock": 33449357,
   "contracts": {
-    "Poseidon2_BN254": "0x919374E87Ad26ADf9ad52E31E983747B9EC7d458",
-    "WithdrawHonkVerifier": "0x6c1A539e284b25Dc6c2cDA2bAbb8C27D163D9ee8",
-    "PayHonkVerifier": "0x20cB6A0B0AADd01dD9F39A35CFf2D961a321B36c",
-    "PlaceOrderHonkVerifier": "0xae66B23d9ac5085F240ce77c4ca33bFFEdc54F88",
-    "CancelOrderHonkVerifier": "0x06f9B6318488d12441448Ef0FA050e67EA5509Ea",
-    "MatchOrdersHonkVerifier": "0xd72996BA8fa26547e1e2827B49ea18e94ffEA2C7",
-    "ShieldedVault": "0xC10fbb6bcF4a404185cAc74AD670BFA31992F6b6",
-    "ComplianceRegistry": "0xC9aD83D3004275b3e7D520dd338e7564fbbeD228",
-    "StealthAnnouncer": "0x68b1F23ac0B9C7128df68D6E72EcfE7D46DBd240",
-    "OwnerKeyRegistry": "0x9c30aD071629879172C29AAc3A166E6f43563AA7"
+    "Poseidon2_BN254": "0x94d22070FfDB39a9dAEc0a9B5b367111e74dF071",
+    "WithdrawHonkVerifier": "0xa3410943004c2b537C48e76F8A9eeE8aA71df40c",
+    "PayHonkVerifier": "0xF7aC6d4A281cf9c117380B5c8E238d466943cFC3",
+    "PlaceOrderHonkVerifier": "0xbdB988FBc849499bcdF42951FD67792357B34d2D",
+    "CancelOrderHonkVerifier": "0xcBa1edd6b9D9f799BF172C14803CB14b89715Dd7",
+    "MatchOrdersHonkVerifier": "0x22A3B97BA38013BA44B91a9baE72094A751a318A",
+    "ShieldedVault": "0x6C8a2D7299b2Fb0c04fcB0e78edFA0abD428e563",
+    "ComplianceRegistry": "0xC9192Ecaf662c977B28c614e49F558AAAB832577",
+    "StealthAnnouncer": "0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1",
+    "OwnerKeyRegistry": "0x48C77021624f7b4baC092570CDD56EB163eC3e71"
   },
   "assets": {
     "WFLR": { "assetId": 0, "token": "0xC67DCE33D7A8efA5FfEB961899C73fe01bCe9273", "decimals": 18 },
     "FXRP": { "assetId": 1, "token": "0x0b6A3645c240605887a5532109323A3E12273dc7", "decimals": 6 },
     "USDT0": { "assetId": 2, "token": "0xC1A5B41512496B80903D1f32d6dEa3a73212E71F", "decimals": 6 }
   },
-  "note": "Redeployed to pick up the owner_key note-commitment scheme (circuits/DESIGN.md) — earlier addresses from this same file are stale; this vault's Merkle tree starts empty again."
+  "note": "Redeployed for partial-fill matchOrders support: place_order/cancel_order/match_orders circuits rewritten onto the owner_key(spending_key) order-ownership scheme, match_orders now proves real fill amounts with optional residual-order outputs instead of an exact-bilateral-cross-only match. A first version of this redeploy used a 64-bit range-check bound on amounts (assert_64) that turned out too tight for 18-decimal WFLR amounts (a plain 50 WFLR order already exceeds 2^64 raw units) — caught by a real end-to-end test, not a unit test with toy numbers; fixed by switching to a 100-bit bound (assert_100), safe because Noir's u128 multiplication is itself overflow-checked (confirmed empirically), not silently wrapping. Poseidon2/WithdrawVerifier/PayVerifier/ComplianceRegistry/StealthAnnouncer/OwnerKeyRegistry are unchanged and reused from the prior deployment (targeted redeploy — see contract/scripts/redeploy-vault-only.ts) so existing OwnerKeyRegistry registrations weren't orphaned. Earlier addresses in this file's history are stale."
 }

@@ -1,5 +1,6 @@
 import type { PublicClient } from "viem";
 import { SHIELDED_VAULT_ABI } from "./vaultAbi";
+import { ZERO_VALUE } from "./merkleTree";
 
 // Only these two methods are used — narrowing to them (rather than the full
 // PublicClient) sidesteps a real but irrelevant type mismatch: wagmi's
@@ -62,13 +63,30 @@ async function fetchAllLeavesOnce(client: ScanClient, vaultAddress: `0x${string}
       events.push({ commitment, leafIndex: log.args.leafIndex, blockNumber: log.blockNumber, logIndex: log.logIndex });
     }
   }
-  // OrdersMatched doesn't emit leafIndex directly — the two leaves it inserts
-  // are always the two immediately after whatever nextLeafIndex was at the
+  // OrdersMatched doesn't emit leafIndex directly — the leaves it inserts
+  // are always the ones immediately after whatever nextLeafIndex was at the
   // time. Cheapest correct approach: sort everything else first, then slot
-  // matched-pairs in by block/log order and infer indices from position.
-  for (const log of matchedLogs as unknown as { args: { outCommitmentA: bigint; outCommitmentB: bigint }; blockNumber: bigint; logIndex: number }[]) {
-    events.push({ commitment: log.args.outCommitmentA, leafIndex: -1, blockNumber: log.blockNumber, logIndex: log.logIndex });
-    events.push({ commitment: log.args.outCommitmentB, leafIndex: -1, blockNumber: log.blockNumber, logIndex: log.logIndex + 0.5 });
+  // matched leaves in by block/log order and infer indices from position.
+  //
+  // A match inserts 2-4 leaves: the two matched-proceeds notes always, plus
+  // a residual order for whichever side wasn't fully filled (partial fills
+  // — see circuits/DESIGN.md). ZERO_VALUE (the domain-separated empty-leaf
+  // constant) signals "no residual"; the contract itself skips inserting
+  // it, so this reconstruction must skip it too, in the exact same order
+  // ShieldedVault.matchOrders inserts them (out A, out B, residual A,
+  // residual B).
+  for (const log of matchedLogs as unknown as {
+    args: { outCommitmentA: bigint; outCommitmentB: bigint; residualCommitmentA: bigint; residualCommitmentB: bigint };
+    blockNumber: bigint;
+    logIndex: number;
+  }[]) {
+    const leaves = [log.args.outCommitmentA, log.args.outCommitmentB, log.args.residualCommitmentA, log.args.residualCommitmentB];
+    let offset = 0;
+    for (const commitment of leaves) {
+      if (commitment === ZERO_VALUE) continue;
+      events.push({ commitment, leafIndex: -1, blockNumber: log.blockNumber, logIndex: log.logIndex + offset * 0.1 });
+      offset += 1;
+    }
   }
 
   events.sort((a, b) => (a.blockNumber !== b.blockNumber ? Number(a.blockNumber - b.blockNumber) : a.logIndex - b.logIndex));

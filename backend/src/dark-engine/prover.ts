@@ -1,6 +1,6 @@
 import { randomBytes } from "crypto";
-import { commitment as computeCommitment, nullifierHash as computeNullifierHash } from "../shared/poseidon2";
-import { MerkleTree } from "../shared/merkleTree";
+import { commitment as computeCommitment, nullifierHash as computeNullifierHash, orderCommitment as computeOrderCommitment } from "../shared/poseidon2";
+import { MerkleTree, ZERO_VALUE } from "../shared/merkleTree";
 import { fetchAllLeaves } from "../shared/scan";
 import type { OrderIntent, MatchProofInputs, MatchOrderSide } from "./types";
 
@@ -15,14 +15,18 @@ function randomBlinding(): bigint {
 /**
  * Real commitment/public-input assembly — the same Poseidon2 math the
  * on-chain verifier will check, and the same Merkle-path logic the frontend
- * uses (shared/merkleTree.ts, shared/scan.ts). This is genuinely testable
- * against the circuit's own fixture without touching the chain or doing any
- * proving — see dark-engine's test file for that cross-check.
+ * uses (shared/merkleTree.ts, shared/scan.ts). `fillA`/`fillB` come from
+ * fillSizing.ts's `computeFill` (already validated against both sides'
+ * pro-rata minimums with exact integer arithmetic) — this function only
+ * turns a decided fill into the actual notes/residuals match_orders needs,
+ * it doesn't decide the fill itself.
  */
 export async function assembleMatchProofInputs(
   vaultAddress: `0x${string}`,
   orderA: OrderIntent,
-  orderB: OrderIntent
+  orderB: OrderIntent,
+  fillA: bigint,
+  fillB: bigint
 ): Promise<MatchProofInputs> {
   const leaves = await fetchAllLeaves(vaultAddress);
   const asOfIndex = Math.max(orderA.leafIndex, orderB.leafIndex);
@@ -30,25 +34,66 @@ export async function assembleMatchProofInputs(
   const pathA = tree.path(orderA.leafIndex);
   const pathB = tree.path(orderB.leafIndex);
 
-  const nullifierHashA = computeNullifierHash(BigInt(orderA.commitment), BigInt(orderA.nullifier));
-  const nullifierHashB = computeNullifierHash(BigInt(orderB.commitment), BigInt(orderB.nullifier));
+  const nullifierHashA = computeNullifierHash(BigInt(orderA.commitment), BigInt(orderA.spendingKey));
+  const nullifierHashB = computeNullifierHash(BigInt(orderB.commitment), BigInt(orderB.spendingKey));
 
   const aOutBlinding = randomBlinding();
   const bOutBlinding = randomBlinding();
-  const outCommitmentA = computeCommitment(BigInt(orderB.assetIn), BigInt(orderB.amountIn), BigInt(orderA.ownerKey), aOutBlinding);
-  const outCommitmentB = computeCommitment(BigInt(orderA.assetIn), BigInt(orderA.amountIn), BigInt(orderB.ownerKey), bOutBlinding);
+  // A receives fillB of B's asset; B receives fillA of A's asset.
+  const outCommitmentA = computeCommitment(BigInt(orderB.assetIn), fillB, BigInt(orderA.ownerKey), aOutBlinding);
+  const outCommitmentB = computeCommitment(BigInt(orderA.assetIn), fillA, BigInt(orderB.ownerKey), bOutBlinding);
 
-  const side = (order: OrderIntent, outBlinding: bigint, path: { pathElements: bigint[]; pathIndices: boolean[] }): MatchOrderSide => ({
-    secret: BigInt(order.secret),
-    nullifier: BigInt(order.nullifier),
+  const aAmountIn = BigInt(orderA.amountIn);
+  const bAmountIn = BigInt(orderB.amountIn);
+  const aResidualBlinding = randomBlinding();
+  const bResidualBlinding = randomBlinding();
+
+  const aResidualAmount = aAmountIn - fillA;
+  const aResidual =
+    aResidualAmount > BigInt(0)
+      ? {
+          amountIn: aResidualAmount,
+          minAmountOut: (aResidualAmount * BigInt(orderA.minAmountOut)) / aAmountIn,
+          commitment: BigInt(0), // filled in below
+        }
+      : undefined;
+  const residualCommitmentA = aResidual
+    ? computeOrderCommitment(BigInt(orderA.ownerKey), aResidualBlinding, aResidual.amountIn, BigInt(orderA.assetIn), BigInt(orderA.assetOut), aResidual.minAmountOut)
+    : ZERO_VALUE;
+  if (aResidual) aResidual.commitment = residualCommitmentA;
+
+  const bResidualAmount = bAmountIn - fillB;
+  const bResidual =
+    bResidualAmount > BigInt(0)
+      ? {
+          amountIn: bResidualAmount,
+          minAmountOut: (bResidualAmount * BigInt(orderB.minAmountOut)) / bAmountIn,
+          commitment: BigInt(0),
+        }
+      : undefined;
+  const residualCommitmentB = bResidual
+    ? computeOrderCommitment(BigInt(orderB.ownerKey), bResidualBlinding, bResidual.amountIn, BigInt(orderB.assetIn), BigInt(orderB.assetOut), bResidual.minAmountOut)
+    : ZERO_VALUE;
+  if (bResidual) bResidual.commitment = residualCommitmentB;
+
+  const side = (
+    order: OrderIntent,
+    outBlinding: bigint,
+    residualBlinding: bigint,
+    residual: { amountIn: bigint; minAmountOut: bigint; commitment: bigint } | undefined,
+    path: { pathElements: bigint[]; pathIndices: boolean[] }
+  ): MatchOrderSide => ({
+    spendingKey: BigInt(order.spendingKey),
+    orderBlinding: BigInt(order.orderBlinding),
     amountIn: BigInt(order.amountIn),
     assetIn: BigInt(order.assetIn),
     assetOut: BigInt(order.assetOut),
     minAmountOut: BigInt(order.minAmountOut),
     pathElements: path.pathElements,
     pathIndices: path.pathIndices,
-    outOwnerKey: BigInt(order.ownerKey),
     outBlinding,
+    residualBlinding,
+    residual,
   });
 
   return {
@@ -57,8 +102,12 @@ export async function assembleMatchProofInputs(
     nullifierHashB,
     outCommitmentA,
     outCommitmentB,
-    a: side(orderA, aOutBlinding, pathA),
-    b: side(orderB, bOutBlinding, pathB),
+    residualCommitmentA,
+    residualCommitmentB,
+    fillA,
+    fillB,
+    a: side(orderA, aOutBlinding, aResidualBlinding, aResidual, pathA),
+    b: side(orderB, bOutBlinding, bResidualBlinding, bResidual, pathB),
   };
 }
 
