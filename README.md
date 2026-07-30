@@ -1,4 +1,4 @@
-# Umbra
+# UMBRA
 
 > A Privacy-Preserving Dark Pool for FAssets on the Flare Network
 
