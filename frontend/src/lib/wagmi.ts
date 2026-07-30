@@ -9,7 +9,7 @@ export const wagmiConfig = createConfig({
   chains: [flareTestnet, flare],
   connectors: [
     injected({ target: 'metaMask' }),
-    coinbaseWallet({ appName: 'Umbra Protocol', appLogoUrl: '' }),
+    coinbaseWallet({ appName: 'Umbra Protocol', appLogoUrl: '/logo.png' }),
     walletConnect({ projectId: WC_PROJECT_ID, showQrModal: true }),
     injected({ target: 'rabby' }),
     injected({ target: 'trust' }),

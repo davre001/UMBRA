@@ -26,6 +26,7 @@ import {
   ArrowDown,
 } from 'lucide-react';
 import Link from 'next/link';
+import { UmbraLogo } from '@/components/shared/logo';
 
 // Fade-in-up animation wrapper — hook-free, uses framer-motion whileInView
 function FadeUp({ children, delay = 0, className = '' }: { children: React.ReactNode; delay?: number; className?: string }) {
@@ -111,12 +112,7 @@ export default function Home() {
             {/* ── TOP NAV ── */}
             <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-10 py-3 sm:py-4 border-b border-white/5 backdrop-blur-xl bg-black/40">
               <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                <div className="h-7 w-7 sm:h-8 sm:w-8 rounded-lg border border-accent-primary/40 bg-accent-primary/10 flex items-center justify-center flex-shrink-0">
-                  <Lock size={13} className="text-accent-primary" />
-                </div>
-                <span className="font-display font-extrabold text-base sm:text-lg tracking-tighter text-text-primary uppercase truncate">
-                  Umbra<span className="text-accent-primary">.</span>
-                </span>
+                <UmbraLogo size={28} textClassName="text-base sm:text-lg" />
               </div>
 
               <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
@@ -173,8 +169,8 @@ export default function Home() {
                 >
                   <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-accent-secondary/20 to-accent-primary/20 opacity-0 group-hover:opacity-100 transition-opacity duration-700 blur" />
                   <div className="h-12 w-12 sm:h-20 sm:w-20 rounded-full border border-accent-primary/30 flex items-center justify-center bg-bg-base relative">
-                    <Lock size={22} className="text-accent-primary animate-pulse sm:hidden" />
-                    <Lock size={32} className="text-accent-primary animate-pulse hidden sm:block" />
+                    <UmbraLogo iconOnly size={36} className="sm:hidden" />
+                    <UmbraLogo iconOnly size={48} className="hidden sm:flex" />
                   </div>
                 </motion.div>
 
@@ -409,12 +405,7 @@ export default function Home() {
             {/* ── FOOTER ── */}
             <footer className="relative z-10 max-w-5xl mx-auto px-4 sm:px-8 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-border-custom/30">
               <div className="flex items-center gap-2">
-                <div className="h-5 w-5 rounded-md border border-accent-primary/40 bg-accent-primary/10 flex items-center justify-center">
-                  <Lock size={9} className="text-accent-primary" />
-                </div>
-                <span className="font-display font-extrabold text-sm tracking-tighter text-text-primary uppercase">
-                  Umbra<span className="text-accent-primary">.</span>
-                </span>
+                <UmbraLogo size={22} textClassName="text-sm" />
                 <span className="text-[10px] text-text-secondary ml-3 hidden sm:block">© 2026 Umbra Protocol.</span>
               </div>
               <div className="flex items-center gap-6">
