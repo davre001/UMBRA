@@ -7,12 +7,12 @@ import { X, Wallet, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { walletIcon, networkIcon, CONNECTOR_ICONS, SUPPORTED_CHAINS } from '@/lib/icons';
 
 const WALLET_META: Record<string, { label: string }> = {
-  metaMask:      { label: 'MetaMask' },
-  coinbaseWallet:{ label: 'Coinbase Wallet' },
-  walletConnect: { label: 'WalletConnect' },
-  rabby:         { label: 'Rabby' },
-  trust:         { label: 'Trust Wallet' },
-  phantom:       { label: 'Phantom' },
+  metaMask:          { label: 'MetaMask' },
+  coinbaseWalletSDK: { label: 'Coinbase Wallet' },
+  walletConnect:     { label: 'WalletConnect' },
+  rabby:             { label: 'Rabby' },
+  trust:             { label: 'Trust Wallet' },
+  phantom:           { label: 'Phantom' },
 };
 
 interface WalletModalProps {
