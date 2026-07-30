@@ -12,7 +12,6 @@ import { nullifierHash as computeNullifierHash } from '@/lib/noteWallet/poseidon
 import { proveWithdraw } from '@/lib/proving/prove';
 import type { StoredNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
-import { Sidebar } from '@/components/shared/sidebar';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { GlowBorder } from '@/components/ui/glow-border';
@@ -296,9 +295,8 @@ export default function ShieldPage() {
     (isWalletConnected && onCoston2 && activeTab === 'withdraw' && (assetNotes.length === 0 || !selectedNoteId));
 
   return (
-    <div className="flex min-h-screen flex-col pt-16 md:pl-16 z-10 relative">
+    <div className="flex min-h-screen flex-col pt-16 z-10 relative">
       <Navbar />
-      <Sidebar />
 
       <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         {/* Header */}

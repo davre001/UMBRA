@@ -7,13 +7,12 @@ import { X, Wallet, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { walletIcon, networkIcon, CONNECTOR_ICONS, SUPPORTED_CHAINS } from '@/lib/icons';
 
 const WALLET_META: Record<string, { label: string }> = {
-  metaMask:      { label: 'MetaMask' },
-  coinbaseWallet:{ label: 'Coinbase Wallet' },
-  walletConnect: { label: 'WalletConnect' },
-  rabby:         { label: 'Rabby' },
-  trust:         { label: 'Trust Wallet' },
-  phantom:       { label: 'Phantom' },
-  injected:      { label: 'Browser Wallet' },
+  metaMask:          { label: 'MetaMask' },
+  coinbaseWalletSDK: { label: 'Coinbase Wallet' },
+  walletConnect:     { label: 'WalletConnect' },
+  rabby:             { label: 'Rabby' },
+  trust:             { label: 'Trust Wallet' },
+  phantom:           { label: 'Phantom' },
 };
 
 interface WalletModalProps {
@@ -47,12 +46,14 @@ export function WalletModal({ open, onClose, onConnected }: WalletModalProps) {
     onClose();
   };
 
-  // Targeted injected connectors carry their own id (rabby, trust, …); the bare
-  // injected() fallback and EIP-6963 discovery can still surface the same wallet twice.
+  // Every wallet is a named connector (metaMask, rabby, …). The generic
+  // `injected` fallback is deliberately excluded, and EIP-6963 discovery can
+  // surface the same wallet a second time, so dedupe on id and name.
   const unique = React.useMemo(() => {
     const seen = new Set<string>();
     return connectors.filter(c => {
-      const key = c.id === 'injected' ? 'browser' : c.id.toLowerCase();
+      if (c.id === 'injected') return false;
+      const key = c.id.toLowerCase();
       const nameKey = c.name.toLowerCase();
       if (seen.has(key) || seen.has(nameKey)) return false;
       seen.add(key);
@@ -176,20 +177,20 @@ export function WalletModal({ open, onClose, onConnected }: WalletModalProps) {
                       </div>
                     )}
 
-                    {/* Supported networks */}
+                    {/* Supported network */}
                     <div className="mt-4 pt-4 border-t border-border-custom/40">
                       <p className="text-[9px] text-text-secondary uppercase tracking-widest mb-2.5 text-center">
-                        Supported Networks
+                        Supported Network
                       </p>
                       <div className="flex items-center justify-center flex-wrap gap-2">
                         {SUPPORTED_CHAINS.map((chain) => (
                           <div
                             key={chain.slug}
                             title={chain.name}
-                            className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border-custom/50 bg-surface/20"
+                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-white/10 bg-black/40 backdrop-blur-xl"
                           >
-                            <img src={networkIcon(chain.slug)} alt={chain.name} className="h-4 w-4 rounded-full" />
-                            <span className="text-[9px] text-text-secondary">{chain.name}</span>
+                            <img src={networkIcon(chain.slug)} alt={chain.name} className="h-4 w-4" />
+                            <span className="text-[9px] text-text-primary uppercase tracking-widest">{chain.name}</span>
                           </div>
                         ))}
                       </div>

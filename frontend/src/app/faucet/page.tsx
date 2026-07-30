@@ -3,7 +3,6 @@
 import React, { useState } from 'react';
 import { useApp } from '@/providers/app-provider';
 import { Navbar } from '@/components/shared/navbar';
-import { Sidebar } from '@/components/shared/sidebar';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { GlowBorder } from '@/components/ui/glow-border';
@@ -18,7 +17,7 @@ import {
   Clock,
 } from 'lucide-react';
 import Link from 'next/link';
-import { tokenIcon, SUPPORTED_CHAINS } from '@/lib/icons';
+import { tokenIcon, networkIcon, SUPPORTED_CHAINS } from '@/lib/icons';
 import { formatAddress } from '@/lib/utils';
 
 const FLARE_FAUCET_URL = 'https://faucet.flare.network/';
@@ -45,9 +44,8 @@ export default function FaucetPage() {
 
   // Reachable from the landing header too, so no vault gate — only a wallet gate.
   return (
-    <div className={`flex min-h-screen flex-col z-10 relative ${isEntered ? 'pt-16 md:pl-16' : 'pt-8'}`}>
+    <div className={`flex min-h-screen flex-col z-10 relative ${isEntered ? 'pt-16' : 'pt-8'}`}>
       <Navbar />
-      <Sidebar />
 
       <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         {/* Back to gateway — only when the vault chrome is hidden */}
@@ -61,8 +59,8 @@ export default function FaucetPage() {
           </Link>
         )}
 
-        {/* Header */}
-        <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+        {/* Header — black glass panel */}
+        <div className="mb-8 rounded-2xl border border-white/15 bg-black/60 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.08)] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight text-text-primary font-display uppercase flex items-center gap-2.5">
               <Droplets size={22} className="text-accent-primary" />
@@ -78,7 +76,7 @@ export default function FaucetPage() {
             {isWalletConnected ? (
               <button
                 onClick={handleCopyAddress}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-success-state/20 bg-success-state/5 text-xs text-success-state font-mono cursor-pointer hover:bg-success-state/10 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-success-state/20 bg-black/40 backdrop-blur-xl text-xs text-success-state font-mono cursor-pointer hover:bg-success-state/10 transition-colors"
               >
                 {copied ? <Check size={14} /> : <ShieldCheck size={14} />}
                 {formatAddress(walletAddress || '')}
@@ -95,7 +93,7 @@ export default function FaucetPage() {
 
         {/* Wallet gate banner */}
         {!isWalletConnected && (
-          <GlassCard className="p-5 mb-8 flex flex-col sm:flex-row sm:items-center gap-4 justify-between" hoverGlow={false}>
+          <GlassCard className="p-5 mb-8 flex flex-col sm:flex-row sm:items-center gap-4 justify-between rounded-2xl border-white/15 bg-black/60 backdrop-blur-xl" hoverGlow={false}>
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-lg border border-accent-primary/20 bg-accent-primary/5 flex-shrink-0">
                 <Wallet size={16} className="text-accent-primary" />
@@ -108,51 +106,59 @@ export default function FaucetPage() {
               </div>
             </div>
 
+            {/* Supported network */}
             <div className="flex items-center gap-2 flex-shrink-0">
               <span className="text-[9px] text-text-secondary uppercase tracking-widest hidden sm:inline">Network</span>
-              <img
-                src={`https://cdn.jsdelivr.net/gh/0xa3k5/web3icons@main/packages/core/src/svgs/networks/branded/${SUPPORTED_CHAINS[0].slug}.svg`}
-                alt={SUPPORTED_CHAINS[0].name}
-                title="Flare — Coston2 Testnet"
-                className="h-6 w-6 rounded-full ring-2 ring-bg-base bg-surface"
-              />
+              {SUPPORTED_CHAINS.map((chain) => (
+                <div
+                  key={chain.slug}
+                  className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-black/40 backdrop-blur-xl px-2.5 py-1.5"
+                >
+                  <img src={networkIcon(chain.slug)} alt={chain.name} className="h-5 w-5" />
+                  <span className="text-[10px] text-text-primary uppercase tracking-widest">{chain.name}</span>
+                </div>
+              ))}
             </div>
           </GlassCard>
         )}
 
-        {/* Asset grid — real Coston2 assets, deep-linked to Flare's faucet */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-          {REAL_ASSETS.map((asset) => (
-            <GlassCard key={asset.symbol} className="p-5 flex flex-col h-full" hoverGlow={false}>
-              <div className="flex items-center gap-3 mb-5">
-                <img
-                  src={tokenIcon(asset.icon)}
-                  alt={asset.symbol}
-                  className="h-10 w-10 rounded-full bg-surface/40 border border-border-custom flex-shrink-0"
-                />
-                <div className="min-w-0">
-                  <div className="font-mono text-sm font-bold text-text-primary">{asset.symbol}</div>
-                  <div className="text-[10px] text-text-secondary uppercase tracking-wider truncate">{asset.name}</div>
-                </div>
-              </div>
+        {/* Asset grid — nested inside an outer black glass shell, real Coston2 assets deep-linked to Flare's faucet */}
+        <div className="rounded-3xl border border-white/15 bg-black/60 backdrop-blur-xl shadow-[0_8px_40px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.08)] p-5 sm:p-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {REAL_ASSETS.map((asset) => (
+              <GlowBorder key={asset.symbol} active={false} glowColor="cyan">
+                <GlassCard className="p-5 flex flex-col h-full rounded-2xl border-white/10 bg-white/[0.07] backdrop-blur-md">
+                  <div className="flex items-center gap-3 mb-5">
+                    <img
+                      src={tokenIcon(asset.icon)}
+                      alt={asset.symbol}
+                      className="h-10 w-10 flex-shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <div className="font-mono text-sm font-bold text-text-primary">{asset.symbol}</div>
+                      <div className="text-[10px] text-text-secondary uppercase tracking-wider truncate">{asset.name}</div>
+                    </div>
+                  </div>
 
-              <div className="rounded-lg border border-border-custom bg-surface/20 px-3 py-3 mb-5">
-                <span className="text-[9px] text-text-secondary uppercase tracking-widest block mb-1">Source</span>
-                <span className="font-mono text-xs font-semibold text-accent-primary">Official Flare Faucet</span>
-              </div>
+                  <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-3 mb-5">
+                    <span className="text-[9px] text-text-secondary uppercase tracking-widest block mb-1">Source</span>
+                    <span className="font-mono text-xs font-semibold text-accent-primary">Official Flare Faucet</span>
+                  </div>
 
-              <div className="mt-auto">
-                <a href={FLARE_FAUCET_URL} target="_blank" rel="noopener noreferrer">
-                  <AnimatedButton variant="primary" size="sm" fullWidth className="rounded-lg">
-                    <span className="flex items-center gap-1.5">
-                      <ExternalLink size={13} />
-                      Open Faucet
-                    </span>
-                  </AnimatedButton>
-                </a>
-              </div>
-            </GlassCard>
-          ))}
+                  <div className="mt-auto">
+                    <a href={FLARE_FAUCET_URL} target="_blank" rel="noopener noreferrer">
+                      <AnimatedButton variant="primary" size="sm" fullWidth className="rounded-lg">
+                        <span className="flex items-center gap-1.5">
+                          <ExternalLink size={13} />
+                          Open Faucet
+                        </span>
+                      </AnimatedButton>
+                    </a>
+                  </div>
+                </GlassCard>
+              </GlowBorder>
+            ))}
+          </div>
         </div>
 
         {/* USDC — not yet available on Coston2 */}

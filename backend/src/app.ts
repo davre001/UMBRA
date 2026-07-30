@@ -1,5 +1,7 @@
 import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
+import swaggerUi from "swagger-ui-express";
+import { openapiSpec } from "./docs/openapi";
 import { darkEngineRouter } from "./dark-engine/dark-engine.routes";
 import { pricingRouter } from "./pricing/pricing.routes";
 import { complianceRouter } from "./compliance/compliance.routes";
@@ -12,6 +14,8 @@ export function createApp() {
   app.use(express.json());
 
   app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
 
   app.use("/api/dark-engine", darkEngineRouter);
   app.use("/api/pricing", pricingRouter);

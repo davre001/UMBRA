@@ -8,6 +8,7 @@ import { useApp } from '@/providers/app-provider';
 import { Bell, Wallet, ShieldAlert, ShieldCheck, ChevronDown, Menu, X, Check, ArrowRight } from 'lucide-react';
 import { formatAddress } from '@/lib/utils';
 import { AnimatedButton } from '@/components/ui/animated-button';
+import { UmbraLogo } from '@/components/shared/logo';
 
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
@@ -84,10 +85,7 @@ export const Navbar: React.FC = () => {
                   window.location.replace('/');
                 }}
               >
-                <span className="h-6 w-6 rounded-full bg-gradient-to-tr from-accent-secondary to-accent-primary animate-pulse" />
-                <span className="font-display text-lg font-bold tracking-widest text-text-primary">
-                  UMBRA
-                </span>
+                <UmbraLogo size={32} />
               </a>
             </motion.div>
 

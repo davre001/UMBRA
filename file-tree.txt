@@ -10,6 +10,8 @@ UMBRA/
 │   │   ├── dark-engine/
 │   │   │   ├── dark-engine.routes.ts
 │   │   │   └── matcher.ts
+│   │   ├── docs/
+│   │   │   └── openapi.ts
 │   │   ├── portfolio/
 │   │   │   ├── portfolio.routes.ts
 │   │   │   └── portfolio.service.ts
@@ -51,6 +53,21 @@ UMBRA/
 ├── contract/
 ├── frontend/
 │   ├── public/
+│   │   ├── icons/
+│   │   │   ├── networks/
+│   │   │   │   └── flare.svg
+│   │   │   ├── tokens/
+│   │   │   │   ├── flr.svg
+│   │   │   │   ├── usdc.svg
+│   │   │   │   ├── usdt.svg
+│   │   │   │   └── xrp.svg
+│   │   │   └── wallets/
+│   │   │       ├── coinbase.svg
+│   │   │       ├── metamask.svg
+│   │   │       ├── phantom.svg
+│   │   │       ├── rabby.svg
+│   │   │       ├── trust.svg
+│   │   │       └── wallet-connect.svg
 │   │   ├── file.svg
 │   │   ├── globe.svg
 │   │   ├── next.svg
@@ -58,6 +75,8 @@ UMBRA/
 │   │   └── window.svg
 │   ├── src/
 │   │   ├── app/
+│   │   │   ├── faucet/
+│   │   │   │   └── page.tsx
 │   │   │   ├── pay/
 │   │   │   │   └── page.tsx
 │   │   │   ├── portfolio/
@@ -76,6 +95,7 @@ UMBRA/
 │   │   │   ├── shared/
 │   │   │   │   ├── navbar.tsx
 │   │   │   │   ├── sidebar.tsx
+│   │   │   │   ├── wallet-modal.tsx
 │   │   │   │   └── web-gl-background.tsx
 │   │   │   └── ui/
 │   │   │       ├── animated-button.tsx
@@ -88,9 +108,12 @@ UMBRA/
 │   │   │       ├── tooltip.tsx
 │   │   │       └── web-gl-shader.tsx
 │   │   ├── lib/
-│   │   │   └── utils.ts
+│   │   │   ├── icons.ts
+│   │   │   ├── utils.ts
+│   │   │   └── wagmi.ts
 │   │   └── providers/
-│   │       └── app-provider.tsx
+│   │       ├── app-provider.tsx
+│   │       └── providers.tsx
 │   ├── .gitignore
 │   ├── AGENTS.md
 │   ├── CLAUDE.md

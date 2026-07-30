@@ -4,10 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useApp } from '@/providers/app-provider';
 import { Navbar } from '@/components/shared/navbar';
-import { Sidebar } from '@/components/shared/sidebar';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { GlowBorder } from '@/components/ui/glow-border';
+import { CountUp } from '@/components/ui/count-up';
 import {
   Shield,
   Cpu,
@@ -22,10 +22,12 @@ import {
   GitBranch,
   BookOpen,
   Droplets,
-  Zap,
+  Send,
+  EyeOff,
   ArrowDown,
 } from 'lucide-react';
 import Link from 'next/link';
+import { UmbraLogo } from '@/components/shared/logo';
 
 // Fade-in-up animation wrapper — hook-free, uses framer-motion whileInView
 function FadeUp({ children, delay = 0, className = '' }: { children: React.ReactNode; delay?: number; className?: string }) {
@@ -109,75 +111,67 @@ export default function Home() {
           >
 
             {/* ── TOP NAV ── */}
-            <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-6 sm:px-10 py-4 border-b border-white/5 backdrop-blur-xl bg-black/40">
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-lg border border-accent-primary/40 bg-accent-primary/10 flex items-center justify-center">
-                  <Lock size={14} className="text-accent-primary" />
-                </div>
-                <span className="font-display font-extrabold text-lg tracking-tighter text-text-primary uppercase">
-                  Umbra<span className="text-accent-primary">.</span>
-                </span>
+            <header className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-2 px-3 sm:px-10 py-3 sm:py-4 border-b border-white/5 backdrop-blur-xl bg-black/40">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                <UmbraLogo size={28} textClassName="text-base sm:text-lg" />
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
                 <a
                   href="https://docs.umbraprotocol.io"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border-custom text-xs text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider"
+                  className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border-custom text-[11px] text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider"
                 >
-                  <BookOpen size={12} />
+                  <BookOpen size={11} />
                   Docs
                 </a>
                 <Link
                   href="/faucet"
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border-custom text-xs text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider"
+                  className="flex items-center gap-1 px-2 sm:px-2.5 py-1 rounded-lg border border-border-custom text-[10px] sm:text-[11px] text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider whitespace-nowrap"
                 >
-                  <Droplets size={12} />
+                  <Droplets size={11} />
                   Faucet
                 </Link>
-                <AnimatedButton variant="primary" size="sm" onClick={handleEnterVault} disabled={transitioning}>
+                <AnimatedButton
+                  variant="primary"
+                  size="sm"
+                  onClick={handleEnterVault}
+                  disabled={transitioning}
+                  className="px-2 sm:px-2.5 py-1 text-[10px] sm:text-[11px] whitespace-nowrap"
+                >
                   {transitioning ? (
-                    <span className="flex items-center gap-1.5"><RefreshCw size={12} className="animate-spin" />Loading...</span>
+                    <span className="flex items-center gap-1"><RefreshCw size={11} className="animate-spin" />Loading</span>
                   ) : (
-                    <span className="flex items-center gap-1.5">Launch App <ArrowRight size={12} /></span>
+                    <span className="flex items-center gap-1">Launch App <ArrowRight size={11} /></span>
                   )}
                 </AnimatedButton>
               </div>
             </header>
 
             {/* ── HERO ── */}
-            <section className="relative flex flex-col items-center justify-center min-h-screen px-4 pt-20 z-10">
+            <section className="relative flex flex-col items-center justify-start sm:justify-center min-h-screen px-4 pt-24 sm:pt-20 z-10 overflow-x-hidden">
               <div className="absolute inset-0 grid-overlay opacity-20 z-0 pointer-events-none" />
 
               <motion.div
                 animate={{ rotate: 360 }}
                 transition={{ duration: 25, repeat: Infinity, ease: 'linear' }}
-                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full border border-dashed border-accent-primary/10 opacity-30 pointer-events-none blur-[1px]"
+                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[320px] h-[320px] sm:w-[500px] sm:h-[500px] rounded-full border border-dashed border-accent-primary/10 opacity-30 pointer-events-none blur-[1px]"
               />
 
-              <div className="relative text-center flex flex-col items-center max-w-3xl z-10">
-                {/* Status badge */}
-                <motion.div
-                  initial={{ opacity: 0, y: -12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.1, duration: 0.6 }}
-                  className="mb-8 inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-accent-primary/30 bg-accent-primary/5 text-[10px] text-accent-primary uppercase tracking-widest font-sans"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent-primary animate-pulse" />
-                  Live on Flare Network Testnet
-                </motion.div>
+              <div className="relative text-center flex flex-col items-center w-full max-w-3xl z-10">
 
                 {/* Lock icon */}
                 <motion.div
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   transition={{ duration: 1, ease: 'easeOut' }}
-                  className="mb-8 p-6 rounded-full border border-border-custom bg-surface/30 backdrop-blur-xl relative group"
+                  className="mb-4 sm:mb-8 p-3 sm:p-6 rounded-full border border-border-custom bg-surface/30 backdrop-blur-xl relative group"
                 >
                   <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-accent-secondary/20 to-accent-primary/20 opacity-0 group-hover:opacity-100 transition-opacity duration-700 blur" />
-                  <div className="h-20 w-20 rounded-full border border-accent-primary/30 flex items-center justify-center bg-bg-base relative">
-                    <Lock size={32} className="text-accent-primary animate-pulse" />
+                  <div className="h-12 w-12 sm:h-20 sm:w-20 rounded-full border border-accent-primary/30 flex items-center justify-center bg-bg-base relative">
+                    <UmbraLogo iconOnly size={36} className="sm:hidden" />
+                    <UmbraLogo iconOnly size={48} className="hidden sm:flex" />
                   </div>
                 </motion.div>
 
@@ -185,7 +179,7 @@ export default function Home() {
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.2, duration: 0.8 }}
-                  className="font-display text-5xl sm:text-7xl font-extrabold tracking-tighter text-text-primary mb-6 uppercase cursor-default select-none filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)] drop-shadow-[0_12px_24px_rgba(0,0,0,0.95)]"
+                  className="font-display text-[2.1rem] leading-[1.05] sm:text-7xl sm:leading-none font-extrabold tracking-tighter text-text-primary mb-4 sm:mb-6 uppercase cursor-default select-none break-words max-w-full filter drop-shadow-[0_4px_12px_rgba(0,0,0,0.95)] drop-shadow-[0_12px_24px_rgba(0,0,0,0.95)]"
                 >
                   Private Trading.<br />
                   <span className="text-accent-primary">Without Compromise.</span>
@@ -195,9 +189,9 @@ export default function Home() {
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.4, duration: 0.8 }}
-                  className="font-sans text-sm sm:text-base text-text-primary max-w-lg mb-10 font-semibold leading-relaxed select-none filter drop-shadow-[0_2px_4px_rgba(0,0,0,1)]"
+                  className="font-sans text-sm sm:text-base text-text-primary max-w-2xl mb-6 sm:mb-10 font-light leading-relaxed select-none filter drop-shadow-[0_2px_4px_rgba(0,0,0,1)]"
                 >
-                  Trustless dark pool liquidity, stealth addresses, and zero-knowledge proving on Flare Network.
+                  Trade without leaving a trace. Umbra pairs zero-knowledge proofs with stealth addresses and TEE-matched dark pool liquidity, so your positions, counterparties, and balances stay private — while settling openly on Flare.
                 </motion.p>
 
                 <motion.div
@@ -208,20 +202,20 @@ export default function Home() {
                 >
                   <AnimatedButton
                     variant="primary"
-                    size="lg"
+                    size="sm"
                     onClick={handleEnterVault}
                     disabled={transitioning}
-                    className="px-10 py-4 font-bold border border-accent-primary/30 rounded-xl"
+                    className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest border border-accent-primary/30 rounded-xl"
                   >
                     {transitioning ? (
-                      <span className="flex items-center gap-2">
-                        <RefreshCw className="animate-spin" size={16} />
+                      <span className="flex items-center gap-1.5">
+                        <RefreshCw className="animate-spin" size={13} />
                         Opening Secure Vault...
                       </span>
                     ) : (
-                      <span className="flex items-center gap-2">
+                      <span className="flex items-center gap-1.5">
                         Initiate Protocol Session
-                        <ArrowRight size={16} />
+                        <ArrowRight size={13} />
                       </span>
                     )}
                   </AnimatedButton>
@@ -229,9 +223,9 @@ export default function Home() {
                     href="https://docs.umbraprotocol.io"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-6 py-3 rounded-xl border border-border-custom text-sm text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all"
+                    className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border-custom text-xs text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all"
                   >
-                    <BookOpen size={16} />
+                    <BookOpen size={13} />
                     Read the Docs
                   </a>
                 </motion.div>
@@ -252,7 +246,7 @@ export default function Home() {
             </section>
 
             {/* ── STATS STRIP ── */}
-            <section className="relative z-10 border-y border-border-custom/40 bg-black/60 backdrop-blur-sm py-8 px-4">
+            <section className="relative z-10 border-y border-border-custom/40 bg-black/75 backdrop-blur-sm py-8 px-4">
               <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
                 {[
                   { label: 'Total Shielded Value', value: '$84.2M' },
@@ -261,7 +255,10 @@ export default function Home() {
                   { label: 'Compliance Rate', value: '100%' },
                 ].map((s, i) => (
                   <FadeUp key={i} delay={i * 0.1}>
-                    <div className="text-2xl sm:text-3xl font-display font-extrabold text-text-primary tracking-tight">{s.value}</div>
+                    <CountUp
+                      value={s.value}
+                      className="block text-2xl sm:text-3xl font-display font-extrabold text-text-primary tracking-tight tabular-nums"
+                    />
                     <div className="text-[10px] text-accent-primary uppercase tracking-widest mt-1">{s.label}</div>
                   </FadeUp>
                 ))}
@@ -289,7 +286,7 @@ export default function Home() {
                   },
                 ].map((f, i) => (
                   <FadeUp key={i} delay={i * 0.1}>
-                    <GlassCard className="p-6 h-full flex flex-col" hoverGlow>
+                    <GlassCard className="p-6 h-full flex flex-col bg-surface/65" hoverGlow>
                       <div className="p-2.5 rounded-lg bg-accent-primary/10 border border-accent-primary/20 w-fit mb-4">
                         <f.icon size={18} className="text-accent-primary" />
                       </div>
@@ -320,28 +317,32 @@ export default function Home() {
                     },
                     {
                       step: '02',
-                      icon: Cpu,
+                      icon: Send,
                       title: 'Trade in the Dark Pool',
                       desc: 'Swap inside Trusted Execution Environments. Orders match off-chain in SGX enclaves and settle atomically on Flare.',
                     },
                     {
                       step: '03',
-                      icon: Zap,
+                      icon: EyeOff,
                       title: 'Withdraw Privately',
                       desc: 'Funds are released to a stealth address with no on-chain link to the original deposit. Gasless relayer pays the fee.',
                     },
                   ].map((item, i) => (
                     <FadeUp key={i} delay={i * 0.12}>
-                      <div className="flex flex-col p-6 rounded-xl border border-border-custom/50 bg-surface/20 hover:border-accent-primary/30 transition-all duration-300 h-full">
+                      <motion.div
+                        whileHover={{ y: -4 }}
+                        transition={{ type: 'spring', stiffness: 300, damping: 22 }}
+                        className="group flex flex-col p-6 rounded-xl border border-border-custom/50 bg-surface/65 hover:bg-surface/80 hover:border-accent-primary/50 hover:shadow-[0_12px_32px_rgba(0,0,0,0.55)] transition-colors duration-300 h-full cursor-pointer"
+                      >
                         <div className="flex items-start justify-between mb-4">
-                          <div className="p-2.5 rounded-lg bg-accent-primary/10 border border-accent-primary/20">
+                          <div className="p-2.5 rounded-lg bg-accent-primary/10 border border-accent-primary/20 group-hover:bg-accent-primary/20 group-hover:border-accent-primary/40 transition-colors">
                             <item.icon size={16} className="text-accent-primary" />
                           </div>
-                          <span className="font-display text-3xl font-extrabold text-border-custom/50 tracking-tight">{item.step}</span>
+                          <span className="font-display text-3xl font-extrabold text-text-primary tracking-tight">{item.step}</span>
                         </div>
                         <h3 className="font-display text-xs font-bold uppercase tracking-wider text-text-primary mb-2">{item.title}</h3>
                         <p className="text-[10px] text-text-secondary leading-relaxed font-light">{item.desc}</p>
-                      </div>
+                      </motion.div>
                     </FadeUp>
                   ))}
                 </div>
@@ -358,17 +359,21 @@ export default function Home() {
               </FadeUp>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 {[
-                  { name: 'Noir', role: 'ZK Circuits' },
+                  { name: 'Next.js 16', role: 'App Router' },
+                  { name: 'React 19', role: 'UI Runtime' },
+                  { name: 'TypeScript', role: 'Type Safety' },
+                  { name: 'Tailwind v4', role: 'Styling' },
+                  { name: 'wagmi + viem', role: 'EVM Client' },
                   { name: 'Flare', role: 'Settlement' },
+                  { name: 'Express', role: 'Protocol API' },
+                  { name: 'Noir + WASM', role: 'ZK Proving' },
                   { name: 'Intel SGX', role: 'TEE Matching' },
                   { name: 'FTSO', role: 'Price Oracle' },
-                  { name: 'WebGPU', role: 'Client Prover' },
-                  { name: 'WASM', role: 'Prover Runtime' },
-                  { name: 'EVM', role: 'Smart Contracts' },
-                  { name: 'ECDH', role: 'Stealth Keys' },
+                  { name: 'FDC', role: 'Compliance' },
+                  { name: 'WebAuthn', role: 'Passkey Auth' },
                 ].map((t, i) => (
                   <FadeUp key={i} delay={(i % 4) * 0.07}>
-                    <div className="p-4 rounded-xl border border-border-custom/40 bg-surface/10 hover:border-accent-primary/20 hover:bg-surface/30 transition-all text-center">
+                    <div className="p-4 rounded-xl border border-border-custom/60 bg-surface/65 hover:border-accent-primary/40 hover:bg-surface/80 transition-all text-center">
                       <div className="font-display text-sm font-extrabold uppercase tracking-tight text-accent-primary mb-1">{t.name}</div>
                       <div className="text-[9px] text-text-secondary uppercase tracking-widest">{t.role}</div>
                     </div>
@@ -378,7 +383,7 @@ export default function Home() {
             </section>
 
             {/* ── CTA BANNER ── */}
-            <section className="relative z-10 bg-black/60 backdrop-blur-sm border-y border-border-custom/30 py-20 px-4">
+            <section className="relative z-10 bg-black/75 backdrop-blur-sm border-y border-border-custom/30 py-20 px-4">
               <FadeUp className="max-w-2xl mx-auto text-center">
                 <div className="mb-5 inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-accent-primary/30 bg-accent-primary/5 text-[10px] text-accent-primary uppercase tracking-widest">
                   <span className="h-1.5 w-1.5 rounded-full bg-accent-primary animate-pulse" />
@@ -409,22 +414,16 @@ export default function Home() {
             {/* ── FOOTER ── */}
             <footer className="relative z-10 max-w-5xl mx-auto px-4 sm:px-8 py-8 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-border-custom/30">
               <div className="flex items-center gap-2">
-                <div className="h-5 w-5 rounded-md border border-accent-primary/40 bg-accent-primary/10 flex items-center justify-center">
-                  <Lock size={9} className="text-accent-primary" />
-                </div>
-                <span className="font-display font-extrabold text-sm tracking-tighter text-text-primary uppercase">
-                  Umbra<span className="text-accent-primary">.</span>
-                </span>
+                <UmbraLogo size={22} textClassName="text-sm" />
                 <span className="text-[10px] text-text-secondary ml-3 hidden sm:block">© 2026 Umbra Protocol.</span>
               </div>
               <div className="flex items-center gap-6">
                 <a href="https://docs.umbraprotocol.io" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1 transition-colors">
                   <BookOpen size={10} />Docs
                 </a>
-                <a href="https://github.com/umbraprotocol" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1 transition-colors">
+                <a href="https://github.com/davre001/UMBRA" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1 transition-colors">
                   <GitBranch size={10} />GitHub
                 </a>
-                <a href="#" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest transition-colors">Audits</a>
               </div>
             </footer>
 
@@ -437,10 +436,9 @@ export default function Home() {
             key="app-dashboard"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="flex min-h-screen flex-col pt-16 md:pl-16 z-10 relative"
+            className="flex min-h-screen flex-col pt-16 z-10 relative"
           >
             <Navbar />
-            <Sidebar />
 
             <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
               {/* Dashboard Hero Header */}
@@ -453,11 +451,7 @@ export default function Home() {
                     Zero-Knowledge Dark Pool Liquidity on Flare
                   </p>
                 </div>
-                {!isWalletConnected ? (
-                  <AnimatedButton variant="primary" size="sm" onClick={connectWallet}>
-                    Connect Wallet
-                  </AnimatedButton>
-                ) : (
+                {isWalletConnected && (
                   <div className="text-xs text-text-secondary flex items-center gap-2">
                     <span className="h-2 w-2 bg-success-state rounded-full animate-ping" />
                     Secure Sandbox Active
@@ -478,9 +472,10 @@ export default function Home() {
                       {stat.name}
                     </span>
                     <div className="mt-2">
-                      <span className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary font-display">
-                        {stat.value}
-                      </span>
+                      <CountUp
+                        value={stat.value}
+                        className="text-xl sm:text-2xl font-bold tracking-tight text-text-primary font-display tabular-nums"
+                      />
                       <span className={`block text-[10px] mt-1 font-light ${stat.color === 'success' ? 'text-success-state' : 'text-accent-primary'}`}>
                         {stat.change}
                       </span>
@@ -632,8 +627,7 @@ export default function Home() {
                   <a href="https://docs.umbraprotocol.io" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1">
                     Documentation <ExternalLink size={10} />
                   </a>
-                  <a href="#" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest">Audits</a>
-                  <a href="https://github.com/umbraprotocol" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest">
+                  <a href="https://github.com/davre001/UMBRA" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest">
                     GitHub
                   </a>
                 </div>
