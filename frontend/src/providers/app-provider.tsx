@@ -58,7 +58,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const handleSetEntered = (val: boolean) => {
     setIsEntered(val);
     if (val) {
-      addNotification('Secure Vault Session', 'Sanitized TEE connection established.', 'success');
+      addNotification('Secure Vault Session', 'Vault interface unlocked.', 'success');
     }
   };
 

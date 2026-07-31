@@ -147,7 +147,7 @@ export default function Home() {
               transition={{ delay: 0.4, duration: 0.8 }}
               className="font-sans text-sm sm:text-base text-text-primary max-w-2xl mb-6 sm:mb-10 font-light leading-relaxed select-none filter drop-shadow-[0_2px_4px_rgba(0,0,0,1)]"
             >
-              Trade without leaving a trace. Umbra pairs zero-knowledge proofs with stealth addresses and TEE-matched dark pool liquidity, so your positions, counterparties, and balances stay private — while settling openly on Flare.
+              Trade without leaving a trace. Umbra pairs zero-knowledge proofs with stealth addresses and a privately-matched dark pool, so your positions, counterparties, and balances stay private — while match correctness and settlement are verified openly on Flare.
             </motion.p>
 
             <motion.div
@@ -275,7 +275,7 @@ export default function Home() {
                   step: '02',
                   icon: Send,
                   title: 'Trade in the Dark Pool',
-                  desc: 'Swap inside Trusted Execution Environments. Orders match off-chain in SGX enclaves and settle atomically on Flare.',
+                  desc: 'Orders match off-chain against a shared order book. A zero-knowledge proof verifies the match was computed correctly before it settles atomically on Flare.',
                 },
                 {
                   step: '03',
@@ -323,7 +323,7 @@ export default function Home() {
               { name: 'Flare', role: 'Settlement' },
               { name: 'Express', role: 'Protocol API' },
               { name: 'Noir + WASM', role: 'ZK Proving' },
-              { name: 'Intel SGX', role: 'TEE Matching' },
+              { name: 'AWS Lambda', role: 'Match Proving' },
               { name: 'FTSO', role: 'Price Oracle' },
               { name: 'FDC', role: 'Compliance' },
               { name: 'WebAuthn', role: 'Passkey Auth' },
