@@ -19,6 +19,7 @@ import {
   Send,
   EyeOff,
   ArrowDown,
+  Wallet,
 } from 'lucide-react';
 import Link from 'next/link';
 import { UmbraLogo } from '@/components/shared/logo';
@@ -39,7 +40,7 @@ function FadeUp({ children, delay = 0, className = '' }: { children: React.React
 }
 
 export default function Home() {
-  const { isEntered, setIsEntered } = useApp();
+  const { isEntered, setIsEntered, isWalletConnected, connectWallet } = useApp();
   const [transitioning, setTransitioning] = useState(false);
   const router = useRouter();
 
@@ -354,14 +355,16 @@ export default function Home() {
             <AnimatedButton
               variant="primary"
               size="lg"
-              onClick={handleEnterVault}
+              onClick={isWalletConnected ? handleEnterVault : connectWallet}
               disabled={transitioning}
               className="px-10 py-4 font-bold"
             >
               {transitioning ? (
                 <span className="flex items-center gap-2"><RefreshCw className="animate-spin" size={16} />Loading...</span>
-              ) : (
+              ) : isWalletConnected ? (
                 <span className="flex items-center gap-2">Launch Protocol <ArrowRight size={16} /></span>
+              ) : (
+                <span className="flex items-center gap-2"><Wallet size={16} />Connect Wallet</span>
               )}
             </AnimatedButton>
           </FadeUp>

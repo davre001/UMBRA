@@ -85,6 +85,17 @@ body {
   text-shadow: 0 0 15px rgba(255, 255, 255, 0.4);
 }
 
+/* Spinner arrows sit under the absolutely-positioned token symbol on amount inputs */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinner {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
 
 
 /* Custom Grid overlay */

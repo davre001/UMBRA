@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAccount, useDisconnect } from 'wagmi';
 
 type Notification = {
@@ -18,10 +19,13 @@ type AppContextType = {
   isWalletConnected: boolean;
   walletAddress: string | null;
   connectWallet: () => void;   // now opens the modal — set externally
+  requestDisconnect: () => void;
   disconnectWallet: () => void;
   // Modal control
   walletModalOpen: boolean;
   setWalletModalOpen: (open: boolean) => void;
+  disconnectModalOpen: boolean;
+  setDisconnectModalOpen: (open: boolean) => void;
   // Notifications
   notifications: Notification[];
   addNotification: (title: string, message: string, type?: Notification['type']) => void;
@@ -38,10 +42,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [anonymityScore, setAnonymityScore] = useState<number>(85);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
+  const [disconnectModalOpen, setDisconnectModalOpen] = useState(false);
 
   // Real wallet state from wagmi
   const { address, isConnected } = useAccount();
   const { disconnect } = useDisconnect();
+  const router = useRouter();
 
   // Notify on connect/disconnect
   useEffect(() => {
@@ -64,9 +70,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const connectWallet = () => setWalletModalOpen(true);
 
+  const requestDisconnect = () => setDisconnectModalOpen(true);
+
   const disconnectWallet = () => {
+    setDisconnectModalOpen(false);
+    setWalletModalOpen(false);
     disconnect();
     addNotification('Wallet Disconnected', 'Secure connection terminated.', 'warning');
+    // End the vault session and return to the gateway so the next connect starts clean
+    setIsEntered(false);
+    router.push('/');
   };
 
   const addNotification = (title: string, message: string, type: Notification['type'] = 'info') => {
@@ -89,9 +102,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isWalletConnected: isConnected,
       walletAddress: address ?? null,
       connectWallet,
+      requestDisconnect,
       disconnectWallet,
       walletModalOpen,
       setWalletModalOpen,
+      disconnectModalOpen,
+      setDisconnectModalOpen,
       notifications,
       addNotification,
       clearNotifications,

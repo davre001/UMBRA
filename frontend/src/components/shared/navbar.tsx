@@ -18,7 +18,7 @@ export const Navbar: React.FC = () => {
     isWalletConnected,
     walletAddress,
     connectWallet,
-    disconnectWallet,
+    requestDisconnect,
     notifications,
     clearNotifications
   } = useApp();
@@ -211,7 +211,7 @@ export const Navbar: React.FC = () => {
                   {formatAddress(walletAddress || '')}
                 </div>
                 <button
-                  onClick={disconnectWallet}
+                  onClick={requestDisconnect}
                   className="text-xs text-text-secondary hover:text-text-primary transition-all underline cursor-pointer"
                 >
                   Disconnect
@@ -276,7 +276,7 @@ export const Navbar: React.FC = () => {
                 {isWalletConnected ? (
                   <div className="flex items-center justify-between bg-accent-primary/5 p-3 rounded-lg border border-accent-primary/10">
                     <span className="text-xs font-mono text-accent-primary">{formatAddress(walletAddress || '')}</span>
-                    <button onClick={disconnectWallet} className="text-xs text-text-secondary hover:underline cursor-pointer">Disconnect</button>
+                    <button onClick={requestDisconnect} className="text-xs text-text-secondary hover:underline cursor-pointer">Disconnect</button>
                   </div>
                 ) : (
                   <AnimatedButton

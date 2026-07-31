@@ -10,6 +10,7 @@ import { getDeployment } from '@/lib/noteWallet/deployments';
 import { COMPLIANCE_REGISTRY_ABI } from '@/lib/noteWallet/complianceRegistryAbi';
 import type { StoredOrderNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
+import { tokenIcon } from '@/lib/icons';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import {
@@ -24,6 +25,8 @@ import Link from 'next/link';
 
 type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0';
 const ASSET_OPTIONS: AssetSymbol[] = ['C2FLR', 'FXRP', 'USDT0'];
+
+const ASSET_ICONS: Record<AssetSymbol, string> = { C2FLR: 'FLR', FXRP: 'XRP', USDT0: 'USDT' };
 
 export default function Portfolio() {
   const { isEntered, isWalletConnected, walletAddress, connectWallet } = useApp();
@@ -192,9 +195,7 @@ export default function Portfolio() {
                       return (
                         <tr key={sym}>
                           <td className="py-3 flex items-center gap-2">
-                            <span className="h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-semibold bg-accent-primary/20 text-accent-primary">
-                              {sym.slice(0, 2)}
-                            </span>
+                            <img src={tokenIcon(ASSET_ICONS[sym])} alt="" className="h-5 w-5 flex-shrink-0" />
                             <span className="font-semibold">{sym}</span>
                           </td>
                           <td className="py-3 text-right font-mono font-medium">

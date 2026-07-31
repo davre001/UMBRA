@@ -2,9 +2,10 @@
 
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useConnect, useDisconnect, useAccount } from 'wagmi';
+import { useConnect, useAccount } from 'wagmi';
 import { X, Wallet, AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
 import { walletIcon, networkIcon, CONNECTOR_ICONS, SUPPORTED_CHAINS } from '@/lib/icons';
+import { useApp } from '@/providers/app-provider';
 
 const WALLET_META: Record<string, { label: string }> = {
   metaMask:          { label: 'MetaMask' },
@@ -32,18 +33,13 @@ export function WalletModal({ open, onClose, onConnected }: WalletModalProps) {
     },
   });
   const { address, isConnected } = useAccount();
-  const { disconnect } = useDisconnect();
+  const { requestDisconnect } = useApp();
 
   const [pendingConnectorId, setPendingConnectorId] = React.useState<string | null>(null);
 
   const handleConnect = (connector: (typeof connectors)[number]) => {
     setPendingConnectorId(connector.id);
     connect({ connector });
-  };
-
-  const handleDisconnect = () => {
-    disconnect();
-    onClose();
   };
 
   // Every wallet is a named connector (metaMask, rabby, …). The generic
@@ -116,7 +112,7 @@ export function WalletModal({ open, onClose, onConnected }: WalletModalProps) {
                       <p className="font-mono text-sm text-text-primary font-semibold break-all">{address}</p>
                     </div>
                     <button
-                      onClick={handleDisconnect}
+                      onClick={requestDisconnect}
                       className="w-full py-2.5 rounded-xl border border-border-custom text-xs text-text-secondary hover:border-red-500/40 hover:text-red-400 transition-all uppercase tracking-wider font-sans cursor-pointer"
                     >
                       Disconnect Wallet

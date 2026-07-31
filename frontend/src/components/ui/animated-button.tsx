@@ -21,11 +21,11 @@ export const AnimatedButton: React.FC<AnimatedButtonProps> = ({
 }) => {
   const [isHovered, setIsHovered] = React.useState(false);
 
-  const baseStyles = "relative inline-flex items-center justify-center font-display rounded-lg font-medium transition-all focus:outline-none focus:ring-1 focus:ring-accent-primary/50 overflow-hidden cursor-pointer active:scale-[0.98]";
+  const baseStyles = "relative inline-flex items-center justify-center font-display rounded-lg font-medium transition-all focus:outline-none focus:ring-1 focus:ring-accent-primary/50 overflow-hidden cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none";
 
   const variantStyles = {
     primary: "bg-accent-primary text-bg-base hover:bg-accent-primary/90 hover:shadow-[0_0_15px_rgba(255,165,0,0.4)]",
-    secondary: "bg-accent-secondary text-text-primary hover:bg-accent-secondary/90 hover:shadow-[0_0_15px_rgba(255,255,255,0.2)]",
+    secondary: "bg-accent-secondary text-bg-base hover:bg-accent-secondary/90 hover:shadow-[0_0_15px_rgba(255,255,255,0.2)]",
     glass: "glass-panel border-border-custom text-text-primary hover:bg-surface/60 hover:border-accent-primary/30",
     ghost: "bg-transparent border border-transparent text-text-secondary hover:text-text-primary hover:bg-surface/20"
   };

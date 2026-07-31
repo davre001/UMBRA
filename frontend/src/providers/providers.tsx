@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { wagmiConfig } from '@/lib/wagmi';
 import { AppProvider, useApp } from './app-provider';
 import { WalletModal } from '@/components/shared/wallet-modal';
+import { DisconnectConfirmModal } from '@/components/shared/disconnect-confirm-modal';
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <AppProvider>
           {children}
           <WalletModalMount />
+          <DisconnectConfirmModal />
         </AppProvider>
       </QueryClientProvider>
     </WagmiProvider>

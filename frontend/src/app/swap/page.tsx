@@ -436,10 +436,10 @@ export default function DarkPoolPage() {
                         value={minAmountOut}
                         onChange={(e) => setMinAmountOut(e.target.value)}
                         placeholder="0.00"
-                        className="w-full bg-surface/30 border border-border-custom rounded-lg px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60 font-mono"
+                        className="no-spinner w-full bg-surface/30 border border-border-custom rounded-lg pl-4 pr-20 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60 font-mono"
                         required
                       />
-                      <span className="absolute right-4 top-3.5 text-xs text-text-secondary font-bold font-mono">{assetOut}</span>
+                      <span className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-xs text-text-secondary font-bold font-mono">{assetOut}</span>
                     </div>
                   </div>
 
