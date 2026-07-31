@@ -31,12 +31,12 @@ import {
 import Link from 'next/link';
 
 type Tab = 'place' | 'orders';
-type AssetSymbol = 'WFLR' | 'FXRP' | 'USDT0';
+type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0';
 type PlaceStep = 'idle' | 'proving' | 'submitting' | 'confirming' | 'finalized';
 
 const COSTON2_CHAIN_ID = 114;
 const ASSET_OPTIONS: { sym: AssetSymbol; name: string }[] = [
-  { sym: 'WFLR', name: 'Wrapped Flare' },
+  { sym: 'C2FLR', name: 'Coston2 Flare (native)' },
   { sym: 'FXRP', name: 'FAssets XRP' },
   { sym: 'USDT0', name: 'Tether USD' },
 ];
@@ -62,7 +62,7 @@ export default function DarkPoolPage() {
   const onCoston2 = chainId === COSTON2_CHAIN_ID;
 
   const [activeTab, setActiveTab] = useState<Tab>('place');
-  const [assetIn, setAssetIn] = useState<AssetSymbol>('WFLR');
+  const [assetIn, setAssetIn] = useState<AssetSymbol>('C2FLR');
   const [assetOut, setAssetOut] = useState<AssetSymbol>('FXRP');
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [minAmountOut, setMinAmountOut] = useState('');

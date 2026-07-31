@@ -2,9 +2,8 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
 import request from "supertest";
-import { erc20Abi } from "viem";
 import { createApp } from "../src/app";
-import { CONTRACTS, ASSETS, getWalletClient, publicClient } from "../src/shared/chain";
+import { CONTRACTS, getWalletClient, publicClient } from "../src/shared/chain";
 import { SHIELDED_VAULT_ABI } from "../src/shared/vaultAbi";
 
 const app = createApp();
@@ -27,7 +26,7 @@ function loadWithdrawFixture() {
   return { proof: proof as `0x${string}`, publicInputs };
 }
 
-// spendingKey=111, blinding=999, amount=1000, assetId=0 (WFLR)
+// spendingKey=111, blinding=999, amount=1000, assetId=0 (native C2FLR)
 const WITHDRAW_COMMITMENT = "0x1558e1fa811a3e586c2ca3b6d3fe47681eaf479bc5bb69a83fb4505018672fad" as `0x${string}`;
 const WITHDRAW_RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
 const WITHDRAW_AMOUNT = BigInt(1000);
@@ -45,38 +44,20 @@ describe("relayer routes", () => {
   });
 
   describe(
-    "real end-to-end: wrap, shield, screen, relay withdraw",
+    "real end-to-end: shield, screen, relay withdraw",
     () => {
       beforeAll(async () => {
         const wallet = getWalletClient();
         const account = wallet.account!;
-        const wflr = ASSETS.WFLR.token as `0x${string}`;
 
-        // Wrap enough native C2FLR into WFLR to cover the fixture's amount.
-        const wrapHash = await wallet.sendTransaction({
-          to: wflr,
-          data: "0xd0e30db0", // deposit()
-          value: WITHDRAW_AMOUNT,
-          chain: wallet.chain,
-          account,
-        });
-        await publicClient.waitForTransactionReceipt({ hash: wrapHash });
-
-        const approveHash = await wallet.writeContract({
-          address: wflr,
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [CONTRACTS.ShieldedVault as `0x${string}`, WITHDRAW_AMOUNT],
-          chain: wallet.chain,
-          account,
-        });
-        await publicClient.waitForTransactionReceipt({ hash: approveHash });
-
+        // assetId 0 is native C2FLR — shield() holds it directly, no
+        // wrap/approve step needed (see ShieldedVault.sol's nativeAssetId).
         const shieldHash = await wallet.writeContract({
           address: CONTRACTS.ShieldedVault as `0x${string}`,
           abi: SHIELDED_VAULT_ABI,
           functionName: "shield",
           args: [WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, BigInt(WITHDRAW_COMMITMENT)],
+          value: WITHDRAW_AMOUNT,
           chain: wallet.chain,
           account,
         });

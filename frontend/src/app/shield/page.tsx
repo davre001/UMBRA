@@ -29,18 +29,26 @@ import {
 import Link from 'next/link';
 
 type Tab = 'deposit' | 'withdraw';
-type AssetSymbol = 'WFLR' | 'FXRP' | 'USDT0';
+type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0';
 type FlowStep = 'idle' | 'approving' | 'submitting' | 'proving' | 'confirming' | 'finalized';
 
 const COSTON2_CHAIN_ID = 114;
 const ASSET_OPTIONS: { sym: AssetSymbol; name: string }[] = [
-  { sym: 'WFLR', name: 'Wrapped Flare' },
+  { sym: 'C2FLR', name: 'Coston2 Flare (native)' },
   { sym: 'FXRP', name: 'FAssets XRP' },
   { sym: 'USDT0', name: 'Tether USD' },
 ];
 
-const DEPOSIT_TIMELINE = [
+const DEPOSIT_TIMELINE_ERC20 = [
   { key: 'approving', label: 'Approve Token' },
+  { key: 'submitting', label: 'Submit Deposit' },
+  { key: 'confirming', label: 'Confirm On-Chain' },
+  { key: 'finalized', label: 'Settlement' },
+] as const;
+
+// No approve step for the native asset — shield() takes it directly as the
+// call's own value, nothing to allow beforehand.
+const DEPOSIT_TIMELINE_NATIVE = [
   { key: 'submitting', label: 'Submit Deposit' },
   { key: 'confirming', label: 'Confirm On-Chain' },
   { key: 'finalized', label: 'Settlement' },
@@ -66,7 +74,7 @@ export default function ShieldPage() {
   const noteWallet = useNoteWallet(vaultAddress, deployment?.deployBlock !== undefined ? BigInt(deployment.deployBlock) : undefined);
 
   const [activeTab, setActiveTab] = useState<Tab>('deposit');
-  const [asset, setAsset] = useState<AssetSymbol>('WFLR');
+  const [asset, setAsset] = useState<AssetSymbol>('C2FLR');
   const [amount, setAmount] = useState('');
   const [destination, setDestination] = useState('');
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
@@ -78,14 +86,16 @@ export default function ShieldPage() {
   const effectiveDestination = (destination || walletAddress || '') as `0x${string}` | '';
 
   const publicBalanceQuery = useQuery({
-    queryKey: ['publicBalance', chainId, assetConfig?.token, walletAddress],
+    queryKey: ['publicBalance', chainId, asset, walletAddress],
     queryFn: () =>
-      publicClient!.readContract({
-        address: assetConfig!.token,
-        abi: erc20Abi,
-        functionName: 'balanceOf',
-        args: [walletAddress as `0x${string}`],
-      }),
+      assetConfig!.native
+        ? publicClient!.getBalance({ address: walletAddress as `0x${string}` })
+        : publicClient!.readContract({
+            address: assetConfig!.token as `0x${string}`,
+            abi: erc20Abi,
+            functionName: 'balanceOf',
+            args: [walletAddress as `0x${string}`],
+          }),
     enabled: !!publicClient && !!assetConfig && !!walletAddress,
   });
 
@@ -122,30 +132,35 @@ export default function ShieldPage() {
         return;
       }
 
-      setStep('approving');
-      const allowance = await publicClient.readContract({
-        address: assetConfig.token,
-        abi: erc20Abi,
-        functionName: 'allowance',
-        args: [walletAddress as `0x${string}`, vaultAddress],
-      });
-      if (allowance < amountBaseUnits) {
-        const approveHash = await writeContractAsync({
-          address: assetConfig.token,
+      if (assetConfig.native) {
+        setStep('submitting');
+      } else {
+        setStep('approving');
+        const allowance = await publicClient.readContract({
+          address: assetConfig.token as `0x${string}`,
           abi: erc20Abi,
-          functionName: 'approve',
-          args: [vaultAddress, amountBaseUnits],
+          functionName: 'allowance',
+          args: [walletAddress as `0x${string}`, vaultAddress],
         });
-        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        if (allowance < amountBaseUnits) {
+          const approveHash = await writeContractAsync({
+            address: assetConfig.token as `0x${string}`,
+            abi: erc20Abi,
+            functionName: 'approve',
+            args: [vaultAddress, amountBaseUnits],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        }
+        setStep('submitting');
       }
 
-      setStep('submitting');
       const note = await noteWallet.prepareNote(amountBaseUnits, BigInt(assetConfig.assetId));
       const shieldHash = await writeContractAsync({
         address: vaultAddress,
         abi: SHIELDED_VAULT_ABI,
         functionName: 'shield',
         args: [BigInt(assetConfig.assetId), amountBaseUnits, note.commitment],
+        value: assetConfig.native ? amountBaseUnits : undefined,
       });
 
       setStep('confirming');
@@ -157,7 +172,7 @@ export default function ShieldPage() {
       setLastTxHash(shieldHash);
       setStep('finalized');
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
-      queryClient.invalidateQueries({ queryKey: ['publicBalance', chainId, assetConfig.token, walletAddress] });
+      queryClient.invalidateQueries({ queryKey: ['publicBalance', chainId, asset, walletAddress] });
       addNotification('Deposit Shielded', `Successfully shielded ${amount} ${asset} privately.`, 'success');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Shield deposit failed.';
@@ -217,7 +232,7 @@ export default function ShieldPage() {
       setStep('finalized');
       setSelectedNoteId(null);
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
-      queryClient.invalidateQueries({ queryKey: ['publicBalance', chainId, assetConfig.token, walletAddress] });
+      queryClient.invalidateQueries({ queryKey: ['publicBalance', chainId, asset, walletAddress] });
       addNotification(
         'Funds Withdrawn',
         `Successfully withdrew ${formatUnits(amountValue, assetConfig.decimals)} ${asset} privately.`,
@@ -261,7 +276,12 @@ export default function ShieldPage() {
     );
   }
 
-  const timelineSteps = activeTab === 'deposit' ? DEPOSIT_TIMELINE : WITHDRAW_TIMELINE;
+  const timelineSteps =
+    activeTab === 'deposit'
+      ? assetConfig?.native
+        ? DEPOSIT_TIMELINE_NATIVE
+        : DEPOSIT_TIMELINE_ERC20
+      : WITHDRAW_TIMELINE;
   const currentStepIdx = timelineSteps.findIndex((t) => t.key === step);
 
   const stepLabel: Record<Exclude<FlowStep, 'idle' | 'finalized'>, string> = {

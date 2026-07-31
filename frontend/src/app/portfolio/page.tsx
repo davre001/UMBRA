@@ -22,8 +22,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
-type AssetSymbol = 'WFLR' | 'FXRP' | 'USDT0';
-const ASSET_OPTIONS: AssetSymbol[] = ['WFLR', 'FXRP', 'USDT0'];
+type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0';
+const ASSET_OPTIONS: AssetSymbol[] = ['C2FLR', 'FXRP', 'USDT0'];
 
 export default function Portfolio() {
   const { isEntered, isWalletConnected, walletAddress, connectWallet } = useApp();
@@ -39,12 +39,14 @@ export default function Portfolio() {
       const entries = await Promise.all(
         ASSET_OPTIONS.map(async (sym) => {
           const cfg = deployment!.assets[sym];
-          const balance = await publicClient!.readContract({
-            address: cfg.token,
-            abi: erc20Abi,
-            functionName: 'balanceOf',
-            args: [walletAddress as `0x${string}`],
-          });
+          const balance = cfg.native
+            ? await publicClient!.getBalance({ address: walletAddress as `0x${string}` })
+            : await publicClient!.readContract({
+                address: cfg.token as `0x${string}`,
+                abi: erc20Abi,
+                functionName: 'balanceOf',
+                args: [walletAddress as `0x${string}`],
+              });
           return [sym, balance] as const;
         })
       );
@@ -60,7 +62,7 @@ export default function Portfolio() {
   });
 
   const shieldedBalances = useMemo(() => {
-    const totals: Record<AssetSymbol, bigint> = { WFLR: BigInt(0), FXRP: BigInt(0), USDT0: BigInt(0) };
+    const totals: Record<AssetSymbol, bigint> = { C2FLR: BigInt(0), FXRP: BigInt(0), USDT0: BigInt(0) };
     if (!notesQuery.data || !deployment) return totals;
     for (const note of notesQuery.data) {
       if (note.kind !== 'note') continue;

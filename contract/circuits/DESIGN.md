@@ -185,7 +185,7 @@ notice and resubmit it.
 checked to 100 bits (`assert_100`, `contract/circuits/noir/lib`) before any
 comparison or the pro-rata multiplication (`mul_div_floor`, computed in
 `u128`). 100 bits comfortably covers any realistic amount on this project's
-three assets, even WFLR's 18 decimals (2^100 raw units is ~1.27 trillion
+three assets, even C2FLR's 18 decimals (2^100 raw units is ~1.27 trillion
 whole tokens) — and Noir's own `u128` multiplication is itself
 overflow-checked (confirmed empirically, see `lib`'s own
 `test_u128_mult_overflow_is_checked_not_wrapping`), so the — for real
@@ -193,7 +193,7 @@ orders, unreachable — case of both multiplied values simultaneously near
 that ceiling fails to prove rather than silently wrapping into a
 wrong/attacker-chosen result. An earlier version of this range check used a
 64-bit bound, which turned out too tight for this project's own assets: a
-plain 50 WFLR order (`50 * 10^18` raw units) already exceeds `2^64`. That
+plain 50-token, 18-decimal order (`50 * 10^18` raw units) already exceeds `2^64`. That
 wasn't caught by any unit test using small round numbers — only by running
 a real end-to-end match through the actual matcher-worker proving pipeline
 with realistic amounts, which is why `match_orders`'s own test suite now

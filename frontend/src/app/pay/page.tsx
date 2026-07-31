@@ -33,12 +33,12 @@ import {
 import Link from 'next/link';
 
 type Tab = 'send' | 'incoming';
-type AssetSymbol = 'WFLR' | 'FXRP' | 'USDT0';
+type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0';
 type SendStep = 'idle' | 'proving' | 'submitting' | 'confirming' | 'announcing' | 'finalized';
 
 const COSTON2_CHAIN_ID = 114;
 const ASSET_OPTIONS: { sym: AssetSymbol; name: string }[] = [
-  { sym: 'WFLR', name: 'Wrapped Flare' },
+  { sym: 'C2FLR', name: 'Coston2 Flare (native)' },
   { sym: 'FXRP', name: 'FAssets XRP' },
   { sym: 'USDT0', name: 'Tether USD' },
 ];
@@ -67,7 +67,7 @@ export default function PrivatePayPage() {
   const onCoston2 = chainId === COSTON2_CHAIN_ID;
 
   const [activeTab, setActiveTab] = useState<Tab>('send');
-  const [asset, setAsset] = useState<AssetSymbol>('WFLR');
+  const [asset, setAsset] = useState<AssetSymbol>('C2FLR');
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [recipient, setRecipient] = useState('');
   const [step, setStep] = useState<SendStep>('idle');

@@ -8,12 +8,15 @@ import { ethers } from "hardhat";
  * contracts/verifiers/*.sol (generated from circuits/noir/* via bb) must
  * exist. See circuits/README.md for the one-time setup commands.
  *
- * Real asset addresses (FXRP, WFLR, USDT0) are intentionally NOT hardcoded —
- * per Flare's own guidance, AssetManager/FAsset addresses should be resolved
- * dynamically and can change. Pass them via env vars once looked up on the
- * Coston2 explorer (https://coston2-explorer.flare.network); each gets the
- * assetId matching its position below (0 = WFLR, 1 = FXRP, 2 = USDT0) — the
- * same convention the frontend/circuits need to agree on. Any left unset are
+ * assetId 0 is native C2FLR — `shield`/`withdraw` hold/pay it directly
+ * (any contract can hold native value, no wrapped-token contract involved
+ * at all), so it needs no token address. Real ERC20 asset addresses (FXRP,
+ * USDT0) are intentionally NOT hardcoded — per Flare's own guidance,
+ * AssetManager/FAsset addresses should be resolved dynamically and can
+ * change. Pass them via env vars once looked up on the Coston2 explorer
+ * (https://coston2-explorer.flare.network); each gets the assetId matching
+ * its position below (0 = native C2FLR, 1 = FXRP, 2 = USDT0) — the same
+ * convention the frontend/circuits need to agree on. Any left unset are
  * skipped and can be allowlisted later via `vault.setAsset(assetId, token, true)`.
  *
  * ATTESTER_ADDRESS defaults to the deployer if unset — fine for a first
@@ -24,9 +27,9 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("Deploying with:", deployer.address);
 
+  const NATIVE_ASSET_ID = 0;
   const attesterAddress = process.env.ATTESTER_ADDRESS ?? deployer.address;
-  const assets: { assetId: number; address: string | undefined }[] = [
-    { assetId: 0, address: process.env.WFLR_ADDRESS },
+  const erc20Assets: { assetId: number; address: string | undefined }[] = [
     { assetId: 1, address: process.env.FXRP_ADDRESS },
     { assetId: 2, address: process.env.USDT0_ADDRESS },
   ];
@@ -70,7 +73,8 @@ async function main() {
     await placeOrderVerifier.getAddress(),
     await cancelOrderVerifier.getAddress(),
     await matchOrdersVerifier.getAddress(),
-    deployer.address
+    deployer.address,
+    NATIVE_ASSET_ID
   );
   await vault.waitForDeployment();
   console.log("ShieldedVault:", await vault.getAddress());
@@ -98,15 +102,16 @@ async function main() {
   await (await vault.setComplianceRegistry(await compliance.getAddress())).wait();
   await (await compliance.grantRole(await compliance.ATTESTER_ROLE(), attesterAddress)).wait();
 
-  for (const { assetId, address } of assets) {
+  await (await vault.setAsset(NATIVE_ASSET_ID, ethers.ZeroAddress, true)).wait();
+  console.log(`Allowlisted assetId ${NATIVE_ASSET_ID}: native C2FLR`);
+
+  for (const { assetId, address } of erc20Assets) {
     if (!address) continue;
     await (await vault.setAsset(assetId, address, true)).wait();
     console.log(`Allowlisted assetId ${assetId}:`, address);
   }
-  if (assets.every((a) => !a.address)) {
-    console.log(
-      "No WFLR_ADDRESS/FXRP_ADDRESS/USDT0_ADDRESS set — allowlist assets later via vault.setAsset(assetId, token, true)."
-    );
+  if (erc20Assets.every((a) => !a.address)) {
+    console.log("No FXRP_ADDRESS/USDT0_ADDRESS set — allowlist them later via vault.setAsset(assetId, token, true).");
   }
 
   console.log("\nDeployment summary");

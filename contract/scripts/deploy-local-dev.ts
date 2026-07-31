@@ -5,11 +5,12 @@ import * as path from "path";
 /**
  * Stable local-dev deployment for frontend work against the running
  * `npx hardhat node` instance — not a throwaway test script. Deploys the
- * full contract set plus three MockERC20s standing in for WFLR/FXRP/USDT0
- * (assetId 0/1/2, same convention as deploy.ts's real Coston2 deploy), mints
- * a large balance to Hardhat's default account #0, and writes the addresses
- * to frontend/src/lib/noteWallet/localDevAddresses.json so the frontend can
- * pick them up without hand-copying.
+ * full contract set plus two MockERC20s standing in for FXRP/USDT0 (assetId
+ * 1/2 — assetId 0 is native C2FLR/ETH, which Hardhat's local accounts are
+ * already funded with, same convention as deploy.ts's real Coston2 deploy),
+ * mints a large ERC20 balance to Hardhat's default account #0, and writes
+ * the addresses to frontend/src/lib/noteWallet/localDevAddresses.json so
+ * the frontend can pick them up without hand-copying.
  */
 async function deployHonkVerifier(contractName: string, relationsName: string, transcriptName: string) {
   const Relations = await ethers.getContractFactory(relationsName);
@@ -40,6 +41,7 @@ async function main() {
   const cancelOrderVerifier = await deployHonkVerifier("CancelOrderHonkVerifier", "CancelOrderRelationsLib", "CancelOrderZKTranscriptLib");
   const matchOrdersVerifier = await deployHonkVerifier("MatchOrdersHonkVerifier", "MatchOrdersRelationsLib", "MatchOrdersZKTranscriptLib");
 
+  const NATIVE_ASSET_ID = 0;
   const Vault = await ethers.getContractFactory("ShieldedVault");
   const vault = await Vault.deploy(
     await hasher.getAddress(),
@@ -48,13 +50,16 @@ async function main() {
     await placeOrderVerifier.getAddress(),
     await cancelOrderVerifier.getAddress(),
     await matchOrdersVerifier.getAddress(),
-    deployer.address
+    deployer.address,
+    NATIVE_ASSET_ID
   );
   await vault.waitForDeployment();
 
+  await (await vault.setAsset(NATIVE_ASSET_ID, ethers.ZeroAddress, true)).wait();
+  console.log(`native C2FLR/ETH (assetId ${NATIVE_ASSET_ID}) allowlisted`);
+
   const Token = await ethers.getContractFactory("MockERC20");
   const assets = [
-    { assetId: 0, symbol: "WFLR", name: "Mock Wrapped Flare" },
     { assetId: 1, symbol: "FXRP", name: "Mock FAssets XRP" },
     { assetId: 2, symbol: "USDT0", name: "Mock Tether USD" },
   ];
@@ -85,7 +90,7 @@ async function main() {
     compliance: await compliance.getAddress(),
     ownerKeyRegistry: await ownerKeyRegistry.getAddress(),
     assets: {
-      WFLR: { assetId: 0, token: tokenAddresses.WFLR, decimals: 18 },
+      C2FLR: { assetId: 0, native: true, decimals: 18 },
       FXRP: { assetId: 1, token: tokenAddresses.FXRP, decimals: 18 },
       USDT0: { assetId: 2, token: tokenAddresses.USDT0, decimals: 18 },
     },

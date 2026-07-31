@@ -3,8 +3,11 @@ import localDev from "./localDevAddresses.json";
 
 export interface AssetConfig {
   assetId: number;
-  token: `0x${string}`;
+  /** Native assets (see `native`) have no token contract — shield()/withdraw() hold/pay them directly. */
+  token?: `0x${string}`;
   decimals: number;
+  /** True for the one asset (C2FLR) that shield()/withdraw() treat as native value instead of an ERC20. */
+  native?: boolean;
 }
 
 export interface ChainDeployment {

@@ -12,7 +12,7 @@ import { MerkleTree, ZERO_VALUE } from "../src/shared/merkleTree";
  * If this test passes, the TS assembly logic here produces byte-identical
  * public inputs to what the real Noir circuit and on-chain verifier expect
  * — checked without touching the chain or running any proving. Fixture is a
- * genuine partial fill at realistic 18-decimal scale (50 WFLR fully fills
+ * genuine partial fill at realistic 18-decimal scale (a 50-token order fully fills
  * against a larger FXRP order, which keeps a residual) — see the circuit's
  * own #[test] fn test_match_orders_partial_fill_at_realistic_18_decimal_scale,
  * the exact magnitude that first exposed assert_64 as too tight for this
@@ -39,7 +39,7 @@ describe("match_orders commitment/Merkle assembly vs. the real circuit fixture",
     // #[test] fn test_match_orders_partial_fill_at_realistic_18_decimal_scale.
     const aSpendingKey = BigInt(111);
     const aOrderBlinding = BigInt(222);
-    const aAmountIn = BigInt("50000000000000000000"); // 50 WFLR
+    const aAmountIn = BigInt("50000000000000000000"); // 50 tokens at 18 decimals
     const aAssetIn = BigInt(0);
     const aAssetOut = BigInt(1);
     const aMinAmountOut = BigInt(1);

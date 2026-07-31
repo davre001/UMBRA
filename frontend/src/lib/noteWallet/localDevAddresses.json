@@ -4,9 +4,9 @@
   "vault": "0xE3011A37A904aB90C8881a99BD1F6E21401f1522",
   "compliance": "0x40918Ba7f132E0aCba2CE4de4c4baF9BD2D7D849",
   "assets": {
-    "WFLR": {
+    "C2FLR": {
       "assetId": 0,
-      "token": "0x1f10F3Ba7ACB61b2F50B9d6DdCf91a6f787C0E82",
+      "native": true,
       "decimals": 18
     },
     "FXRP": {

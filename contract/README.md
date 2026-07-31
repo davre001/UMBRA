@@ -25,7 +25,7 @@ npm run deploy:coston2
 
 | Contract | Replaces backend module | Purpose |
 | --- | --- | --- |
-| `ShieldedVault.sol` | `vault`, `dark-engine` | Locks allowlisted ERC20s (FXRP, WFLR, USDT0) as **hidden notes** in a commitment Merkle tree — not a public balance mapping. `withdraw`/`pay`/`placeOrder`/`cancelOrder`/`matchOrders` are each gated by a real UltraHonk (Noir/Barretenberg) proof, verified on-chain. |
+| `ShieldedVault.sol` | `vault`, `dark-engine` | Locks allowlisted assets (native C2FLR, plus ERC20s FXRP and USDT0) as **hidden notes** in a commitment Merkle tree — not a public balance mapping. `withdraw`/`pay`/`placeOrder`/`cancelOrder`/`matchOrders` are each gated by a real UltraHonk (Noir/Barretenberg) proof, verified on-chain. |
 | `verifiers/*.sol` | `prover` | Generated (`bb write_solidity_verifier`) from `circuits/noir/*` — real zk-SNARK verification, using Aztec's public Ignition ceremony SRS, not a per-project trusted setup. |
 | `lib/MerkleTreeWithHistory.sol`, `lib/poseidon2/` | — | Incremental commitment tree + the on-chain Poseidon2 hasher it needs (vendored, empirically verified against the circuits — see `circuits/README.md`). |
 | `ComplianceRegistry.sol` | `compliance` | Records sanction-screen results; `ShieldedVault.withdraw` gates on `isScreened(recipient)`. |
@@ -45,15 +45,17 @@ nullifier scheme. Short version:
 - **`shield`** needs no circuit — you compute a commitment client-side
   (`Poseidon2::hash([assetId, amount, ownerKey, blinding], 4)`, where
   `ownerKey` is your published public identifier, not your private
-  spending key) and submit it alongside a plain, public ERC20
-  `transferFrom`. Nothing secret to prove yet.
+  spending key) and submit it alongside a plain, public deposit — an ERC20
+  `transferFrom` for FXRP/USDT0, or the transaction's own native value for
+  C2FLR (`nativeAssetId`, held directly — see `ShieldedVault.sol`, no
+  wrapped-token contract involved). Nothing secret to prove yet.
 - **`withdraw`**, **`pay`**, **`placeOrder`**, **`cancelOrder`**, and
   **`matchOrders`** each require a real UltraHonk proof (generated
   client-side, in the browser — spending keys never leave it) proving you
   know a note whose commitment is *some* leaf under the current root,
   without revealing which one, plus a nullifier only that note's owner
   could derive, so it can't be spent twice.
-  - `withdraw` pays an ERC20 out publicly.
+  - `withdraw` pays the asset out publicly (ERC20 transfer, or native value for C2FLR).
   - `pay` inserts a new hidden commitment instead, keeping funds inside the pool.
   - `placeOrder` spends a regular note and creates a hidden order commitment.
   - `cancelOrder` spends an order commitment and returns a regular note.
@@ -69,8 +71,8 @@ nullifier scheme. Short version:
 
 ### Known simplification, v1
 
-`withdraw`'s amount is public — unavoidably, since it's a plain ERC20
-transfer and the contract needs the real value to move real tokens. `pay`'s
+`withdraw`'s amount is public — unavoidably, since it's a plain on-chain
+transfer and the contract needs the real value to move real funds. `pay`'s
 amount is private (a straight 1-in-1-out passthrough needs no
 value-conservation/range-proof machinery, unlike a real multi-note
 join-split). Order amounts are private too — `placeOrder`/`cancelOrder`/
@@ -86,7 +88,8 @@ no N-way matching in a single proof. See `circuits/DESIGN.md`.
   blocks per query, too small for this app's leaf-history scans)
 - Explorer: https://coston2-explorer.flare.network
 - Faucet (real C2FLR / FXRP / USDT0): https://faucet.flare.network/
-- Real FXRP/WFLR/USDT0 addresses aren't hardcoded anywhere in this repo —
-  look them up on the explorer and pass them to `deploy.ts` via
-  `WFLR_ADDRESS`/`FXRP_ADDRESS`/`USDT0_ADDRESS` in `.env` (see `.env.example`).
-  assetId is fixed by position: 0 = WFLR, 1 = FXRP, 2 = USDT0.
+- Real FXRP/USDT0 addresses aren't hardcoded anywhere in this repo — look
+  them up on the explorer and pass them to `deploy.ts` via
+  `FXRP_ADDRESS`/`USDT0_ADDRESS` in `.env` (see `.env.example`). assetId is
+  fixed by position: 0 = native C2FLR (no address — see `ShieldedVault.sol`'s
+  `nativeAssetId`), 1 = FXRP, 2 = USDT0.

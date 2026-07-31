@@ -26,12 +26,12 @@ describe("computeFill", () => {
   it(
     "fully fills the smaller side and partially fills the larger one at the live fair rate",
     async () => {
-      const fairRate = await getMidpointRate("WFLR", "FXRP"); // 1 WFLR in FXRP
-      const wflrAmountHuman = 1000;
-      const fxrpAmountHuman = fairRate * wflrAmountHuman * 2; // twice what's needed — B is the larger side
+      const fairRate = await getMidpointRate("C2FLR", "FXRP"); // 1 C2FLR in FXRP
+      const c2flrAmountHuman = 1000;
+      const fxrpAmountHuman = fairRate * c2flrAmountHuman * 2; // twice what's needed — B is the larger side
 
       const a = order({
-        amountIn: (BigInt(wflrAmountHuman) * BigInt(10) ** BigInt(18)).toString(),
+        amountIn: (BigInt(c2flrAmountHuman) * BigInt(10) ** BigInt(18)).toString(),
         assetIn: 0,
         assetOut: 1,
         minAmountOut: "1",
@@ -55,15 +55,15 @@ describe("computeFill", () => {
   it(
     "rejects a pair whose minimums can't both clear at the live fair rate",
     async () => {
-      const fairRate = await getMidpointRate("WFLR", "FXRP");
-      const wflrAmountHuman = 1000;
-      const fxrpAmountHuman = fairRate * wflrAmountHuman;
+      const fairRate = await getMidpointRate("C2FLR", "FXRP");
+      const c2flrAmountHuman = 1000;
+      const fxrpAmountHuman = fairRate * c2flrAmountHuman;
 
       const a = order({
-        amountIn: (BigInt(wflrAmountHuman) * BigInt(10) ** BigInt(18)).toString(),
+        amountIn: (BigInt(c2flrAmountHuman) * BigInt(10) ** BigInt(18)).toString(),
         assetIn: 0,
         assetOut: 1,
-        // Demands far more FXRP per WFLR than the live rate offers.
+        // Demands far more FXRP per C2FLR than the live rate offers.
         minAmountOut: String(Math.round(fxrpAmountHuman * 100 * 10 ** 6)),
       });
       const b = order({

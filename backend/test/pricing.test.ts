@@ -14,7 +14,7 @@ describe("pricing routes", () => {
     async () => {
       const res = await request(app).get("/api/pricing");
       expect(res.status).toBe(200);
-      for (const symbol of ["WFLR", "FXRP", "USDT0"]) {
+      for (const symbol of ["C2FLR", "FXRP", "USDT0"]) {
         expect(res.body[symbol].value).toBeGreaterThan(0);
         expect(Number.isFinite(res.body[symbol].value)).toBe(true);
       }
@@ -25,7 +25,7 @@ describe("pricing routes", () => {
   it(
     "returns a real midpoint rate for a known pair",
     async () => {
-      const res = await request(app).get("/api/pricing/WFLR/USDT0");
+      const res = await request(app).get("/api/pricing/C2FLR/USDT0");
       expect(res.status).toBe(200);
       expect(res.body.rate).toBeGreaterThan(0);
     },

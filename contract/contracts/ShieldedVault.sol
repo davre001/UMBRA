@@ -19,8 +19,9 @@ interface IUltraHonkVerifier {
 }
 
 /// @title ShieldedVault
-/// @notice Locks allowlisted ERC20s and holds shielded balances as hidden
-///         notes in a commitment Merkle tree — not a public account=>balance
+/// @notice Locks allowlisted assets (ERC20s, plus native C2FLR for
+///         `nativeAssetId`) and holds shielded balances as hidden notes in a
+///         commitment Merkle tree — not a public account=>balance
 ///         mapping. See circuits/DESIGN.md for the full note/commitment/
 ///         nullifier scheme. Every state-changing action (withdraw, pay,
 ///         placeOrder, cancelOrder, matchOrders) is gated by a real
@@ -32,8 +33,9 @@ interface IUltraHonkVerifier {
 ///      authorized by the ZK proof itself (knowledge of its secret/nullifier),
 ///      not by who calls the function — every action here is already
 ///      relayable by anyone, including a fee-paying relayer, with no
-///      forwarder needed. `shield` is the one exception: a plain ERC20
-///      transferFrom from the real depositor.
+///      forwarder needed. `shield` is the one exception: a plain deposit
+///      from the real depositor (ERC20 `transferFrom`, or for `nativeAssetId`,
+///      the transaction's own native value).
 contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory {
     using SafeERC20 for IERC20;
 
@@ -42,6 +44,16 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     IUltraHonkVerifier public immutable placeOrderVerifier;
     IUltraHonkVerifier public immutable cancelOrderVerifier;
     IUltraHonkVerifier public immutable matchOrdersVerifier;
+
+    /// @notice The one assetId (if any) that `shield`/`withdraw` treat as
+    ///         native C2FLR instead of a plain ERC20 — set once at deploy
+    ///         time, matching this project's existing "assetId 0 = the FLR
+    ///         leg" convention. The vault just holds native value directly
+    ///         for this asset (any contract can — no wrapping needed): no
+    ///         wrapped-token contract is involved anywhere for it, so
+    ///         `assetToken[nativeAssetId]` is left unset (address(0)) and is
+    ///         never read for this assetId.
+    uint256 public immutable nativeAssetId;
 
     mapping(uint256 => address) public assetToken;
     mapping(uint256 => bool) public isAllowedAsset;
@@ -71,6 +83,8 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     error NullifierAlreadySpent(uint256 nullifierHash);
     error InvalidProof();
     error RecipientNotScreened(address recipient);
+    error NativeAmountMismatch(uint256 expected, uint256 sent);
+    error NativeTransferFailed();
 
     constructor(
         address hasherAddress,
@@ -79,13 +93,15 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
         address placeOrderVerifierAddress,
         address cancelOrderVerifierAddress,
         address matchOrdersVerifierAddress,
-        address admin
+        address admin,
+        uint256 nativeAssetIdValue
     ) MerkleTreeWithHistory(hasherAddress) {
         withdrawVerifier = IUltraHonkVerifier(withdrawVerifierAddress);
         payVerifier = IUltraHonkVerifier(payVerifierAddress);
         placeOrderVerifier = IUltraHonkVerifier(placeOrderVerifierAddress);
         cancelOrderVerifier = IUltraHonkVerifier(cancelOrderVerifierAddress);
         matchOrdersVerifier = IUltraHonkVerifier(matchOrdersVerifierAddress);
+        nativeAssetId = nativeAssetIdValue;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
     }
 
@@ -93,6 +109,9 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     // Admin
     // ---------------------------------------------------------------------
 
+    /// @notice Allowlists `assetId` against `token`. For `nativeAssetId`,
+    ///         pass `token = address(0)` — it's never read for that asset,
+    ///         `shield`/`withdraw` handle it via native value instead.
     function setAsset(uint256 assetId, address token, bool allowed) external onlyRole(DEFAULT_ADMIN_ROLE) {
         assetToken[assetId] = token;
         isAllowedAsset[assetId] = allowed;
@@ -111,11 +130,21 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     /// @notice Lock `amount` of the allowlisted asset from the caller and insert
     ///         `commitment` (computed client-side — see circuits/DESIGN.md) as a
     ///         new leaf. No circuit needed: there's nothing secret to prove yet.
-    function shield(uint256 assetId, uint256 amount, uint256 commitment) external nonReentrant {
-        address token = assetToken[assetId];
-        if (!isAllowedAsset[assetId] || token == address(0)) revert AssetNotAllowed(assetId);
+    ///         For `nativeAssetId`, send `amount` as the call's native value
+    ///         (`msg.value`) instead of holding an ERC20 allowance — any
+    ///         contract can hold native value directly, no wrapped-token
+    ///         detour needed.
+    function shield(uint256 assetId, uint256 amount, uint256 commitment) external payable nonReentrant {
+        if (!isAllowedAsset[assetId]) revert AssetNotAllowed(assetId);
 
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        if (assetId == nativeAssetId) {
+            if (msg.value != amount) revert NativeAmountMismatch(amount, msg.value);
+        } else {
+            if (msg.value != 0) revert NativeAmountMismatch(0, msg.value);
+            address token = assetToken[assetId];
+            if (token == address(0)) revert AssetNotAllowed(assetId);
+            IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        }
 
         uint32 leafIndex = _insert(commitment);
         emit Shielded(assetId, commitment, leafIndex, currentRoot);
@@ -135,8 +164,7 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     ) external nonReentrant {
         if (!isKnownRoot[root]) revert UnknownRoot(root);
         if (isSpentNullifier[nullifierHash]) revert NullifierAlreadySpent(nullifierHash);
-        address token = assetToken[assetId];
-        if (!isAllowedAsset[assetId] || token == address(0)) revert AssetNotAllowed(assetId);
+        if (!isAllowedAsset[assetId]) revert AssetNotAllowed(assetId);
         if (address(complianceRegistry) != address(0) && !complianceRegistry.isScreened(recipient)) {
             revert RecipientNotScreened(recipient);
         }
@@ -150,7 +178,14 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
         if (!withdrawVerifier.verify(proof, publicInputs)) revert InvalidProof();
 
         isSpentNullifier[nullifierHash] = true;
-        IERC20(token).safeTransfer(recipient, amount);
+        if (assetId == nativeAssetId) {
+            (bool success, ) = recipient.call{value: amount}("");
+            if (!success) revert NativeTransferFailed();
+        } else {
+            address token = assetToken[assetId];
+            if (token == address(0)) revert AssetNotAllowed(assetId);
+            IERC20(token).safeTransfer(recipient, amount);
+        }
         emit Withdrawn(assetId, nullifierHash, recipient, amount);
     }
 

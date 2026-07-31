@@ -71,10 +71,19 @@ every env var it reads. Tear down with the AWS console or
 since undoing infrastructure deserves an explicit, reviewed action rather
 than a one-liner.
 
+The ~51MB zip is staged through an S3 bucket
+(`<function-name>-deploy-<account-id>`) rather than uploaded inline —
+`aws lambda create-function --zip-file` sending the whole thing in one HTTP
+request body proved unreliable at this size (repeatedly failed with
+"Connection was closed before we received a valid response"); S3's chunked
+upload doesn't have that problem. The script always uploads to the same
+fixed key (`function.zip`), so re-deploys overwrite it in place rather than
+accumulating a new object per run.
+
 Cost: Lambda's own free tier (1M requests + 400,000 GB-seconds/month,
 ongoing, not just during a trial credit) comfortably covers a job this
-small running every few minutes indefinitely. The only steady cost is
-negligible — there's no ECR image to store with a zip deploy.
+small running every few minutes indefinitely. The only steady cost is the
+single ~51MB object sitting in that S3 bucket — a fraction of a cent/month.
 
 ## Verified
 
@@ -83,9 +92,9 @@ matched, proven by this worker, submitted on-chain, announced) — confirmed
 via the Coston2 explorer, not just the exit code:
 
 - An exact full-cross match.
-- A genuine **partial fill** at realistic scale (50 WFLR fully filling
-  against a larger FXRP order), settling with a real non-zero residual
-  order commitment on-chain and the correct leaf count
+- A genuine **partial fill** at realistic 18-decimal scale (a 50-token
+  order fully filling against a larger FXRP order), settling with a real
+  non-zero residual order commitment on-chain and the correct leaf count
   (`OrdersMatched` tx `0x940fdbc7e7b53aa2d05adfd1f64102a3a2cf20bb559f4d3c047405ed4cdf6340`).
 
 Also smoke-tested from the exact packaged Lambda build (`lambda-build/`,

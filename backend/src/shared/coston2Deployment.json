@@ -3,7 +3,7 @@
   "chainId": 114,
   "rpcUrl": "https://flare-testnet.drpc.org",
   "deployer": "0x2d671A0D877B206fcd7A103335ee8173f50A1d06",
-  "deployBlock": 33449357,
+  "deployBlock": 33478628,
   "contracts": {
     "Poseidon2_BN254": "0x94d22070FfDB39a9dAEc0a9B5b367111e74dF071",
     "WithdrawHonkVerifier": "0xa3410943004c2b537C48e76F8A9eeE8aA71df40c",
@@ -11,15 +11,15 @@
     "PlaceOrderHonkVerifier": "0xbdB988FBc849499bcdF42951FD67792357B34d2D",
     "CancelOrderHonkVerifier": "0xcBa1edd6b9D9f799BF172C14803CB14b89715Dd7",
     "MatchOrdersHonkVerifier": "0x22A3B97BA38013BA44B91a9baE72094A751a318A",
-    "ShieldedVault": "0x6C8a2D7299b2Fb0c04fcB0e78edFA0abD428e563",
+    "ShieldedVault": "0xf3eEc625ef0AB89c2396a6e62Cc84E3d15f0Cdc7",
     "ComplianceRegistry": "0xC9192Ecaf662c977B28c614e49F558AAAB832577",
     "StealthAnnouncer": "0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1",
     "OwnerKeyRegistry": "0x48C77021624f7b4baC092570CDD56EB163eC3e71"
   },
   "assets": {
-    "WFLR": { "assetId": 0, "token": "0xC67DCE33D7A8efA5FfEB961899C73fe01bCe9273", "decimals": 18 },
+    "C2FLR": { "assetId": 0, "native": true, "decimals": 18 },
     "FXRP": { "assetId": 1, "token": "0x0b6A3645c240605887a5532109323A3E12273dc7", "decimals": 6 },
     "USDT0": { "assetId": 2, "token": "0xC1A5B41512496B80903D1f32d6dEa3a73212E71F", "decimals": 6 }
   },
-  "note": "Redeployed for partial-fill matchOrders support: place_order/cancel_order/match_orders circuits rewritten onto the owner_key(spending_key) order-ownership scheme, match_orders now proves real fill amounts with optional residual-order outputs instead of an exact-bilateral-cross-only match. A first version of this redeploy used a 64-bit range-check bound on amounts (assert_64) that turned out too tight for 18-decimal WFLR amounts (a plain 50 WFLR order already exceeds 2^64 raw units) — caught by a real end-to-end test, not a unit test with toy numbers; fixed by switching to a 100-bit bound (assert_100), safe because Noir's u128 multiplication is itself overflow-checked (confirmed empirically), not silently wrapping. Poseidon2/WithdrawVerifier/PayVerifier/ComplianceRegistry/StealthAnnouncer/OwnerKeyRegistry are unchanged and reused from the prior deployment (targeted redeploy — see contract/scripts/redeploy-vault-only.ts) so existing OwnerKeyRegistry registrations weren't orphaned. Earlier addresses in this file's history are stale."
+  "note": "Redeployed so shield()/withdraw() hold/pay native C2FLR directly for assetId 0 instead of requiring a separate wrapped-token contract (the app never exposed a wrap button, so shielded balances for that wrapped token silently never reflected faucet-collected C2FLR). No circuit changed — assetId/amount are opaque Field values regardless of what backs them on-chain — so this reuses all 5 existing verifiers plus Poseidon2/ComplianceRegistry/StealthAnnouncer/OwnerKeyRegistry (targeted redeploy — see contract/scripts/redeploy-vault-only.ts), only ShieldedVault itself is new. No wrapped-token contract is used anywhere in this stack. Earlier addresses in this file's history are stale."
 }

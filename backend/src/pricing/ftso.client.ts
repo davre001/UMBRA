@@ -24,9 +24,12 @@ const FTSO_V2_ABI = [
  * ASCII-encoded, zero-padded to 21 bytes) — confirmed live against FtsoV2 on
  * Coston2 (not assumed from the encoding scheme alone), see PR history.
  * USDT0 uses the USDT/USD feed — same peg, no separate USDT0 feed exists.
+ * The on-chain feed itself is named "FLR/USD" — it prices the native asset
+ * directly, which is exactly what `C2FLR` (assetId 0, held natively — see
+ * ShieldedVault.sol's nativeAssetId) actually is.
  */
 const FEED_IDS: Record<AssetSymbol, `0x${string}`> = {
-  WFLR: "0x01464c522f55534400000000000000000000000000",
+  C2FLR: "0x01464c522f55534400000000000000000000000000",
   FXRP: "0x015852502f55534400000000000000000000000000",
   USDT0: "0x01555344542f555344000000000000000000000000",
 };

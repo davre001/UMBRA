@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import request from "supertest";
-import { erc20Abi } from "viem";
 import { createApp } from "../src/app";
-import { CONTRACTS, ASSETS, getWalletClient, publicClient } from "../src/shared/chain";
+import { CONTRACTS, getWalletClient, publicClient } from "../src/shared/chain";
 import { SHIELDED_VAULT_ABI } from "../src/shared/vaultAbi";
 import { getMidpointRate } from "../src/pricing/ftso.client";
 
@@ -48,27 +47,16 @@ beforeAll(async () => {
 
   const wallet = getWalletClient();
   const account = wallet.account!;
-  const wflr = ASSETS.WFLR.token as `0x${string}`;
   const dustAmount = BigInt(1);
 
-  const wrapHash = await wallet.sendTransaction({ to: wflr, data: "0xd0e30db0", value: dustAmount, chain: wallet.chain, account });
-  await publicClient.waitForTransactionReceipt({ hash: wrapHash });
-
-  const approveHash = await wallet.writeContract({
-    address: wflr,
-    abi: erc20Abi,
-    functionName: "approve",
-    args: [CONTRACTS.ShieldedVault as `0x${string}`, dustAmount],
-    chain: wallet.chain,
-    account,
-  });
-  await publicClient.waitForTransactionReceipt({ hash: approveHash });
-
+  // assetId 0 is native C2FLR — shield() holds it directly, no wrap/approve
+  // step needed (see ShieldedVault.sol's nativeAssetId).
   const shieldHash = await wallet.writeContract({
     address: CONTRACTS.ShieldedVault as `0x${string}`,
     abi: SHIELDED_VAULT_ABI,
     functionName: "shield",
     args: [BigInt(0), dustAmount, BigInt(1)],
+    value: dustAmount,
     chain: wallet.chain,
     account,
   });
@@ -102,17 +90,17 @@ describe("dark-engine routes", () => {
       // minimum but priced with unrealistic dust amounts — the new price
       // sanity check (priceCheck.ts) should skip it and match "0xbb"
       // instead, which is priced at the live FTSO rate.
-      const fairRate = await getMidpointRate("WFLR", "FXRP"); // 1 WFLR in FXRP
-      const wflrAmountHuman = 1000;
-      const fxrpAmountHuman = fairRate * wflrAmountHuman;
-      // BigInt exponentiation for the (integer) WFLR side — 1000 * 10^18
+      const fairRate = await getMidpointRate("C2FLR", "FXRP"); // 1 C2FLR in FXRP
+      const c2flrAmountHuman = 1000;
+      const fxrpAmountHuman = fairRate * c2flrAmountHuman;
+      // BigInt exponentiation for the (integer) C2FLR side — 1000 * 10^18
       // overflows Number's non-exponential-notation range, and
       // BigInt(String(...)) can't parse "1e+21".
-      const wflrAmountRaw = (BigInt(wflrAmountHuman) * BigInt(10) ** BigInt(18)).toString();
+      const c2flrAmountRaw = (BigInt(c2flrAmountHuman) * BigInt(10) ** BigInt(18)).toString();
       const fxrpAmountRaw = String(Math.round(fxrpAmountHuman * 10 ** 6));
 
       await request(app).post("/api/dark-engine/orders").send(
-        orderBody({ commitment: "0xbb", leafIndex: existingLeafIndex, amountIn: wflrAmountRaw, assetIn: 0, assetOut: 1, minAmountOut: "1" })
+        orderBody({ commitment: "0xbb", leafIndex: existingLeafIndex, amountIn: c2flrAmountRaw, assetIn: 0, assetOut: 1, minAmountOut: "1" })
       );
       const res = await request(app).post("/api/dark-engine/orders").send(
         orderBody({ commitment: "0xcc", leafIndex: existingLeafIndex, amountIn: fxrpAmountRaw, assetIn: 1, assetOut: 0, minAmountOut: "1" })

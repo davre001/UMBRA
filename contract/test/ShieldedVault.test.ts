@@ -94,12 +94,15 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
       await placeOrderVerifier.getAddress(),
       await cancelOrderVerifier.getAddress(),
       await matchOrdersVerifier.getAddress(),
-      admin.address
+      admin.address,
+      WITHDRAW_ASSET_ID // nativeAssetId — the withdraw fixture's assetId 0 doubles as "the native leg" here
     );
 
     const Token = await ethers.getContractFactory("MockERC20");
     token = await Token.deploy("Mock Asset", "MOCK");
-    await vault.connect(admin).setAsset(WITHDRAW_ASSET_ID, await token.getAddress(), true);
+    // WITHDRAW_ASSET_ID (0) is the native asset — no ERC20 behind it, see
+    // setAsset's own doc comment.
+    await vault.connect(admin).setAsset(WITHDRAW_ASSET_ID, ethers.ZeroAddress, true);
     await vault.connect(admin).setAsset(PAY_ASSET_ID, await token.getAddress(), true);
     await token.mint(alice.address, ethers.parseEther("1000000"));
 
@@ -112,29 +115,27 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
   });
 
   it("shields, then withdraws with a real Noir proof", async () => {
-    await token.connect(alice).approve(await vault.getAddress(), WITHDRAW_AMOUNT);
-    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT);
+    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
 
     const { proof, publicInputs } = loadFixture("withdraw", 5);
     expect(await vault.currentRoot()).to.equal(publicInputs[0], "on-chain root must match the fixture's tree state");
 
     // WITHDRAW_RECIPIENT happens to be Hardhat's well-known default account
-    // #1 (same address as `alice`, who was minted a separate test balance
-    // above) — assert the delta, not an absolute balance, to not conflate
-    // the two.
-    const before = await token.balanceOf(WITHDRAW_RECIPIENT);
+    // #1 (same address as `alice`, who has a real ETH balance from the
+    // Hardhat network's own funding) — assert the delta, not an absolute
+    // balance, to not conflate the two.
+    const before = await ethers.provider.getBalance(WITHDRAW_RECIPIENT);
 
     await expect(vault.withdraw(proof, publicInputs[0], publicInputs[1], WITHDRAW_AMOUNT, WITHDRAW_ASSET_ID, WITHDRAW_RECIPIENT))
       .to.emit(vault, "Withdrawn")
       .withArgs(WITHDRAW_ASSET_ID, publicInputs[1], WITHDRAW_RECIPIENT, WITHDRAW_AMOUNT);
 
-    expect(await token.balanceOf(WITHDRAW_RECIPIENT)).to.equal(before + WITHDRAW_AMOUNT);
+    expect(await ethers.provider.getBalance(WITHDRAW_RECIPIENT)).to.equal(before + WITHDRAW_AMOUNT);
     expect(await vault.isSpentNullifier(publicInputs[1])).to.equal(true);
   });
 
   it("rejects replaying the same nullifier", async () => {
-    await token.connect(alice).approve(await vault.getAddress(), WITHDRAW_AMOUNT);
-    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT);
+    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
     const { proof, publicInputs } = loadFixture("withdraw", 5);
 
     await vault.withdraw(proof, publicInputs[0], publicInputs[1], WITHDRAW_AMOUNT, WITHDRAW_ASSET_ID, WITHDRAW_RECIPIENT);
@@ -144,8 +145,7 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
   });
 
   it("rejects a tampered proof (wrong amount)", async () => {
-    await token.connect(alice).approve(await vault.getAddress(), WITHDRAW_AMOUNT);
-    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT);
+    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
     const { proof, publicInputs } = loadFixture("withdraw", 5);
 
     await expect(
@@ -158,13 +158,25 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     await compliance.grantRole(await compliance.ATTESTER_ROLE(), admin.address);
     await compliance.connect(admin).screen(WITHDRAW_RECIPIENT, false);
 
-    await token.connect(alice).approve(await vault.getAddress(), WITHDRAW_AMOUNT);
-    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT);
+    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
     const { proof, publicInputs } = loadFixture("withdraw", 5);
 
     await expect(
       vault.withdraw(proof, publicInputs[0], publicInputs[1], WITHDRAW_AMOUNT, WITHDRAW_ASSET_ID, WITHDRAW_RECIPIENT)
     ).to.be.revertedWithCustomError(vault, "RecipientNotScreened");
+  });
+
+  it("shield() rejects native value that doesn't match the declared amount", async () => {
+    await expect(
+      vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT - 1n })
+    ).to.be.revertedWithCustomError(vault, "NativeAmountMismatch");
+  });
+
+  it("shield() rejects native value sent alongside a non-native (ERC20) asset", async () => {
+    await token.connect(alice).approve(await vault.getAddress(), PAY_AMOUNT);
+    await expect(
+      vault.connect(alice).shield(PAY_ASSET_ID, PAY_AMOUNT, PAY_COMMITMENT, { value: 1n })
+    ).to.be.revertedWithCustomError(vault, "NativeAmountMismatch");
   });
 
   it("pays privately — spends one note, creates a new hidden one, no ERC20 leaves the vault", async () => {

@@ -39,10 +39,48 @@ fi
 
 echo "Zipping lambda-build/ contents..."
 rm -f function.zip
-(cd lambda-build && zip -qr ../function.zip .)
+if command -v zip >/dev/null 2>&1; then
+  (cd lambda-build && zip -qr ../function.zip .)
+else
+  # No zip on this box (e.g. plain git-bash on Windows) — fall back to
+  # PowerShell's Compress-Archive, which is always present on Windows.
+  # Needs a real Windows path (git-bash's own $(pwd) is POSIX-style, which
+  # PowerShell can't resolve) — `pwd -W` gives the Windows form.
+  WIN_DIR="$(pwd -W)"
+  powershell.exe -NoProfile -Command \
+    "Compress-Archive -Path '${WIN_DIR}\\lambda-build\\*' -DestinationPath '${WIN_DIR}\\function.zip' -Force"
+fi
 echo "  $(du -h function.zip | cut -f1) function.zip"
 
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# The zip is ~50MB, which the direct `--zip-file fileb://...` upload path
+# (whole file in one HTTP request body) has repeatedly failed on
+# ("Connection was closed before we received a valid response") — a known
+# reliability issue with large inline Lambda uploads. Uploading to S3 first
+# and deploying via --code S3Bucket/S3Key instead is the standard, more
+# resilient fix (chunked S3 upload vs. one big synchronous PUT).
+DEPLOY_BUCKET="${FUNCTION_NAME}-deploy-${ACCOUNT_ID}"
+echo "Ensuring S3 deploy bucket ${DEPLOY_BUCKET} exists..."
+if ! aws s3api head-bucket --bucket "$DEPLOY_BUCKET" --region "$AWS_REGION" >/dev/null 2>&1; then
+  if [ "$AWS_REGION" = "us-east-1" ]; then
+    aws s3api create-bucket --bucket "$DEPLOY_BUCKET" --region "$AWS_REGION" >/dev/null
+  else
+    aws s3api create-bucket --bucket "$DEPLOY_BUCKET" --region "$AWS_REGION" \
+      --create-bucket-configuration LocationConstraint="$AWS_REGION" >/dev/null
+  fi
+  echo "  created"
+else
+  echo "  already exists"
+fi
+
+# Fixed key, not timestamped — nothing needs deploy history kept in S3
+# (Lambda's own versioning covers that if it's ever needed), so each
+# deploy just overwrites the previous object instead of accumulating one
+# new object per run forever.
+S3_KEY="function.zip"
+echo "Uploading function.zip to s3://${DEPLOY_BUCKET}/${S3_KEY}..."
+aws s3 cp function.zip "s3://${DEPLOY_BUCKET}/${S3_KEY}" --region "$AWS_REGION" >/dev/null
 
 echo "Ensuring IAM role ${ROLE_NAME} exists..."
 if ! aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
@@ -67,7 +105,8 @@ if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$AWS_REGIO
   echo "Updating existing function code..."
   aws lambda update-function-code \
     --function-name "$FUNCTION_NAME" \
-    --zip-file fileb://function.zip \
+    --s3-bucket "$DEPLOY_BUCKET" \
+    --s3-key "$S3_KEY" \
     --region "$AWS_REGION" \
     >/dev/null
   aws lambda wait function-updated --function-name "$FUNCTION_NAME" --region "$AWS_REGION"
@@ -86,7 +125,7 @@ else
     --runtime nodejs20.x \
     --role "$ROLE_ARN" \
     --handler dist/lambda.handler \
-    --zip-file fileb://function.zip \
+    --code S3Bucket="$DEPLOY_BUCKET",S3Key="$S3_KEY" \
     --memory-size "$MEMORY_MB" \
     --timeout "$TIMEOUT_SECONDS" \
     --environment "$ENV_VARS" \

@@ -5,7 +5,7 @@ import { submitMatch, announceMatchedNote, announceResidualOrder, type MatchLeaf
 import { computeFill } from "./fillSizing";
 import type { OrderIntent, MatchRecord, MatchOrderSide } from "./types";
 
-const CONTRACTS_ASSET_COUNT = 3; // WFLR / FXRP / USDT0 — see shared/chain.ts's ASSETS
+const CONTRACTS_ASSET_COUNT = 3; // C2FLR / FXRP / USDT0 — see shared/chain.ts's ASSETS
 
 const book = new OrderBook();
 const matches = new Map<string, MatchRecord>();

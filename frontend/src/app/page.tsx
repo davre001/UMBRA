@@ -65,7 +65,7 @@ export default function Home() {
   useEffect(() => {
     let timer: NodeJS.Timeout;
     if (zkStep === 'witness') {
-      setWitnessData('Calculating Merkle membership path...\nWitness inputs derived successfully:\n- secret_key: 0x9f...a2\n- nullifier_hash: 0x3d...b8\n- value: 1500 WFLR');
+      setWitnessData('Calculating Merkle membership path...\nWitness inputs derived successfully:\n- secret_key: 0x9f...a2\n- nullifier_hash: 0x3d...b8\n- value: 1500 C2FLR');
       timer = setTimeout(() => setZkStep('proving'), 1800);
     } else if (zkStep === 'proving') {
       let currentProgress = 0;

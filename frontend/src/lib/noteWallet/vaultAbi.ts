@@ -35,6 +35,11 @@ export const SHIELDED_VAULT_ABI = [
         "internalType": "address",
         "name": "admin",
         "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "nativeAssetIdValue",
+        "type": "uint256"
       }
     ],
     "stateMutability": "nonpayable",
@@ -75,6 +80,27 @@ export const SHIELDED_VAULT_ABI = [
   {
     "inputs": [],
     "name": "InvalidProof",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "expected",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "sent",
+        "type": "uint256"
+      }
+    ],
+    "name": "NativeAmountMismatch",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NativeTransferFailed",
     "type": "error"
   },
   {
@@ -800,6 +826,19 @@ export const SHIELDED_VAULT_ABI = [
   },
   {
     "inputs": [],
+    "name": "nativeAssetId",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "nextLeafIndex",
     "outputs": [
       {
@@ -990,7 +1029,7 @@ export const SHIELDED_VAULT_ABI = [
     ],
     "name": "shield",
     "outputs": [],
-    "stateMutability": "nonpayable",
+    "stateMutability": "payable",
     "type": "function"
   },
   {
