@@ -226,11 +226,12 @@ work than what's built here. What *is* real: the backend matcher sizes
 every fill directly off live FTSOv2 data (`backend/src/dark-engine/
 fillSizing.ts`) rather than accepting whatever rate the two order sizes
 happen to imply, refusing to propose a fill at all if no valid one clears
-both sides' minimums at the fair rate — the same disclosed trust model
-Wraith's own matcher documents (it already sees order amounts to build
-proof inputs at all; this is one more thing it's trusted to do, not a new
-category of trust). That's an off-chain policy backstop, not a
-cryptographic guarantee the way the fill/pro-rata-minimum rules above are.
+both sides' minimums at the fair rate — the same disclosed trust model the
+matcher already operates under elsewhere in this document (it already sees
+order amounts to build proof inputs at all; this is one more thing it's
+trusted to do, not a new category of trust). That's an off-chain policy
+backstop, not a cryptographic guarantee the way the fill/pro-rata-minimum
+rules above are.
 
 ## Merkle tree
 

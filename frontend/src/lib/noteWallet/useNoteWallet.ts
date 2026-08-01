@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef } from "react";
 import { useAccount, usePublicClient, useSignMessage } from "wagmi";
 import type { Hex } from "viem";
-import { DERIVATION_MESSAGE, deriveBlinding, deriveSpendingKey, randomBlinding } from "./keys";
+import { DERIVATION_MESSAGE, deriveBlinding, deriveDepositBlinding, deriveSpendingKey, randomBlinding } from "./keys";
 import {
   commitment as computeCommitment,
   nullifierHash as computeNullifierHash,
@@ -11,7 +11,9 @@ import {
   ownerKey as computeOwnerKey,
 } from "./poseidon2";
 import {
+  countDepositNotes,
   getNextDerivationIndex,
+  getNotesForWallet,
   getUnspentNotesForWallet,
   markNoteSpent,
   saveNote,
@@ -19,7 +21,7 @@ import {
   type StoredNote,
   type StoredOrderNote,
 } from "./store";
-import { fetchAllLeaves, isNullifierSpentOnChain } from "./scan";
+import { fetchAllLeaves, isNullifierSpentOnChain, scanShieldedDeposits } from "./scan";
 import { fetchIncomingAnnouncements, fetchIncomingOrderAnnouncements, type AnnouncedOrder } from "./announcer";
 import { MerkleTree, type MerkleProof } from "./merkleTree";
 
@@ -34,6 +36,8 @@ interface PreparedNote {
   amount: bigint;
   assetId: bigint;
   derivationIndex: number;
+  /** Set only by prepareDepositNote — see store.ts's StoredRegularNote.source. */
+  source?: "deposit";
 }
 
 interface PreparedOrder {
@@ -57,18 +61,31 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
   const { signMessageAsync } = useSignMessage();
   const publicClient = usePublicClient();
 
-  // Cached in memory only — re-prompts once per page session, never
-  // persisted. There's nothing sensitive in the signature staying only in
-  // memory; the risk this avoids is a stale/replayed signature living in
-  // storage longer than the tab does.
-  const signatureRef = useRef<Hex | null>(null);
+  // Persisted per-address in localStorage, not memory-only — a deliberate
+  // tradeoff: the signature never authorizes a transaction by itself (see
+  // DERIVATION_MESSAGE) and now that a vault session survives a reload too
+  // (see app-provider.tsx's ENTERED_STORAGE_KEY), re-prompting on every
+  // reload anyway would just be friction with no real security benefit left
+  // to protect. Keyed by address so switching wallets can't reuse a stale
+  // signature for the wrong one.
+  const signatureRef = useRef<{ address: string; signature: Hex } | null>(null);
 
   const getSignature = useCallback(async (): Promise<Hex> => {
-    if (signatureRef.current) return signatureRef.current;
+    if (!address) throw new Error("Wallet not connected");
+    if (signatureRef.current?.address === address) return signatureRef.current.signature;
+
+    const storageKey = `umbra:signature:${address.toLowerCase()}`;
+    const stored = localStorage.getItem(storageKey) as Hex | null;
+    if (stored) {
+      signatureRef.current = { address, signature: stored };
+      return stored;
+    }
+
     const sig = await signMessageAsync({ message: DERIVATION_MESSAGE });
-    signatureRef.current = sig;
+    signatureRef.current = { address, signature: sig };
+    localStorage.setItem(storageKey, sig);
     return sig;
-  }, [signMessageAsync]);
+  }, [address, signMessageAsync]);
 
   /** This wallet's persistent private spending key — never leaves this function's caller. */
   const getSpendingKey = useCallback(async (): Promise<bigint> => {
@@ -91,6 +108,28 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       const blinding = deriveBlinding(signature, index);
       const commitment = computeCommitment(assetId, amount, computeOwnerKey(spendingKey), blinding);
       return { kind: "note", blinding, commitment, amount, assetId, derivationIndex: index };
+    },
+    [address, getSignature]
+  );
+
+  /**
+   * Like `prepareNote`, but specifically for a Shield deposit: uses
+   * deterministic, recoverable blinding (deriveDepositBlinding) instead of
+   * the plain local-index one, so this exact note can be found again by
+   * `recoverDepositNotes` from a different browser/device. `derivationIndex`
+   * here is still just a local unique-id source (confirmNote's `id`), not
+   * part of the blinding itself.
+   */
+  const prepareDepositNote = useCallback(
+    async (amount: bigint, assetId: bigint): Promise<PreparedNote> => {
+      if (!address) throw new Error("Wallet not connected");
+      const signature = await getSignature();
+      const spendingKey = deriveSpendingKey(signature);
+      const salt = await countDepositNotes(address, assetId.toString(), amount.toString());
+      const blinding = deriveDepositBlinding(signature, assetId, amount, salt);
+      const commitment = computeCommitment(assetId, amount, computeOwnerKey(spendingKey), blinding);
+      const derivationIndex = await getNextDerivationIndex(address);
+      return { kind: "note", blinding, commitment, amount, assetId, derivationIndex, source: "deposit" };
     },
     [address, getSignature]
   );
@@ -147,7 +186,7 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       };
       const stored: StoredNote =
         prepared.kind === "note"
-          ? { ...base, kind: "note", blinding: prepared.blinding.toString() }
+          ? { ...base, kind: "note", blinding: prepared.blinding.toString(), ...(prepared.source ? { source: prepared.source } : {}) }
           : {
               ...base,
               kind: "order",
@@ -318,12 +357,82 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
     [publicClient, vaultAddress, deployBlock]
   );
 
+  /**
+   * Recovers this wallet's own Shield deposit notes from on-chain data alone
+   * — the point of prepareDepositNote's deterministic blinding. For every
+   * distinct `(assetId, amount)` any deposit into this vault ever used,
+   * tries salt 0, 1, 2, ... recomputing the candidate commitment this
+   * wallet's key would have produced at that salt, and checks it against
+   * the real on-chain commitments for that pair; stops at the first salt
+   * with no match (salts are assigned strictly sequentially, so a gap means
+   * there are no more). Newly-found notes are saved locally exactly like a
+   * fresh deposit would be, backfilling `spent` from the real nullifier
+   * state. Returns how many new notes were recovered.
+   */
+  const recoverDepositNotes = useCallback(async (): Promise<number> => {
+    if (!address || !publicClient || !vaultAddress) return 0;
+    const [signature, deposits, known] = await Promise.all([
+      getSignature(),
+      scanShieldedDeposits(publicClient, vaultAddress, deployBlock),
+      getNotesForWallet(address),
+    ]);
+    const spendingKey = deriveSpendingKey(signature);
+    const ownOwnerKey = computeOwnerKey(spendingKey);
+    const knownCommitments = new Set(known.map((n) => n.commitment.toLowerCase()));
+
+    const groups = new Map<string, typeof deposits>();
+    for (const d of deposits) {
+      const key = `${d.assetId}:${d.amount}`;
+      const list = groups.get(key);
+      if (list) list.push(d);
+      else groups.set(key, [d]);
+    }
+
+    let recovered = 0;
+    for (const [key, group] of groups) {
+      const [assetIdStr, amountStr] = key.split(":");
+      const assetId = BigInt(assetIdStr);
+      const amount = BigInt(amountStr);
+      const byCommitment = new Map(group.map((d) => [d.commitment, d]));
+
+      for (let salt = 0; ; salt += 1) {
+        const blinding = deriveDepositBlinding(signature, assetId, amount, salt);
+        const candidateCommitment = computeCommitment(assetId, amount, ownOwnerKey, blinding);
+        const match = byCommitment.get(candidateCommitment);
+        if (!match) break;
+
+        if (knownCommitments.has(toHex(candidateCommitment).toLowerCase())) continue;
+        const nh = computeNullifierHash(candidateCommitment, spendingKey);
+        const spent = await isNullifierSpentOnChain(publicClient, vaultAddress, nh);
+        const derivationIndex = await getNextDerivationIndex(address);
+        const stored: StoredNote = {
+          id: `${address}:${derivationIndex}`,
+          walletAddress: address,
+          derivationIndex,
+          kind: "note",
+          blinding: blinding.toString(),
+          commitment: toHex(candidateCommitment),
+          amount: amount.toString(),
+          assetId: assetId.toString(),
+          leafIndex: match.leafIndex,
+          spent,
+          createdAt: Date.now(),
+          source: "deposit",
+        };
+        await saveNote(stored);
+        recovered += 1;
+      }
+    }
+    return recovered;
+  }, [address, publicClient, vaultAddress, deployBlock, getSignature]);
+
   return useMemo(
     () => ({
       getSignature,
       getSpendingKey,
       getOwnerKey,
       prepareNote,
+      prepareDepositNote,
       prepareOrderNote,
       buildRecipientNote,
       confirmNote,
@@ -334,6 +443,7 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       scanIncomingOrders,
       claimIncomingOrder,
       getMerkleProof,
+      recoverDepositNotes,
       setNoteLeafIndex,
     }),
     [
@@ -341,6 +451,7 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       getSpendingKey,
       getOwnerKey,
       prepareNote,
+      prepareDepositNote,
       prepareOrderNote,
       buildRecipientNote,
       confirmNote,
@@ -351,6 +462,7 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       scanIncomingOrders,
       claimIncomingOrder,
       getMerkleProof,
+      recoverDepositNotes,
     ]
   );
 }

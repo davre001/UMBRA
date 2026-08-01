@@ -22,6 +22,8 @@ interface StoredNoteBase {
 export interface StoredRegularNote extends StoredNoteBase {
   kind: "note";
   blinding: string; // bigint as decimal string
+  /** Set only for deposit notes (deterministic blinding, see keys.ts's deriveDepositBlinding) — undefined for everything else (cancel-order refunds, claimed pay/match notes), which stay randomly/index-blinded. */
+  source?: "deposit";
 }
 
 /**
@@ -109,4 +111,10 @@ export async function getNextDerivationIndex(walletAddress: string): Promise<num
   const notes = await getNotesForWallet(walletAddress);
   if (notes.length === 0) return 0;
   return Math.max(...notes.map((n) => n.derivationIndex)) + 1;
+}
+
+/** How many deposit notes of this exact `(assetId, amount)` pair this wallet already has locally — the next deterministic deposit blinding's `salt` (see keys.ts's deriveDepositBlinding). Counts every locally-known deposit note regardless of spent status, since salt assignment must never be reused even after a note is spent. */
+export async function countDepositNotes(walletAddress: string, assetId: string, amount: string): Promise<number> {
+  const notes = await getNotesForWallet(walletAddress);
+  return notes.filter((n) => n.kind === "note" && n.source === "deposit" && n.assetId === assetId && n.amount === amount).length;
 }

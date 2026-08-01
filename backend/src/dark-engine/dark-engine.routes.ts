@@ -39,7 +39,7 @@ darkEngineRouter.post("/orders", async (req, res, next) => {
   }
 });
 
-/** Commitments + timestamps only — never order details, same disclosure boundary Wraith's matcher documents for its own book. */
+/** Commitments + timestamps only — never order details, same disclosed trust boundary as the rest of this matcher (see circuits/DESIGN.md). */
 darkEngineRouter.get("/orders", (_req, res) => {
   res.json({ orders: listOpenOrders() });
 });

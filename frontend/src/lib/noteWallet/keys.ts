@@ -28,6 +28,23 @@ export function deriveBlinding(walletSignature: Hex, index: number): bigint {
   return deriveField(walletSignature, "blinding", index);
 }
 
+/**
+ * Deterministic blinding for a shield deposit of `(assetId, amount)`, at
+ * this wallet's `salt`-th deposit of that exact pair. Unlike
+ * `deriveBlinding`'s plain index (meaningless outside the browser that
+ * assigned it), `assetId`/`amount` are already public on-chain the moment a
+ * deposit lands (the `shield()` call itself, not a proof) — so a fresh
+ * device can recompute this and search on-chain commitments for a match,
+ * recovering a self-created deposit note without needing the original
+ * browser's local storage. `salt` must be assigned strictly sequentially
+ * per `(assetId, amount)` pair (see countDepositNotes / recoverDepositNotes)
+ * for both the forward and recovery paths to agree on the same mapping.
+ */
+export function deriveDepositBlinding(walletSignature: Hex, assetId: bigint, amount: bigint, salt: number): bigint {
+  const hash = keccak256(toBytes(`umbra-note:${walletSignature}:deposit-blinding:${assetId.toString()}:${amount.toString()}:${salt}`));
+  return BigInt(hash) % FIELD_PRIME;
+}
+
 /** A fresh random blinding for a note credited to someone else's ownerKey — not reproducible, doesn't need to be. */
 export function randomBlinding(): bigint {
   const bytes = crypto.getRandomValues(new Uint8Array(31)); // < 2^248, comfortably under FIELD_PRIME

@@ -1,11 +1,10 @@
 /**
  * An order's private preimage, submitted by its own trader after `placeOrder`
- * confirms on-chain. Same trust tradeoff Wraith's matcher docs disclose for
- * their own dark pool: the matcher CAN see submitted order details (asset,
- * amount, price bound) but CANNOT steal funds or redirect settlement — every
- * output note it builds must reproduce a commitment the on-chain UltraHonk
- * verifier accepts, and that commitment is bound to each trader's own
- * published `ownerKey`, never the matcher's.
+ * confirms on-chain. A disclosed trust tradeoff: the matcher CAN see
+ * submitted order details (asset, amount, price bound) but CANNOT steal
+ * funds or redirect settlement — every output note it builds must reproduce
+ * a commitment the on-chain UltraHonk verifier accepts, and that commitment
+ * is bound to each trader's own published `ownerKey`, never the matcher's.
  *
  * `spendingKey` is this wallet's persistent note-spending key, reused as the
  * order's own owner_key(spendingKey) too (circuits/DESIGN.md's "an order"

@@ -32,8 +32,8 @@ export class OrderBook {
   }
 
   list(): PublicOrderView[] {
-    // Commitments only, never order details — same disclosure boundary
-    // Wraith's matcher documents for its own GET /orders.
+    // Commitments only, never order details — same disclosure boundary the
+    // rest of this module's docs describe for the matcher as a whole.
     return [...this.open.values()].map((o) => ({ commitment: o.commitment, submittedAt: o.submittedAt }));
   }
 

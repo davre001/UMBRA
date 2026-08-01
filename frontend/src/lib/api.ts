@@ -28,8 +28,8 @@ export interface SubmitOrderResult {
  * Hands a just-placed order's private preimage to the matcher so it can
  * actually be matched — placeOrder() itself only puts the opaque
  * order_commitment on-chain, the matcher needs the real amounts/assets to
- * find a counterparty (same disclosure Wraith's own matcher documents: it
- * CAN see order details, CANNOT steal funds — see circuits/DESIGN.md).
+ * find a counterparty (a disclosed trust boundary: the matcher CAN see order
+ * details, CANNOT steal funds — see circuits/DESIGN.md).
  */
 export async function submitOrderToMatcher(order: OrderIntentBody): Promise<SubmitOrderResult> {
   const res = await fetch(`${API_URL}/api/dark-engine/orders`, {

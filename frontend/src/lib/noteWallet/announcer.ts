@@ -7,8 +7,8 @@ import { decodeAbiParameters, encodeAbiParameters, type PublicClient } from "vie
  * This is NOT full EIP-5564 stealth addressing (schemeId 1, reserved by the
  * contract's own doc comment) — there's no ephemeral-keypair ECDH here, and
  * `stealthAddress` is just the recipient's ordinary wallet address, not a
- * fresh one-time destination. That tradeoff follows directly from adopting
- * Wraith's reused-ownerKey note scheme (circuits/DESIGN.md) instead of full
+ * fresh one-time destination. That tradeoff follows directly from this
+ * project's reused-ownerKey note scheme (circuits/DESIGN.md) instead of full
  * per-payment stealth addresses: metadata is announced in the clear rather
  * than ECDH-encrypted. This adds no new privacy loss beyond what `pay`
  * already exposes on-chain — assetId/amount/commitment are already public

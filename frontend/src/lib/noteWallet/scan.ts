@@ -1,15 +1,19 @@
-import type { PublicClient } from "viem";
+import { decodeFunctionData, type PublicClient } from "viem";
 import { SHIELDED_VAULT_ABI } from "./vaultAbi";
 import { ZERO_VALUE } from "./merkleTree";
 
-// Only these three methods are used — narrowing to them (rather than the
-// full PublicClient) sidesteps a real but irrelevant type mismatch: wagmi's
+// Only these methods are used — narrowing to them (rather than the full
+// PublicClient) sidesteps a real but irrelevant type mismatch: wagmi's
 // config includes op-stack chains whose Block/transaction shape doesn't
 // structurally match viem's default PublicClient generic, which otherwise
 // blocks passing wagmi's usePublicClient() result in directly. getLogs/
 // readContract/getBlockNumber's own signatures don't involve that Block
-// type at all.
-type ScanClient = Pick<PublicClient, "getLogs" | "readContract" | "getBlockNumber">;
+// type at all. `getTransaction` is narrowed to just the `input` field
+// deposit recovery needs, for the same reason — not viem's full Transaction
+// return type.
+type ScanClient = Pick<PublicClient, "getLogs" | "readContract" | "getBlockNumber"> & {
+  getTransaction: (args: { hash: `0x${string}` }) => Promise<{ input: `0x${string}` }>;
+};
 
 const LEAF_EVENTS = ["Shielded", "Paid", "OrderPlaced", "OrderCancelled"] as const;
 
@@ -180,4 +184,47 @@ export async function isNullifierSpentOnChain(
     functionName: "isSpentNullifier",
     args: [nullifierHash],
   }) as Promise<boolean>;
+}
+
+export interface ShieldedDeposit {
+  assetId: bigint;
+  amount: bigint;
+  commitment: bigint;
+  leafIndex: number;
+}
+
+/**
+ * Every `Shielded` deposit ever made into this vault, with its real amount —
+ * the `Shielded` event itself only carries `assetId`/`commitment`/`leafIndex`
+ * (see ShieldedVault.sol), not `amount`, so each event's own transaction
+ * calldata is decoded to recover it. `shield()` isn't proof-gated at all
+ * (deposits are public by design — see circuits/DESIGN.md), so this is
+ * exactly as public as the event itself, not a new disclosure.
+ *
+ * Used only by deposit-note recovery (deriveDepositBlinding's `salt` search)
+ * — real RPC cost (one extra call per historical deposit across the whole
+ * vault, not just this wallet's own), so callers should treat this as an
+ * explicit, occasional action, not something run on every page load.
+ */
+export async function scanShieldedDeposits(
+  client: ScanClient,
+  vaultAddress: `0x${string}`,
+  fromBlock: bigint = BigInt(0)
+): Promise<ShieldedDeposit[]> {
+  const toBlock = await client.getBlockNumber();
+  const shieldedEvent = SHIELDED_VAULT_ABI.find((e) => e.type === "event" && e.name === "Shielded");
+  const shieldFn = SHIELDED_VAULT_ABI.find((e) => e.type === "function" && e.name === "shield");
+  const logs = (await getLogsChunked(client, vaultAddress, shieldedEvent, fromBlock, toBlock)) as unknown as {
+    args: { assetId: bigint; commitment: bigint; leafIndex: number };
+    transactionHash: `0x${string}`;
+  }[];
+
+  return Promise.all(
+    logs.map(async (log) => {
+      const tx = await client.getTransaction({ hash: log.transactionHash });
+      const decoded = decodeFunctionData({ abi: [shieldFn], data: tx.input }) as unknown as { args: readonly [bigint, bigint, bigint] };
+      const [, amount] = decoded.args;
+      return { assetId: log.args.assetId, amount, commitment: log.args.commitment, leafIndex: log.args.leafIndex };
+    })
+  );
 }

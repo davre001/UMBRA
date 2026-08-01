@@ -80,6 +80,9 @@ export default function ShieldPage() {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [step, setStep] = useState<FlowStep>('idle');
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
+  const [recovering, setRecovering] = useState(false);
+  const [bulkWithdrawing, setBulkWithdrawing] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
 
   const assetConfig = deployment?.assets[asset];
   const onCoston2 = chainId === COSTON2_CHAIN_ID;
@@ -154,7 +157,7 @@ export default function ShieldPage() {
         setStep('submitting');
       }
 
-      const note = await noteWallet.prepareNote(amountBaseUnits, BigInt(assetConfig.assetId));
+      const note = await noteWallet.prepareDepositNote(amountBaseUnits, BigInt(assetConfig.assetId));
       const shieldHash = await writeContractAsync({
         address: vaultAddress,
         abi: SHIELDED_VAULT_ABI,
@@ -181,6 +184,48 @@ export default function ShieldPage() {
     }
   };
 
+  /** Proves + submits one withdrawal, waits for confirmation, returns the tx hash. Shared by the single-note flow and Unshield All — `onStep` lets a caller drive its own progress UI, or omit it for a silent/batched call. */
+  const withdrawOneNote = async (
+    note: StoredNote,
+    destination: `0x${string}`,
+    onStep?: (step: 'proving' | 'submitting' | 'confirming') => void
+  ): Promise<`0x${string}`> => {
+    if (!publicClient || !vaultAddress) throw new Error('No public client / vault address');
+    if (note.kind !== 'note') throw new Error('Selected item is not a spendable note.');
+
+    onStep?.('proving');
+    const merklePath = await noteWallet.getMerkleProof(note);
+    const spendingKey = await noteWallet.getSpendingKey();
+    const amountValue = BigInt(note.amount);
+    const assetIdValue = BigInt(note.assetId);
+    const nullifierHashValue = computeNullifierHash(BigInt(note.commitment), spendingKey);
+
+    const proofHex = await proveWithdraw({
+      root: merklePath.root,
+      nullifierHash: nullifierHashValue,
+      amount: amountValue,
+      assetId: assetIdValue,
+      recipient: BigInt(destination),
+      note: {
+        spendingKey,
+        blinding: BigInt(note.blinding),
+        merklePath: { pathElements: merklePath.pathElements, pathIndices: merklePath.pathIndices },
+      },
+    });
+
+    onStep?.('submitting');
+    const withdrawHash = await writeContractAsync({
+      address: vaultAddress,
+      abi: SHIELDED_VAULT_ABI,
+      functionName: 'withdraw',
+      args: [proofHex, merklePath.root, nullifierHashValue, amountValue, assetIdValue, destination],
+    });
+
+    onStep?.('confirming');
+    await publicClient.waitForTransactionReceipt({ hash: withdrawHash });
+    return withdrawHash;
+  };
+
   const handleWithdraw = async () => {
     if (!walletAddress || !publicClient || !deployment || !assetConfig || !vaultAddress) return;
     const note = assetNotes.find((n) => n.id === selectedNoteId);
@@ -194,38 +239,8 @@ export default function ShieldPage() {
     }
 
     try {
-      if (note.kind !== 'note') throw new Error('Selected item is not a spendable note.');
-
-      setStep('proving');
-      const merklePath = await noteWallet.getMerkleProof(note);
-      const spendingKey = await noteWallet.getSpendingKey();
       const amountValue = BigInt(note.amount);
-      const assetIdValue = BigInt(note.assetId);
-      const nullifierHashValue = computeNullifierHash(BigInt(note.commitment), spendingKey);
-
-      const proofHex = await proveWithdraw({
-        root: merklePath.root,
-        nullifierHash: nullifierHashValue,
-        amount: amountValue,
-        assetId: assetIdValue,
-        recipient: BigInt(effectiveDestination),
-        note: {
-          spendingKey,
-          blinding: BigInt(note.blinding),
-          merklePath: { pathElements: merklePath.pathElements, pathIndices: merklePath.pathIndices },
-        },
-      });
-
-      setStep('submitting');
-      const withdrawHash = await writeContractAsync({
-        address: vaultAddress,
-        abi: SHIELDED_VAULT_ABI,
-        functionName: 'withdraw',
-        args: [proofHex, merklePath.root, nullifierHashValue, amountValue, assetIdValue, effectiveDestination],
-      });
-
-      setStep('confirming');
-      await publicClient.waitForTransactionReceipt({ hash: withdrawHash });
+      const withdrawHash = await withdrawOneNote(note, effectiveDestination as `0x${string}`, setStep);
       await noteWallet.refreshSpentStatus();
 
       setLastTxHash(withdrawHash);
@@ -242,6 +257,68 @@ export default function ShieldPage() {
       const message = err instanceof Error ? err.message : 'Withdrawal failed.';
       addNotification('Withdraw Request Failed', message, 'error');
       setStep('idle');
+    }
+  };
+
+  const handleUnshieldAll = async () => {
+    if (!walletAddress || !assetConfig || !effectiveDestination) {
+      addNotification('Missing Destination', 'Enter a destination address.', 'error');
+      return;
+    }
+    const notes = assetNotes.filter((n) => n.kind === 'note');
+    if (notes.length === 0) return;
+
+    setBulkWithdrawing(true);
+    setBulkProgress({ done: 0, total: notes.length });
+    let succeeded = 0;
+    let failed = 0;
+    let totalAmount = BigInt(0);
+    for (let i = 0; i < notes.length; i++) {
+      try {
+        await withdrawOneNote(notes[i], effectiveDestination as `0x${string}`);
+        succeeded += 1;
+        totalAmount += BigInt(notes[i].amount);
+      } catch {
+        failed += 1;
+      }
+      setBulkProgress({ done: i + 1, total: notes.length });
+    }
+    await noteWallet.refreshSpentStatus();
+    setBulkWithdrawing(false);
+    setBulkProgress(null);
+    setSelectedNoteId(null);
+    queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
+    queryClient.invalidateQueries({ queryKey: ['publicBalance', chainId, asset, walletAddress] });
+
+    if (succeeded > 0) {
+      addNotification(
+        'Unshield All Complete',
+        `Withdrew ${succeeded} note${succeeded === 1 ? '' : 's'} (${formatUnits(totalAmount, assetConfig.decimals)} ${asset})${failed ? `, ${failed} failed` : ''}.`,
+        failed ? 'warning' : 'success'
+      );
+    } else {
+      addNotification('Unshield All Failed', 'None of the selected notes could be withdrawn.', 'error');
+    }
+  };
+
+  const handleRecoverDeposits = async () => {
+    if (!walletAddress) return;
+    setRecovering(true);
+    try {
+      const count = await noteWallet.recoverDepositNotes();
+      queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
+      addNotification(
+        count > 0 ? 'Deposits Recovered' : 'Nothing to Recover',
+        count > 0
+          ? `Found ${count} shielded deposit${count === 1 ? '' : 's'} from this wallet's on-chain history.`
+          : "No deposit notes for this wallet were found beyond what's already in this browser.",
+        count > 0 ? 'success' : 'info'
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Recovery failed.';
+      addNotification('Recovery Failed', message, 'error');
+    } finally {
+      setRecovering(false);
     }
   };
 
@@ -312,6 +389,7 @@ export default function ShieldPage() {
 
   const submitDisabled =
     (step !== 'idle' && step !== 'finalized') ||
+    bulkWithdrawing ||
     (isWalletConnected && onCoston2 && activeTab === 'withdraw' && (assetNotes.length === 0 || !selectedNoteId));
 
   return (
@@ -320,13 +398,27 @@ export default function ShieldPage() {
 
       <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-extrabold tracking-tight text-text-primary font-display uppercase">
-            Shield Gateway
-          </h1>
-          <p className="text-text-secondary text-xs font-light mt-1 tracking-wider uppercase">
-            Deposit and withdraw real Coston2 assets through the shielded vault
-          </p>
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-extrabold tracking-tight text-text-primary font-display uppercase">
+              Shield Gateway
+            </h1>
+            <p className="text-text-secondary text-xs font-light mt-1 tracking-wider uppercase">
+              Deposit and withdraw real Coston2 assets through the shielded vault
+            </p>
+          </div>
+          {isWalletConnected && onCoston2 && (
+            <button
+              type="button"
+              onClick={handleRecoverDeposits}
+              disabled={recovering}
+              className="flex items-center gap-1.5 self-start sm:self-auto px-3 py-1.5 rounded-lg border border-border-custom bg-surface/30 text-[10px] text-text-secondary hover:text-text-primary hover:border-border-custom/80 transition-all cursor-pointer uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Find shielded deposits made from a different browser or device"
+            >
+              <RefreshCw size={11} className={recovering ? 'animate-spin' : ''} />
+              {recovering ? 'Recovering...' : 'Recover Deposits'}
+            </button>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -439,6 +531,23 @@ export default function ShieldPage() {
                             </button>
                           ))}
                         </div>
+                      )}
+                      {assetNotes.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={handleUnshieldAll}
+                          disabled={bulkWithdrawing || !effectiveDestination}
+                          className="mt-2 flex items-center gap-1.5 text-[10px] text-accent-secondary hover:text-accent-secondary/80 underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {bulkWithdrawing ? (
+                            <>
+                              <RefreshCw size={10} className="animate-spin" />
+                              Unshielding {bulkProgress?.done ?? 0} / {bulkProgress?.total ?? assetNotes.length}...
+                            </>
+                          ) : (
+                            `Unshield All (${assetNotes.length} notes)`
+                          )}
+                        </button>
                       )}
                     </div>
 
