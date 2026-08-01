@@ -1,0 +1,91 @@
+---
+title: Shield Assets
+description: Deposit tokens into the shielded pool, and withdraw them back out publicly.
+---
+
+# Shield Assets
+
+import { Callout } from 'nextra/components';
+
+The **Shield** page has two tabs: *Deposit* moves tokens into the shielded
+pool, *Withdraw* takes them back out to a public address.
+
+## Deposit
+
+1. Pick an asset pool — `C2FLR`, `FXRP`, or `USDT0`.
+2. Enter an amount.
+3. Confirm.
+
+For ERC-20 assets the flow runs four steps:
+
+| Step | What happens |
+| --- | --- |
+| Approve Token | Standard ERC-20 approval for the vault |
+| Submit Deposit | `shield()` with your locally computed commitment |
+| Confirm On-Chain | Wait for the receipt and the `Shielded` event |
+| Settlement | The note is saved with its Merkle leaf index |
+
+Native `C2FLR` skips the approval step — `shield()` takes it directly as
+`msg.value`.
+
+<Callout type="info">
+  No zero-knowledge proof is generated here. Your browser computes
+  `Poseidon2(assetId, amount, ownerKey, blinding)` and submits it alongside a
+  perfectly public transfer. You're publishing a commitment, not spending one.
+</Callout>
+
+### What's public
+
+Everything about the deposit itself. The transfer amount, the asset, and your
+address are all visible on-chain — there is nothing secret about putting money
+in.
+
+What's *not* visible is which shielded note becomes yours afterwards. That
+link is what every later operation protects.
+
+## Withdraw
+
+Withdrawal exits the pool publicly.
+
+1. Select one of your shielded notes.
+2. Enter a destination address.
+3. Confirm.
+
+| Step | What happens |
+| --- | --- |
+| Generate ZK Proof | The `withdraw` circuit proves note ownership in your browser |
+| Submit Withdrawal | `withdraw()` with the proof and public inputs |
+| Confirm On-Chain | Verifier checks the proof, tokens transfer |
+| Settlement | The note's nullifier is marked spent |
+
+Proving happens locally with Noir compiled to WASM and Barretenberg. It takes
+a moment — that's real proof generation, not a simulated delay.
+
+### What's revealed
+
+`withdraw` publishes `root`, `nullifierHash`, `amount`, `assetId`, and
+`recipient`. Amount and asset are unavoidably public, since the payout is a
+plain ERC-20 transfer and the contract needs the real value to move real
+tokens.
+
+What stays hidden is **which** prior deposit this withdrawal traces back to.
+Every note in the tree is a candidate.
+
+<Callout type="warning">
+  Withdrawals are subject to sanction screening. If a `ComplianceRegistry` is
+  configured, the vault reverts with `RecipientNotScreened` unless the
+  destination address has a clear screen on file. See
+  [Compliance](/concepts/compliance).
+</Callout>
+
+### Notes are indivisible
+
+You withdraw a whole note, not an arbitrary amount from a balance. If you want
+finer granularity, shield in the denominations you expect to use.
+
+## If you want privacy on both ends
+
+Shielding is public and withdrawing to your own address is public — doing both
+links them. To actually benefit, put something private in between: a
+[dark pool order](/guides/swap), a [private payment](/guides/pay), or simply
+time and a different destination address.

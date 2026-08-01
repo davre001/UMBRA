@@ -1,0 +1,92 @@
+---
+title: Backend API
+description: REST endpoints for the dark engine, pricing, compliance, relayer, and auth.
+---
+
+# Backend API
+
+import { Callout } from 'nextra/components';
+
+The backend is an Express app serving five routers under `/api`, plus a live
+Swagger UI.
+
+| | |
+| --- | --- |
+| Health check | `GET /health` → `{ "status": "ok" }` |
+| Interactive docs | `GET /docs` (Swagger UI) |
+
+<Callout type="info">
+  The Swagger UI at `/docs` is generated from the live OpenAPI spec and is the
+  authoritative reference for request and response schemas. This page lists the
+  surface; go there for field-level detail.
+</Callout>
+
+Errors are returned as `{ "error": "<message>" }` with status `400`.
+
+## `/api/dark-engine`
+
+The order book and matching engine.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/orders` | Submit an order's private details for matching |
+| `GET` | `/orders` | List resting orders |
+| `GET` | `/matches` | List matches |
+| `GET` | `/matches/:id` | Fetch one match |
+| `GET` | `/matches/:id/proof-inputs` | Public and private inputs for the `match_orders` proof |
+| `POST` | `/matches/:id/proof` | Submit a generated proof for settlement |
+
+`POST /orders` is what the Swap page calls *after* the on-chain `placeOrder()`
+confirms. The order is already placed and authorized by then — this only makes
+it findable for matching, which is why a failure here is reported separately
+rather than as an order failure.
+
+## `/api/pricing`
+
+Live rates sourced from Flare's **FTSOv2**.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/` | All supported asset prices |
+| `GET` | `/:fromAsset/:toAsset` | Rate for one pair |
+
+The matcher uses these to size fills, so the realized rate for a filled
+portion is the fair rate by construction.
+
+## `/api/compliance`
+
+Sanction screening. See [Compliance](/concepts/compliance) for the trust
+model.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/screen` | Submit an address for screening |
+| `GET` | `/:address` | Read the current screen result |
+
+A clear result must be on file in `ComplianceRegistry` before that address can
+receive a `withdraw`.
+
+## `/api/relayer`
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/relay` | Submit a transaction for relaying |
+
+Relaying lets a proof be submitted by an address other than the one it
+benefits, so exiting the pool doesn't require the destination address to hold
+gas. `withdraw`'s `recipient` is a public circuit input, so a relayer cannot
+redirect the payout.
+
+## `/api/auth`
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/passkey/challenge` | Issue a WebAuthn challenge |
+| `POST` | `/passkey/verify` | Verify a passkey assertion |
+
+## What the backend never holds
+
+It has no custody and no authority over funds. Every state change to the vault
+requires a valid zero-knowledge proof verified on-chain. The backend keeps an
+order book, computes fill proposals, and relays — none of which the contracts
+take on trust.

@@ -1,0 +1,84 @@
+---
+title: Compliance
+description: How sanction screening gates withdrawals, and the interim trust model behind ComplianceRegistry.
+---
+
+# Compliance
+
+import { Callout } from 'nextra/components';
+
+Privacy and compliance are usually framed as opposites. Umbra's position is
+narrower and more specific: **screening applies where funds re-enter the open,
+and nowhere else.**
+
+## Where screening applies
+
+| Operation | Screened? | Why |
+| --- | --- | --- |
+| `shield` | No | Public ERC-20 deposit, nothing hidden |
+| `place_order` / `match_orders` / `cancel_order` | No | Funds stay inside the pool |
+| `pay` | No | No plaintext recipient exists to screen |
+| **`withdraw`** | **Yes** | Funds leave the pool to a real address |
+
+`pay` is deliberately unscreened. There is no plaintext recipient to screen —
+the output is a commitment against an `ownerKey`, not an address. The moment
+those funds want to become real tokens at a real address, `withdraw` runs the
+check.
+
+## ComplianceRegistry
+
+A small contract recording sanction-screen results:
+
+```solidity
+struct ScreenResult {
+    bool clear;
+    uint64 screenedAt;
+}
+
+function screen(address account, bool clear) external onlyRole(ATTESTER_ROLE);
+function isScreened(address account) external view returns (bool);
+```
+
+`ShieldedVault` holds an optional reference to it. When set, `withdraw`
+reverts with `RecipientNotScreened` unless the recipient has a clear screen on
+file:
+
+```solidity
+if (address(complianceRegistry) != address(0) && !complianceRegistry.isScreened(recipient)) {
+    revert RecipientNotScreened(recipient);
+}
+```
+
+The registry address is settable by the vault's admin role, so the gate can be
+attached or detached without redeploying the vault.
+
+<Callout type="warning">
+  **Interim trust model.** A real deployment verifies the screen result via an
+  FDC attestation proof before recording it. That verification isn't wired up
+  yet, so recording is instead restricted to `ATTESTER_ROLE` holders — the
+  off-chain compliance service.
+
+  The intended path is to swap `screen()`'s access check for FDC proof
+  verification once available. `isScreened` stays identical for downstream
+  callers, so the vault needs no change when that happens.
+</Callout>
+
+## The screening service
+
+Screening itself runs off-chain and is exposed through the backend's
+compliance router:
+
+- `POST /api/compliance/screen` — submit an address for screening
+- `GET /api/compliance/:address` — read the current result
+
+See the [Backend API reference](/reference/api) for details.
+
+## What this does and doesn't buy you
+
+It gates the **exit**, using a result an attester vouched for. It does not
+deanonymize activity inside the pool, and it does not let anyone reconstruct
+who traded with whom — the vault has no such information to give up.
+
+Equally, it is only as good as the attester and, today, the access control
+standing in for FDC verification. That is stated here rather than glossed
+over.

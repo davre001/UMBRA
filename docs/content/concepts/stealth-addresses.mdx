@@ -1,0 +1,98 @@
+---
+title: Note Delivery
+description: How a recipient discovers a note someone created for them, via OwnerKeyRegistry and StealthAnnouncer.
+---
+
+# Note Delivery
+
+import { Callout } from 'nextra/components';
+
+A note created for you is just a leaf in a Merkle tree. Nothing about it says
+"this belongs to that address." So two problems need solving: how a sender
+finds out what to build the note against, and how you find out it exists.
+
+## OwnerKeyRegistry — finding a recipient
+
+Building a note for someone requires their public `ownerKey`. A wallet
+address alone doesn't reveal it, since deriving it needs that wallet's own
+signature.
+
+`OwnerKeyRegistry` is a small standalone contract where a wallet publishes its
+`ownerKey` once:
+
+```solidity
+function register(uint256 ownerKey) external;
+function isRegistered(address account) external view returns (bool);
+mapping(address => uint256) public ownerKeyOf;
+```
+
+`pay` looks the recipient up here before building the output commitment. If a
+recipient hasn't registered, the app refuses rather than inserting an
+unspendable leaf.
+
+The contract is deliberately standalone — `ShieldedVault` never reads it. It
+is a lookup helper for callers building proof inputs off-chain. There is also
+no removal or rotation function: a wallet can always overwrite its own entry
+with a fresh `ownerKey`, and the contract never has to reason about which one
+is "current" beyond the latest value on file.
+
+See the [Receive guide](/guides/receive) for the user-facing flow.
+
+## StealthAnnouncer — discovering an incoming note
+
+Once a note exists on-chain, its recipient still needs the private values —
+the `blinding` in particular — to ever spend it.
+
+`StealthAnnouncer` is an on-chain announcement log following the EIP-5564
+`Announcement` event shape:
+
+```solidity
+event Announcement(
+    uint256 indexed schemeId,
+    address indexed stealthAddress,
+    address indexed caller,
+    bytes ephemeralPubKey,
+    bytes metadata
+);
+```
+
+Anyone may announce. Umbra uses two scheme IDs of its own:
+
+| Scheme ID | Carries |
+| --- | --- |
+| `2` | A `pay`-created note: `assetId`, `amount`, `blinding`, `commitment` |
+| `3` | A partial fill's residual order: `assetIn`, `assetOut`, `amountIn`, `minAmountOut`, `blinding`, `commitment`, `originalAmountIn` |
+
+Scheme ID `1` is left alone — it is reserved by the contract's own
+documentation for real EIP-5564 secp256k1 announcements.
+
+<Callout type="warning">
+  **This is not full EIP-5564 stealth addressing.** There is no ephemeral
+  keypair ECDH here, and `stealthAddress` is the recipient's ordinary wallet
+  address, not a fresh one-time destination. Metadata is announced in the
+  clear rather than ECDH-encrypted.
+
+  That follows directly from the reused-`ownerKey` note scheme (see
+  [Shielded Notes](/concepts/notes)) rather than per-payment stealth
+  addresses. It adds **no new privacy loss beyond what `pay` already exposes
+  on-chain** — `assetId`, `amount`, and `commitment` are already public inputs
+  on the `pay()` call itself. The `blinding` is the only genuinely new value
+  revealed, and on its own it doesn't let anyone but the `spendingKey` holder
+  spend the note.
+</Callout>
+
+## Residual orders come back to you automatically
+
+When a partial fill leaves a residual, it is announced on scheme ID `3` and —
+since the matcher already holds every detail needed to keep it tradeable —
+re-listed on the order book immediately. You don't have to notice and
+resubmit it.
+
+## Scanning
+
+Your wallet reconstructs its notes by scanning the chain's full event history
+from the vault's deploy block, matching announcements and commitments against
+your derived keys. Results are cached in IndexedDB.
+
+That means clearing site data is recoverable — the scan rebuilds everything —
+but the first scan on a new device walks a lot of history and takes a moment.

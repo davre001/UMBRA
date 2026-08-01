@@ -1,0 +1,133 @@
+---
+title: Shielded Notes
+description: How Umbra represents private balances as commitments, and why publishing your ownerKey is safe.
+---
+
+# Shielded Notes
+
+import { Callout } from 'nextra/components';
+
+Umbra doesn't track balances. It tracks **notes** — individual, indivisible
+records of "someone owns this much of this asset" — and hides which one is
+yours.
+
+The scheme is adapted from Tornado Cash's commitment/nullifier pattern,
+extended for variable amounts and multiple assets rather than a single fixed
+denomination.
+
+## What a note is
+
+```
+note = { assetId, amount, ownerKey, blinding }
+```
+
+| Field | Meaning |
+| --- | --- |
+| `assetId` | The allowlisted token's index in `ShieldedVault` — not the raw address, to keep the hashed field small |
+| `amount` | Raw token units, matching the ERC-20's own decimals |
+| `ownerKey` | The public value identifying the owner |
+| `blinding` | A fresh random field element, unique per note |
+
+The `blinding` is what stops two notes for the same amount, asset, and owner
+from producing an identical commitment.
+
+## Keys
+
+```
+ownerKey = Poseidon2(spendingKey, 0)
+```
+
+Your **spending key** is derived once from a wallet signature and reused
+across every note you own. It never leaves your browser.
+
+Your **ownerKey** is derived from it and is safe to publish — on
+`OwnerKeyRegistry`, in an event log, anywhere. Knowing someone's `ownerKey`
+lets you build a note *for* them. It does not let you spend one.
+
+<Callout type="info">
+  Because the spending key is deterministic from your wallet signature, there
+  is no separate seed phrase. The same wallet always regenerates the same
+  keys.
+</Callout>
+
+## Commitments and nullifiers
+
+Two hashes carry the whole design:
+
+```
+commitment    = Poseidon2(assetId, amount, ownerKey, blinding)
+nullifierHash = Poseidon2(commitment, spendingKey)
+```
+
+The **commitment** is what goes on-chain, inserted as a leaf in the vault's
+Merkle tree. It reveals nothing — it's a Poseidon2 output over values only
+you know.
+
+The **nullifier hash** is revealed when you spend. The vault records it so
+the same note can't be spent twice. Only whoever holds the `spendingKey`
+behind a note's `ownerKey` can compute it, and because it's bound to that
+note's specific commitment, reusing one spending key across all your notes
+never produces the same nullifier twice.
+
+That property is exactly what makes notes payable to other people. To pay
+someone, you build a commitment against *their* `ownerKey` — and you never
+touch anything that would let you spend it yourself.
+
+## Spending a note
+
+`withdraw` and `pay` prove the same core statement:
+
+> *I know a note whose commitment is one of the leaves under this Merkle
+> root, here is its nullifier hash, and it hasn't been spent before.*
+
+Crucially, the proof never reveals **which** leaf. Every other note in the
+tree is a candidate — that's your anonymity set.
+
+The circuit checks three things:
+
+1. The commitment really is `Poseidon2(assetId, amount, Poseidon2(spendingKey, 0), blinding)`
+2. The nullifier hash really is `Poseidon2(commitment, spendingKey)`
+3. The Merkle path from that commitment up to the claimed root is valid — 20
+   Poseidon2 hashes, direction chosen per level
+
+The vault then checks the root is one it has seen, checks the nullifier is
+fresh, marks it spent, and either transfers ERC-20 out (`withdraw`) or
+inserts the new output commitment as a leaf (`pay`).
+
+## Shielding needs no proof
+
+`shield()` has no circuit at all. You compute the commitment in your browser
+and submit it alongside an ordinary, fully public ERC-20 `transferFrom`.
+
+There is nothing secret to prove yet — you're *publishing* a commitment, not
+*spending* one. The vault simply inserts it as a new leaf.
+
+## The Merkle tree
+
+- **Depth 20** — the same choice Tornado Cash uses, giving roughly 1,048,576
+  note slots.
+- **Poseidon2** for internal nodes, the same hash family as the commitments
+  themselves. One hash implementation to trust, in-circuit and on-chain.
+- `ShieldedVault` keeps the **full history** of every root that has ever been
+  current, not a bounded recent window. Otherwise a proof built against a
+  root that has since moved on — because someone else's shield landed first —
+  would wrongly fail.
+- The empty-leaf constant is `ZERO_VALUE = keccak256("umbra-shielded-vault-noir") % Fr`.
+  It is domain-separated so no real commitment can ever equal it.
+
+## Two kinds of leaf, one tree
+
+Dark pool orders live in the same Merkle tree as regular notes, using a
+**6-input** commitment instead of a 4-input one:
+
+```
+orderCommitment = Poseidon2(ownerKey, blinding, amountIn, assetIn, assetOut, minAmountOut)
+```
+
+Poseidon2's sponge IV depends on the number of inputs, so a 6-input order
+commitment can never collide with a 4-input note commitment. The two leaf
+kinds coexist with no ambiguity about which circuit is allowed to open which
+leaf.
+
+See [Dark Pool Matching](/concepts/dark-pool) for what happens to those
+order leaves.

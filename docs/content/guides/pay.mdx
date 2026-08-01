@@ -1,0 +1,80 @@
+---
+title: Private Pay
+description: Send a shielded note to another registered wallet without revealing the amount.
+---
+
+# Private Pay
+
+import { Callout } from 'nextra/components';
+
+**Pay** sends one of your shielded notes to someone else. Funds never leave
+the shielded pool — the recipient gets a note, not a transfer.
+
+## Before you can pay someone
+
+The recipient must have **published their payment key** on
+`OwnerKeyRegistry`. A wallet address alone isn't enough to build a note for
+someone; deriving their `ownerKey` requires their own signature.
+
+If the address you enter hasn't registered, the app refuses rather than
+inserting a leaf nobody can spend. Point them at the
+[Receive](/guides/receive) page.
+
+## Sending
+
+1. Pick an asset pool.
+2. Select the shielded note to spend.
+3. Enter the recipient's address.
+4. Confirm.
+
+| Step | What happens |
+| --- | --- |
+| Generate ZK Proof | The `pay` circuit runs in your browser (Noir / UltraHonk) |
+| Submit Payment | `pay()` — nullifier spent, output commitment inserted |
+| Confirm On-Chain | Wait for the `Paid` event |
+| Notify Recipient | Announce the note's private data via `StealthAnnouncer` |
+| Settlement | Done |
+
+The whole note moves. Pay is a straight 1-in-1-out passthrough — there's no
+change output.
+
+## What's private, what isn't
+
+| Value | Visibility |
+| --- | --- |
+| Amount | **Private** |
+| Asset | Public |
+| Which note you spent | Private (only the nullifier is revealed) |
+| Recipient | Not on the `pay()` call itself |
+
+The amount stays private because `pay` never sums anything — the spent note's
+amount moves to the output note unchanged. That meant the circuit only needed
+a real output-commitment check, not the value-conservation and range-proof
+machinery a multi-input/multi-output system would require.
+
+<Callout type="info">
+  The circuit genuinely recomputes the output commitment from the spent note's
+  own amount and asserts equality. That check matters: without it, anyone could
+  pair a proof for spending a trivial note with an arbitrary, uncapped output
+  commitment. An earlier version of the circuit had exactly that hole — a
+  self-referential assertion that was always true — and it's covered by a
+  dedicated regression test now.
+</Callout>
+
+## No compliance gate here
+
+`pay` is not sanction-screened, on purpose. There is no plaintext recipient to
+screen — the output is a commitment against an `ownerKey`, not an address.
+Screening applies at [withdrawal](/guides/shield#withdraw), when funds
+re-enter the open.
+
+## The notify step
+
+After the payment confirms, the app announces the note's private data —
+`assetId`, `amount`, `blinding`, `commitment` — through `StealthAnnouncer` so
+the recipient can find and spend it.
+
+That announcement is in the clear. As explained in
+[Note Delivery](/concepts/stealth-addresses), it adds no privacy loss beyond
+what `pay()` already puts on-chain: the `blinding` is the only genuinely new
+value, and on its own it doesn't let anyone but the key holder spend the note.

@@ -1,0 +1,51 @@
+---
+title: Testnet Faucet
+description: Get C2FLR, FXRP, and USDT0 on Flare Coston2.
+---
+
+# Testnet Faucet
+
+import { Callout } from 'nextra/components';
+
+Umbra runs on Flare Coston2. The **Faucet** page helps you get the three
+supported testnet assets.
+
+## What you can get
+
+| Asset | Name | Decimals |
+| --- | --- | --- |
+| `C2FLR` | Coston2 Flare — native gas token | 18 |
+| `FXRP` | FAssets XRP — real bridge | 6 |
+| `USDT0` | Tether USD — testnet | 6 |
+
+These are **real Coston2 assets** minted by Flare's own faucet. FXRP in
+particular comes from the actual FAssets bridge, not a simulated mint.
+
+## How it works
+
+The page deep-links to [Flare's faucet](https://faucet.flare.network/) rather
+than minting anything itself — the point of this app is genuine FAssets
+integration, not a fake token.
+
+When you open the faucet link from an asset card, Umbra records your current
+balance as a baseline and starts watching. It polls every 5 seconds and
+refetches the moment you tab back in, so the card flashes **Received** as soon
+as tokens land. No manual balance checking.
+
+## Requirements
+
+- Wallet connected
+- Network set to **Flare Coston2**, chain ID `114`
+
+Balances only load on Coston2; on any other network the cards stay inert.
+
+<Callout type="info">
+  **USDC is not available.** There's no official USDC on Coston2 yet. The page
+  shows it as coming soon rather than faking a mint, and a clearly-labeled
+  testnet mock will ship if and when it's needed.
+</Callout>
+
+## Next
+
+With C2FLR for gas and at least one tradeable asset, head to
+[Shield](/guides/shield) to make your first deposit.

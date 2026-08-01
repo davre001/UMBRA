@@ -1,0 +1,88 @@
+---
+title: Dark Pool Swap
+description: Place a private order, wait for a match, and cancel if you change your mind.
+---
+
+# Dark Pool Swap
+
+import { Callout } from 'nextra/components';
+
+The **Swap** page places dark pool orders. Both the amounts and the assets
+stay private — this is the strongest privacy Umbra offers.
+
+## Placing an order
+
+1. **You're Selling** — pick the asset, then select one of your shielded
+   notes. The note's full amount becomes the order's `amountIn`; orders
+   consume a whole note.
+2. **You Want** — pick the asset you want back.
+3. **Minimum Acceptable Amount** — your slippage floor. A match that would
+   give you less than this cannot be proven, so it cannot settle.
+4. Confirm.
+
+| Step | What happens |
+| --- | --- |
+| Generate ZK Proof | The `place_order` circuit runs in your browser |
+| Submit Order | `placeOrder()` — the note's nullifier is spent, the order commitment inserted |
+| Confirm On-Chain | Wait for the `OrderPlaced` event and its leaf index |
+| Order Placed | Order details go to the matcher |
+
+### Two separate things happen
+
+The on-chain `placeOrder()` call **fully authorizes and places** your order.
+The order is real the moment that transaction confirms.
+
+Handing the order's private details to the matcher is a **separate step**
+afterward, and it only makes the order *findable* for matching. If the matcher
+can't be reached, the app tells you so specifically — your order is on-chain,
+it just needs to be resubmitted for matching. It is not an "order failed"
+error, because nothing failed.
+
+## What's public
+
+Only two values: the spent note's `nullifierHash` and an opaque
+`orderCommitment`. Nobody watching the chain can tell what you're selling,
+what you want, how much, or at what limit.
+
+The matcher, who receives your order details off-chain, does know. See the
+[tradeoff note in Dark Pool Matching](/concepts/dark-pool) for exactly what
+that discloses.
+
+## Partial fills
+
+Orders support partial fills. If a match only consumes part of yours, the
+leftover automatically re-commits as a smaller residual order under your own
+key, with the minimum scaled pro-rata.
+
+<Callout type="info">
+  You don't have to do anything for a residual to keep working. It's announced
+  to you on-chain and re-listed on the matcher's book immediately — you'll see
+  it appear in your open orders and on the [Receive](/guides/receive) page.
+</Callout>
+
+## How fills are priced
+
+The backend sizes every fill against the live **FTSOv2** rate, so the realized
+rate for the filled portion is the fair rate by construction rather than
+whatever the two order sizes happen to imply. If no valid fill clears both
+sides' minimums at that rate, it refuses to propose one at all.
+
+The circuit remains the actual authority — it independently checks that both
+sides' pro-rata minimums are met. The FTSOv2 sizing is an off-chain policy
+layer on top, not the thing keeping you safe.
+
+## Cancelling
+
+Open orders are listed on the same page. Cancel one and the `cancel_order`
+circuit spends the order commitment and inserts a regular note commitment
+back — the refund, for the original amount and asset, under your own key.
+
+Cancelling reveals nothing about what the order contained. Only the nullifier
+and the refund note's opaque commitment become public.
+
+## Waiting for a match
+
+Neither trader needs to be online at match time. Once your order is on the
+book, the matcher can pair it and generate the proof without you. Matched
+proceeds arrive as a shielded note you claim on the
+[Receive](/guides/receive) page.

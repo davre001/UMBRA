@@ -1,0 +1,67 @@
+---
+title: Deployed Contracts
+description: Live Umbra contract addresses and asset IDs on Flare Coston2.
+---
+
+# Deployed Contracts
+
+import { Callout } from 'nextra/components';
+
+## Network
+
+| | |
+| --- | --- |
+| Chain | Flare Coston2 testnet |
+| Chain ID | `114` |
+| Vault deploy block | `33478628` |
+| Explorer | [coston2-explorer.flare.network](https://coston2-explorer.flare.network) |
+
+The app talks to Coston2 through `flare-testnet.drpc.org` rather than the
+official `coston2-api.flare.network` endpoint, because the official RPC caps
+`eth_getLogs` to a 30-block range — which breaks the note wallet's history
+scan outright.
+
+## Contracts
+
+| Contract | Address |
+| --- | --- |
+| `ShieldedVault` | `0xf3eEc625ef0AB89c2396a6e62Cc84E3d15f0Cdc7` |
+| `ComplianceRegistry` | `0xC9192Ecaf662c977B28c614e49F558AAAB832577` |
+| `OwnerKeyRegistry` | `0x48C77021624f7b4baC092570CDD56EB163eC3e71` |
+| `StealthAnnouncer` | `0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1` |
+
+`ShieldedVault` holds the funds, the Merkle tree, and the nullifier set, and
+calls the per-circuit verifiers. The other three are standalone helpers —
+`OwnerKeyRegistry` and `StealthAnnouncer` are read and written entirely
+off-chain by clients, and `ComplianceRegistry` is only consulted by the vault
+on `withdraw`.
+
+## Assets
+
+| Asset | ID | Token | Decimals |
+| --- | --- | --- | --- |
+| `C2FLR` | `0` | native | 18 |
+| `FXRP` | `1` | `0x0b6A3645c240605887a5532109323A3E12273dc7` | 6 |
+| `USDT0` | `2` | `0xC1A5B41512496B80903D1f32d6dEa3a73212E71F` | 6 |
+
+The asset ID is what appears inside note commitments — not the token address,
+which would be a needlessly large field element to hash.
+
+## Verifiers
+
+One generated Solidity verifier per circuit, all called by `ShieldedVault`:
+
+- `WithdrawVerifier`
+- `PayVerifier`
+- `PlaceOrderVerifier`
+- `CancelOrderVerifier`
+- `MatchOrdersVerifier`
+
+See [Noir Circuits](/reference/circuits) for each one's public inputs and the
+order they must be passed in.
+
+<Callout type="info">
+  **Single source of truth.** These values live in
+  `frontend/src/lib/noteWallet/coston2Addresses.json`. If contracts are
+  redeployed, update that file and re-sync this page from it.
+</Callout>

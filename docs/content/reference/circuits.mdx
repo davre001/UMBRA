@@ -1,0 +1,180 @@
+---
+title: Noir Circuits
+description: Public and private inputs for each of Umbra's five Noir circuits.
+---
+
+# Noir Circuits
+
+import { Callout } from 'nextra/components';
+
+Five circuits, written in Noir, compiled to WASM, proven with Barretenberg
+(UltraHonk). Four run in your browser; `match_orders` runs on an off-chain
+worker.
+
+Shared constants: Merkle depth `LEVELS = 20`, empty leaf
+`ZERO_VALUE = keccak256("umbra-shielded-vault-noir") % Fr`.
+
+<Callout type="warning">
+  Public input **order matters**. Each verifier is called with a
+  `bytes32[] publicInputs` array that must match the circuit's `pub` parameter
+  order exactly.
+</Callout>
+
+## `withdraw`
+
+Proves ownership of a shielded note and authorizes a public ERC-20 payout.
+
+**Public:** `root`, `nullifier_hash_pub`, `amount`, `asset_id`, `recipient`
+
+**Private:** `spending_key`, `blinding`, `path_elements[20]`, `path_indices[20]`
+
+**Constraints**
+
+```
+leaf = commitment(asset_id, amount, owner_key(spending_key), blinding)
+merkle_root(leaf, path_elements, path_indices) == root
+nullifier_hash(leaf, spending_key) == nullifier_hash_pub
+```
+
+Amount and asset are public on purpose — the payout is a plain ERC-20
+transfer, so they can't be hidden either way. What's hidden is which prior
+`shield` this traces back to.
+
+`recipient` is a public input, so it's bound to the proof by the verification
+equation itself. No relayer can swap it after the fact, and no extra
+in-circuit constraint is needed for that.
+
+## `pay`
+
+Same core statement as `withdraw`, but credits a new hidden note instead of
+paying out.
+
+**Public:** `root`, `nullifier_hash_pub`, `asset_id`, `out_commitment`
+
+**Private:** `spending_key`, `blinding`, `amount`, `path_elements[20]`,
+`path_indices[20]`, `out_owner_key`, `out_blinding`
+
+**Constraints**
+
+```
+leaf = commitment(asset_id, amount, owner_key(spending_key), blinding)
+merkle_root(leaf, path_elements, path_indices) == root
+nullifier_hash(leaf, spending_key) == nullifier_hash_pub
+commitment(asset_id, amount, out_owner_key, out_blinding) == out_commitment
+```
+
+That last check is load-bearing. Unlike `withdraw`'s `recipient` — which the
+*contract* binds to the real transfer using the same calldata — `pay`'s
+`out_commitment` has no external anchor; the contract inserts whatever the
+proof accepts. Without recomputing it, anyone could pair a proof spending a
+trivial note with an arbitrary, uncapped output.
+
+`amount` is private because `pay` is a straight 1-in-1-out passthrough. No sum
+means no value-conservation or range-proof machinery is needed to hide it.
+
+## `place_order`
+
+Spends a regular note, inserts an opaque order commitment.
+
+**Public:** `root`, `nullifier_hash_pub`, `order_commitment_pub`
+
+**Private:** `spending_key`, `blinding`, `amount_in`, `asset_in`,
+`path_elements[20]`, `path_indices[20]`, `order_blinding`, `asset_out`,
+`min_amount_out`
+
+**Constraints**
+
+```
+leaf = commitment(asset_in, amount_in, owner_key(spending_key), blinding)
+merkle_root(leaf, path_elements, path_indices) == root
+nullifier_hash(leaf, spending_key) == nullifier_hash_pub
+order_commitment(owner_key(spending_key), order_blinding,
+                 amount_in, asset_in, asset_out, min_amount_out) == order_commitment_pub
+```
+
+The order's size, assets, and slippage bound are all private. The order is
+owned by the wallet's persistent `owner_key(spending_key)` rather than a fresh
+per-order secret — which is what lets a partial fill's leftover re-commit
+under a key the trader already controls.
+
+## `cancel_order`
+
+Spends an order commitment, inserts a refund note.
+
+**Public:** `root`, `nullifier_hash_pub`, `refund_commitment_pub`
+
+**Private:** `spending_key`, `order_blinding`, `amount_in`, `asset_in`,
+`asset_out`, `min_amount_out`, `path_elements[20]`, `path_indices[20]`,
+`refund_blinding`
+
+**Constraints**
+
+```
+leaf = order_commitment(owner_key(spending_key), order_blinding,
+                        amount_in, asset_in, asset_out, min_amount_out)
+merkle_root(leaf, path_elements, path_indices) == root
+nullifier_hash(leaf, spending_key) == nullifier_hash_pub
+commitment(asset_in, amount_in, owner_key(spending_key), refund_blinding) == refund_commitment_pub
+```
+
+Same privacy treatment as `place_order` — nothing about the cancelled order's
+size or assets is revealed.
+
+## `match_orders`
+
+Spends two compatible orders and creates the matched output notes, supporting
+partial fills.
+
+**Public:** `root`, `nullifier_hash_a`, `nullifier_hash_b`,
+`out_commitment_a`, `out_commitment_b`, `residual_commitment_a`,
+`residual_commitment_b`
+
+**Private:** `fill_a`, `fill_b`, then per side (`a_` / `b_` prefixed):
+`spending_key`, `order_blinding`, `amount_in`, `asset_in`, `asset_out`,
+`min_amount_out`, `path_elements[20]`, `path_indices[20]`, `out_blinding`,
+`residual_blinding`
+
+**Constraints**
+
+- Both orders are valid Merkle members under `root`, with matching nullifiers.
+- Assets cross: `a_asset_out == b_asset_in` and `b_asset_out == a_asset_in`.
+- Neither fill exceeds its own order's `amount_in`.
+- At least one side is fully consumed.
+- Pro-rata minimums hold: `fill_b >= fill_a * a_min_amount_out / a_amount_in`
+  (floored), and symmetrically for B.
+- Output notes are built from each trader's own `owner_key`.
+- A side not fully consumed gets a residual order at a pro-rata-scaled
+  `min_amount_out`; a fully-consumed side's residual slot is `ZERO_VALUE`.
+
+`fill_a` and `fill_b` are witnesses the matcher **proposes**. The circuit
+checks the proposal; it does not compute it.
+
+### Arithmetic safety
+
+All of `fill_a`, `fill_b`, `amount_in`, and `min_amount_out` are range-checked
+to **100 bits** (`assert_100`) before any comparison or the pro-rata
+multiplication (`mul_div_floor`, computed in `u128`). Noir's `u128`
+multiplication is itself overflow-checked, so an out-of-range case fails to
+prove rather than wrapping.
+
+<Callout type="info">
+  An earlier version used a 64-bit bound — too tight for this project's own
+  assets, since a 50-token 18-decimal order already exceeds 2^64. The test
+  suite now includes
+  `test_match_orders_partial_fill_at_realistic_18_decimal_scale`, and the
+  backend/matcher cross-check uses the same realistic fixture.
+</Callout>
+
+## Where they run
+
+| Circuit | Proven by |
+| --- | --- |
+| `withdraw` | Your browser |
+| `pay` | Your browser |
+| `place_order` | Your browser |
+| `cancel_order` | Your browser |
+| `match_orders` | Off-chain matcher worker |
+
+`match_orders` needs both traders' order details, which no single browser
+has — hence the worker. Correctness is still enforced by the on-chain
+verifier, not by trusting the worker.

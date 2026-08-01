@@ -1,0 +1,72 @@
+---
+title: Introduction
+description: Umbra is a privacy-preserving dark pool for FAssets on the Flare Network.
+---
+
+# Umbra Protocol
+
+Umbra is a **privacy-preserving dark pool** for FAssets on the Flare Network.
+
+Public blockchains publish every trade. Anyone can see what you hold, what you
+traded, and who you traded with — which is exactly the information that makes
+front-running and MEV extraction possible. Traditional dark pools solve the
+visibility problem by moving the order book inside a private venue you have to
+trust.
+
+Umbra takes a third path: your balances and orders stay private, and the
+protocol proves — in zero knowledge, verifiable by anyone — that every
+settlement followed the rules.
+
+## What stays private
+
+| | Amount | Asset | Counterparty |
+| --- | --- | --- | --- |
+| **Shield** (deposit) | Public | Public | — |
+| **Dark pool order** | Private | Private | Private |
+| **Private pay** | Private | Public | Private |
+| **Withdraw** | Public | Public | Public |
+
+Depositing into the vault is a public ERC-20 transfer — there is nothing secret
+about putting money in. Everything you do *inside* the vault is private, and
+what you reveal on the way out depends on which exit you take.
+
+Dark pool orders are the strongest case: amounts **and** assets stay hidden.
+The only public values are an opaque commitment and a nullifier.
+
+## How it works
+
+1. **Shield** — deposit tokens into `ShieldedVault`. A commitment to your new
+   note is inserted as a leaf in an on-chain Merkle tree. No proof is needed
+   yet; you're publishing a commitment, not spending one.
+
+2. **Trade** — place an order by spending a note and inserting an opaque order
+   commitment in its place. Orders rest off-chain in the dark engine's book. A
+   matcher pairs compatible orders and generates a zero-knowledge proof that the
+   match was computed correctly.
+
+3. **Exit** — settle to a new shielded note, pay someone privately, or withdraw
+   publicly to an address.
+
+Matching happens off-chain, but correctness is **not** a matter of trust: the
+`match_orders` circuit proves the fill respected both traders' limits, and
+`MatchOrdersVerifier` checks that proof on-chain before the vault moves
+anything. A dishonest matcher cannot produce a valid proof for an invalid
+match.
+
+## Cryptography
+
+Umbra's note scheme is adapted from Tornado Cash's commitment/nullifier
+pattern, extended for variable amounts and multiple assets rather than one
+fixed denomination.
+
+- **Noir** circuits, compiled to WASM and proven in your browser with
+  Barretenberg — except `match_orders`, which is proven by an off-chain worker.
+- **Poseidon2** for all commitments and nullifiers — a hash designed to be
+  cheap inside an arithmetic circuit.
+- **Solidity verifiers** generated per circuit, called by `ShieldedVault`.
+
+## Status
+
+Umbra runs on the **Flare Coston2 testnet**. No real funds are at risk. See
+[Deployed Contracts](/reference/contracts) for live addresses, and
+[Getting Started](/getting-started) to make your first shielded deposit.

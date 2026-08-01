@@ -1,0 +1,162 @@
+---
+title: Dark Pool Matching
+description: How orders stay private, how partial fills work, and why an off-chain matcher can't cheat.
+---
+
+# Dark Pool Matching
+
+import { Callout } from 'nextra/components';
+
+A dark pool order is the strongest privacy Umbra offers. Amounts **and**
+assets stay hidden — the only public values are an opaque commitment and a
+nullifier.
+
+## An order
+
+```
+order = { ownerKey, blinding, amountIn, assetIn, assetOut, minAmountOut }
+orderCommitment = Poseidon2(ownerKey, blinding, amountIn, assetIn, assetOut, minAmountOut)
+```
+
+Compare this to the other exits from the shielded pool:
+
+| | Amount | Asset |
+| --- | --- | --- |
+| `withdraw` | Public | Public |
+| `pay` | Private | Public |
+| **Order** | **Private** | **Private** |
+
+This is possible specifically because nothing about an order has to become a
+public on-chain value. A `withdraw` moves real ERC-20 tokens, so the contract
+needs the real number. An order just sits in a tree.
+
+Only the matcher, who receives order details off-chain, knows what's actually
+in an order.
+
+## The three order circuits
+
+**`place_order`** spends a regular note — same Merkle-membership and
+nullifier proof as `pay` — and inserts an `orderCommitment` leaf in its
+place.
+
+**`cancel_order`** spends an `orderCommitment` leaf and inserts a regular
+note commitment back: the refund, built from the same owner's `ownerKey`.
+Nothing about the cancelled order's size or assets is revealed.
+
+**`match_orders`** spends two order leaves under the same root and inserts
+the matched proceeds.
+
+## Orders reuse your spending key
+
+An order is owned by the **same** persistent `ownerKey` that owns your
+regular notes, not a fresh per-order secret.
+
+That reuse is what makes partial fills work cleanly. When a match only partly
+consumes your order, the leftover re-commits as a smaller residual order
+under that same `ownerKey` — spendable later exactly the way the original
+was. You don't have to supply anything new for that to happen, because the
+matcher never needed a fresh secret from you in the first place.
+
+<Callout type="warning">
+  **The tradeoff, stated plainly.** Because `match_orders` is proven by an
+  off-chain worker rather than your own browser, submitting an order for
+  matching discloses your wallet's actual `spendingKey` to the matcher, not
+  just an order-scoped one.
+
+  This is narrower than it sounds: on its own, a `spendingKey` only lets
+  someone compute a nullifier hash for a commitment whose full preimage
+  (asset, amount, blinding) they already separately know. It does not reveal
+  or let anyone spend your other notes. A dedicated order-only key would
+  close even that narrow gap, at the cost of a second circuit parameter —
+  deferred as possible future hardening, not because the current exposure is
+  a fund-safety issue.
+</Callout>
+
+## Partial fills
+
+`match_orders` supports partial fills. The matcher proposes `fillA` and
+`fillB` — private witnesses saying how much of each order's `amountIn` this
+match actually consumes — and **the circuit checks the proposal rather than
+computing it.**
+
+The constraints, all over private witnesses:
+
+- Both orders are valid members of the tree under the claimed root.
+- The assets actually cross: `A.assetOut == B.assetIn` and vice versa.
+- Neither fill exceeds its own order's real `amountIn`.
+- **At least one side is fully consumed** — that's what makes this a real
+  fill rather than two orders merely resting near each other.
+- Each side's contribution meets the *pro-rata* share of the other's minimum
+  for the portion actually filled:
+
+  ```
+  fillB >= fillA * A.minAmountOut / A.amountIn    (floored)
+  ```
+
+  When `fill == amountIn` this collapses to exactly the original full-cross
+  minimum check, since `x * m / x == m`.
+
+Any side not fully consumed gets a residual order re-committed under its own
+`ownerKey`, with `minAmountOut` scaled pro-rata. A fully-consumed side's
+residual slot is set to the reserved `ZERO_VALUE` sentinel instead — a real
+order commitment can never equal it, so the sentinel is unambiguous, and the
+vault only inserts a leaf for a slot that isn't it.
+
+## Arithmetic safety
+
+`fillA`, `fillB`, and every order's `amountIn` / `minAmountOut` are
+range-checked to **100 bits** before any comparison or the pro-rata
+multiplication, which is computed in `u128`.
+
+100 bits comfortably covers any realistic amount here, even C2FLR's 18
+decimals — 2^100 raw units is about 1.27 trillion whole tokens. Noir's `u128`
+multiplication is itself overflow-checked, so the (unreachable for real
+orders) case of both multiplied values near the ceiling fails to prove rather
+than silently wrapping.
+
+<Callout type="info">
+  An earlier version used a 64-bit bound, which turned out too tight for this
+  project's own assets — a plain 50-token, 18-decimal order already exceeds
+  2^64. No unit test using small round numbers caught it; only a real
+  end-to-end match through the actual proving pipeline did. The circuit's test
+  suite now includes a realistic 18-decimal partial-fill case alongside the
+  small-number ones.
+</Callout>
+
+## Who matches, and why they can't cheat
+
+Matching happens **off-chain**. `backend/src/dark-engine/` keeps the book and
+decides what fill to propose; the proof itself is generated by a worker.
+
+No matcher role or trusted operator exists on-chain. **The proof is the
+entire authorization.** A dishonest matcher cannot produce a valid
+`match_orders` proof for an invalid match — `MatchOrdersVerifier` rejects it
+and the vault moves nothing.
+
+Two further properties fall out of the design:
+
+- Neither trader needs to be online at match time. The matcher only needs the
+  two orders' private details, received off-chain.
+- Every output note — matched proceeds or residual — is built from that
+  trader's own `ownerKey`, never the matcher's. The matcher never holds
+  anything that would let it spend on a trader's behalf.
+
+Fill sizing is pinned to the live **FTSOv2** rate rather than accepting
+whatever rate the two order sizes happen to imply, and the backend re-verifies
+its own proposal with the exact same integer pro-rata math the circuit
+performs before handing it to a prover. The circuit remains the actual
+authority regardless; this just means a bad proposal fails fast and off-chain
+instead of burning a real proving run.
+
+## Known limits, v1
+
+**Two orders at a time.** Partial fills are real, but there is no N-way
+matching across more than two orders in a single proof. A resting residual
+simply becomes an ordinary order the book can match again later.
+
+**No on-chain price sanity check.** Order amounts and assets are private —
+never public circuit inputs, which is the entire point — so `ShieldedVault`
+has nothing to compare against a price feed without either exposing those
+amounts or extending the circuit with a signed price-attestation witness.
+The FTSOv2-pinned fill sizing above is an off-chain policy backstop, not a
+cryptographic guarantee the way the fill and pro-rata-minimum rules are.

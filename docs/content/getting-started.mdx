@@ -1,0 +1,97 @@
+---
+title: Getting Started
+description: Connect a wallet, get testnet tokens, and make your first shielded deposit on Flare Coston2.
+---
+
+# Getting Started
+
+import { Callout } from 'nextra/components';
+
+Umbra runs on the **Flare Coston2 testnet**. Nothing here uses real funds.
+
+## 1. Connect a wallet
+
+Open the app and click **Connect Wallet**. Umbra supports MetaMask, Coinbase
+Wallet, Rabby, Trust, Phantom, and anything reachable over WalletConnect.
+
+Make sure your wallet is on **Flare Coston2** (chain ID `114`). The app talks to
+Coston2 through `flare-testnet.drpc.org` rather than the official
+`coston2-api.flare.network` endpoint, because the official RPC caps `eth_getLogs`
+at a 30-block range — which breaks the note wallet's history scan outright.
+
+## 2. Derive your note keys
+
+The first time you use a shielded feature, your wallet asks you to sign a fixed
+message:
+
+```
+Umbra Shielded Wallet
+
+Sign to derive your private note keys. This signature never leaves your device
+and does not authorize any transaction.
+```
+
+That signature is the seed for your **spending key** — the single private value
+that owns every note in your wallet. Two things matter about it:
+
+- **It is not a transaction.** Signing authorizes nothing on its own.
+- **It is deterministic.** The same wallet always regenerates the same keys, so
+  there is no separate seed phrase to back up. Your wallet *is* the backup.
+
+The spending key never leaves your browser. Only the derived `ownerKey` —
+`Poseidon2(spendingKey, 0)` — is ever published. See
+[Shielded Notes](/concepts/notes) for why publishing it is safe.
+
+## 3. Get testnet tokens
+
+Head to the **Faucet** page. Umbra supports three assets on Coston2:
+
+| Asset | Type | Decimals |
+| --- | --- | --- |
+| `C2FLR` | Native gas token | 18 |
+| `FXRP` | FAssets XRP, real bridge | 6 |
+| `USDT0` | Tether USD, testnet | 6 |
+
+These are real Coston2 assets issued by Flare's own faucet — FXRP comes from
+the actual FAssets bridge, not a simulated mint. The faucet page deep-links you
+to Flare's faucet and watches your balance, notifying you the moment tokens
+land.
+
+<Callout type="info">
+  There is no USDC on Coston2 yet, so the app shows it as "coming soon" rather
+  than faking a mint for it.
+</Callout>
+
+## 4. Shield your first deposit
+
+Go to **Shield**, pick an asset and an amount, and confirm. Your browser
+computes a commitment to a new note and the vault inserts it as a Merkle tree
+leaf.
+
+This step is a **public** ERC-20 transfer (or a native `C2FLR` send). Everyone
+can see you deposited. What nobody can see is which shielded note is yours
+afterwards — that link is what the rest of the protocol protects.
+
+No zero-knowledge proof is needed here. You're publishing a commitment, not
+spending one.
+
+## 5. Do something private
+
+With a shielded balance you can:
+
+- **[Swap](/guides/swap)** — place a dark pool order. Amount and assets stay
+  private.
+- **[Pay](/guides/pay)** — send a shielded note to another registered user.
+- **[Receive](/guides/receive)** — register your `ownerKey` so others can pay
+  you.
+- **Withdraw** — exit publicly to any address.
+
+## Where your notes live
+
+Your notes are stored in **IndexedDB in your browser**, and rebuilt by scanning
+the chain's full event history from the vault's deploy block. Two consequences:
+
+- Clearing site data drops the local cache, but the notes are recoverable — the
+  scan reconstructs them from chain history using your derived keys.
+- The first scan on a new device takes a moment. It walks every vault event
+  since block `33478628`.
