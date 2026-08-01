@@ -75,7 +75,7 @@ export default function Home() {
 
           <div className="flex items-center gap-1.5 sm:gap-3 flex-shrink-0">
             <a
-              href="https://docs.umbraprotocol.io"
+              href="https://docs-umbra.vercel.app"
               target="_blank"
               rel="noopener noreferrer"
               className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border-custom text-[11px] text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all duration-200 font-sans uppercase tracking-wider"
@@ -177,7 +177,7 @@ export default function Home() {
                 )}
               </AnimatedButton>
               <a
-                href="https://docs.umbraprotocol.io"
+                href="https://docs-umbra.vercel.app"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border-custom text-xs text-text-secondary hover:text-text-primary hover:border-accent-primary/40 transition-all"
@@ -377,7 +377,7 @@ export default function Home() {
             <span className="text-[10px] text-text-secondary ml-3 hidden sm:block">© 2026 Umbra Protocol.</span>
           </div>
           <div className="flex items-center gap-6">
-            <a href="https://docs.umbraprotocol.io" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1 transition-colors">
+            <a href="https://docs-umbra.vercel.app" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1 transition-colors">
               <BookOpen size={10} />Docs
             </a>
             <a href="https://github.com/davre001/UMBRA" target="_blank" rel="noopener noreferrer" className="text-[10px] text-text-secondary hover:text-text-primary uppercase tracking-widest inline-flex items-center gap-1 transition-colors">
