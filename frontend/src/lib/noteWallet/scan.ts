@@ -2,15 +2,38 @@ import type { PublicClient } from "viem";
 import { SHIELDED_VAULT_ABI } from "./vaultAbi";
 import { ZERO_VALUE } from "./merkleTree";
 
-// Only these two methods are used — narrowing to them (rather than the full
-// PublicClient) sidesteps a real but irrelevant type mismatch: wagmi's
+// Only these three methods are used — narrowing to them (rather than the
+// full PublicClient) sidesteps a real but irrelevant type mismatch: wagmi's
 // config includes op-stack chains whose Block/transaction shape doesn't
 // structurally match viem's default PublicClient generic, which otherwise
 // blocks passing wagmi's usePublicClient() result in directly. getLogs/
-// readContract's own signatures don't involve that Block type at all.
-type ScanClient = Pick<PublicClient, "getLogs" | "readContract">;
+// readContract/getBlockNumber's own signatures don't involve that Block
+// type at all.
+type ScanClient = Pick<PublicClient, "getLogs" | "readContract" | "getBlockNumber">;
 
 const LEAF_EVENTS = ["Shielded", "Paid", "OrderPlaced", "OrderCancelled"] as const;
+
+// drpc.org's free tier caps eth_getLogs at a 10,000-block range per call — a
+// single fromBlock=deployBlock..latest call (this scan's original shape)
+// now exceeds that as the chain has grown since deployment. 9999 keeps every
+// window comfortably under the cap.
+const MAX_LOG_RANGE = BigInt(9999);
+
+/** getLogs in <=MAX_LOG_RANGE-block windows, concatenated — see MAX_LOG_RANGE for why a single unbounded call no longer works. */
+async function getLogsChunked(
+  client: ScanClient,
+  address: `0x${string}`,
+  event: unknown,
+  fromBlock: bigint,
+  toBlock: bigint
+) {
+  const logs: unknown[] = [];
+  for (let start = fromBlock; start <= toBlock; start += MAX_LOG_RANGE + BigInt(1)) {
+    const end = start + MAX_LOG_RANGE < toBlock ? start + MAX_LOG_RANGE : toBlock;
+    logs.push(...(await client.getLogs({ address, event: event as never, fromBlock: start, toBlock: end })));
+  }
+  return logs;
+}
 
 interface LeafEvent {
   commitment: bigint;
@@ -33,27 +56,24 @@ export class LeafOrderingMismatchError extends Error {}
 
 /** Does the actual fetch-and-reconstruct — see `fetchAllLeaves` for the retry wrapper around this. */
 async function fetchAllLeavesOnce(client: ScanClient, vaultAddress: `0x${string}`, fromBlock: bigint) {
+  // Resolved once, rather than passing "latest" to every getLogs call below
+  // — beyond avoiding a second/third resolution racing ahead of the first
+  // (a source of the reorg/indexing-lag mismatch fetchAllLeaves already
+  // retries on), a fixed toBlock is also what the chunking loop needs to
+  // know where to stop.
+  const toBlock = await client.getBlockNumber();
+
   const perEventLogs = await Promise.all(
     LEAF_EVENTS.map((eventName) => {
       const abiEvent = SHIELDED_VAULT_ABI.find((e) => e.type === "event" && e.name === eventName);
-      return client.getLogs({
-        address: vaultAddress,
-        event: abiEvent as never,
-        fromBlock,
-        toBlock: "latest",
-      });
+      return getLogsChunked(client, vaultAddress, abiEvent, fromBlock, toBlock);
     })
   );
 
   // OrdersMatched inserts two leaves in one event — handle separately since
   // its arg names differ (outCommitmentA/outCommitmentB, no single leafIndex).
   const matchedAbiEvent = SHIELDED_VAULT_ABI.find((e) => e.type === "event" && e.name === "OrdersMatched");
-  const matchedLogs = await client.getLogs({
-    address: vaultAddress,
-    event: matchedAbiEvent as never,
-    fromBlock,
-    toBlock: "latest",
-  });
+  const matchedLogs = await getLogsChunked(client, vaultAddress, matchedAbiEvent, fromBlock, toBlock);
 
   const events: LeafEvent[] = [];
   for (const logs of perEventLogs) {

@@ -1,8 +1,25 @@
 import { SHIELDED_VAULT_ABI } from "./vaultAbi";
 import { publicClient, DEPLOY_BLOCK } from "./chain";
 import { ZERO_VALUE } from "./merkleTree";
+import { logger } from "./logger";
 
 const LEAF_EVENTS = ["Shielded", "Paid", "OrderPlaced", "OrderCancelled"] as const;
+
+// drpc.org's free tier caps eth_getLogs at a 10,000-block range per call — a
+// single fromBlock=DEPLOY_BLOCK..latest call (this scan's original shape)
+// now exceeds that as the chain has grown since deployment. 9999 keeps every
+// window comfortably under the cap.
+const MAX_LOG_RANGE = BigInt(9999);
+
+/** getLogs in <=MAX_LOG_RANGE-block windows, concatenated — see MAX_LOG_RANGE for why a single unbounded call no longer works. */
+async function getLogsChunked(address: `0x${string}`, event: unknown, fromBlock: bigint, toBlock: bigint) {
+  const logs: unknown[] = [];
+  for (let start = fromBlock; start <= toBlock; start += MAX_LOG_RANGE + BigInt(1)) {
+    const end = start + MAX_LOG_RANGE < toBlock ? start + MAX_LOG_RANGE : toBlock;
+    logs.push(...(await publicClient.getLogs({ address, event: event as never, fromBlock: start, toBlock: end })));
+  }
+  return logs;
+}
 
 interface LeafEvent {
   commitment: bigint;
@@ -15,25 +32,23 @@ interface LeafEvent {
 export class LeafOrderingMismatchError extends Error {}
 
 async function fetchAllLeavesOnce(vaultAddress: `0x${string}`, fromBlock: bigint) {
+  // Resolved once, rather than passing "latest" to every getLogs call below
+  // — beyond avoiding a second/third resolution racing ahead of the first
+  // (a source of the reorg/indexing-lag mismatch fetchAllLeaves already
+  // retries on), a fixed toBlock is also what the chunking loop needs to
+  // know where to stop.
+  const toBlock = await publicClient.getBlockNumber();
+  logger.debug(`[scan] fetching leaves from block ${fromBlock} to ${toBlock} (${toBlock - fromBlock} blocks)`);
+
   const perEventLogs = await Promise.all(
     LEAF_EVENTS.map((eventName) => {
       const abiEvent = SHIELDED_VAULT_ABI.find((e) => e.type === "event" && e.name === eventName);
-      return publicClient.getLogs({
-        address: vaultAddress,
-        event: abiEvent as never,
-        fromBlock,
-        toBlock: "latest",
-      });
+      return getLogsChunked(vaultAddress, abiEvent, fromBlock, toBlock);
     })
   );
 
   const matchedAbiEvent = SHIELDED_VAULT_ABI.find((e) => e.type === "event" && e.name === "OrdersMatched");
-  const matchedLogs = await publicClient.getLogs({
-    address: vaultAddress,
-    event: matchedAbiEvent as never,
-    fromBlock,
-    toBlock: "latest",
-  });
+  const matchedLogs = await getLogsChunked(vaultAddress, matchedAbiEvent, fromBlock, toBlock);
 
   const events: LeafEvent[] = [];
   for (const logs of perEventLogs) {
