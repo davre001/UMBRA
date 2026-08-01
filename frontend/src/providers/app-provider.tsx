@@ -37,6 +37,11 @@ type AppContextType = {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+// A page reload otherwise resets isEntered to false and drops the user back
+// at the landing gate mid-session — persisting it means a refresh keeps them
+// in the app.
+const ENTERED_STORAGE_KEY = 'umbra:isEntered';
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isEntered, setIsEntered] = useState<boolean>(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -61,10 +66,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, address]);
 
+  // Restores an entered session after a reload. Client-only and after mount
+  // (not a lazy useState initializer) so the very first render still matches
+  // the server's — no hydration mismatch, just one extra render on load.
+  useEffect(() => {
+    if (localStorage.getItem(ENTERED_STORAGE_KEY) === 'true') setIsEntered(true);
+  }, []);
+
   const handleSetEntered = (val: boolean) => {
     setIsEntered(val);
     if (val) {
+      localStorage.setItem(ENTERED_STORAGE_KEY, 'true');
       addNotification('Secure Vault Session', 'Vault interface unlocked.', 'success');
+    } else {
+      localStorage.removeItem(ENTERED_STORAGE_KEY);
     }
   };
 
@@ -78,7 +93,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     disconnect();
     addNotification('Wallet Disconnected', 'Secure connection terminated.', 'warning');
     // End the vault session and return to the gateway so the next connect starts clean
-    setIsEntered(false);
+    handleSetEntered(false);
     router.push('/');
   };
 

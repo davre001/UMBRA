@@ -522,7 +522,10 @@ export default function ShieldPage() {
                       <div className="absolute left-2.5 top-2 bottom-2 w-0.5 bg-border-custom z-0" />
 
                       {timelineSteps.map((t, idx) => {
-                        const isDone = currentStepIdx > idx;
+                        // currentStepIdx never exceeds the last step's own index, so
+                        // without the `step === 'finalized'` check the final step would
+                        // never flip to "done" even after the whole flow succeeded.
+                        const isDone = currentStepIdx > idx || step === 'finalized';
                         const isCurrent = currentStepIdx === idx;
 
                         return (

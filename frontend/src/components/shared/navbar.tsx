@@ -4,11 +4,21 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useChainId, useSwitchChain } from 'wagmi';
+import { flare, flareTestnet } from 'wagmi/chains';
 import { useApp } from '@/providers/app-provider';
 import { Bell, Wallet, ShieldAlert, ShieldCheck, ChevronDown, Menu, X, Check, ArrowRight } from 'lucide-react';
 import { formatAddress } from '@/lib/utils';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { UmbraLogo } from '@/components/shared/logo';
+
+// Only the two chains actually configured in wagmi.ts — Songbird was never
+// one of them, so it was never a real option even before this dropdown did
+// anything at all.
+const NETWORKS = [
+  { chainId: flareTestnet.id, name: 'Coston2 Testnet' },
+  { chainId: flare.id, name: 'Flare Mainnet' },
+] as const;
 
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
@@ -20,15 +30,35 @@ export const Navbar: React.FC = () => {
     connectWallet,
     requestDisconnect,
     notifications,
-    clearNotifications
+    clearNotifications,
+    addNotification,
   } = useApp();
+  const chainId = useChainId();
+  const { switchChainAsync } = useSwitchChain();
 
   const [lastScrollY, setLastScrollY] = useState(0);
   const [showNavbar, setShowNavbar] = useState(true);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showNetworkMenu, setShowNetworkMenu] = useState(false);
-  const [selectedNetwork, setSelectedNetwork] = useState('Flare Mainnet');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const currentNetwork = NETWORKS.find((n) => n.chainId === chainId);
+  const selectedNetwork = currentNetwork?.name ?? 'Unsupported Network';
+  // Umbra's vault is only deployed on Coston2 — Flare Mainnet is a real,
+  // switchable chain (unlike the removed Songbird option) but has no
+  // deployment, so every app page already falls back to its own "not
+  // available on this network" state there.
+  const onCoston2 = chainId === flareTestnet.id;
+
+  const handleSwitchNetwork = async (targetChainId: (typeof NETWORKS)[number]['chainId']) => {
+    setShowNetworkMenu(false);
+    if (targetChainId === chainId) return;
+    try {
+      await switchChainAsync({ chainId: targetChainId });
+    } catch {
+      addNotification('Network Switch Failed', 'Please switch networks manually in your wallet.', 'error');
+    }
+  };
 
   // Manage show/hide on scroll
   useEffect(() => {
@@ -54,8 +84,6 @@ export const Navbar: React.FC = () => {
     { name: 'Receive', href: '/receive' },
     { name: 'Faucet', href: '/faucet' },
   ];
-
-  const networks = ['Flare Mainnet', 'Songbird Network', 'Coston2 Testnet'];
 
   const unreadCount = notifications.length;
 
@@ -123,7 +151,7 @@ export const Navbar: React.FC = () => {
                 onClick={() => setShowNetworkMenu(!showNetworkMenu)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border-custom bg-surface/30 text-xs text-text-secondary hover:text-text-primary hover:border-border-custom/80 transition-all cursor-pointer"
               >
-                <div className="h-1.5 w-1.5 rounded-full bg-success-state" />
+                <div className={`h-1.5 w-1.5 rounded-full ${onCoston2 ? 'bg-success-state' : 'bg-accent-secondary'}`} />
                 {selectedNetwork}
                 <ChevronDown size={12} className="opacity-60" />
               </button>
@@ -136,17 +164,14 @@ export const Navbar: React.FC = () => {
                     exit={{ opacity: 0, y: 10 }}
                     className="absolute right-0 mt-2 w-48 rounded-lg border border-border-custom bg-surface/90 backdrop-blur-md p-1 shadow-xl z-50"
                   >
-                    {networks.map((net) => (
+                    {NETWORKS.map((net) => (
                       <button
-                        key={net}
-                        onClick={() => {
-                          setSelectedNetwork(net);
-                          setShowNetworkMenu(false);
-                        }}
+                        key={net.chainId}
+                        onClick={() => handleSwitchNetwork(net.chainId)}
                         className="flex w-full items-center justify-between px-3 py-2 rounded-md text-xs text-text-secondary hover:text-text-primary hover:bg-border-custom/40 transition-all text-left cursor-pointer"
                       >
-                        {net}
-                        {selectedNetwork === net && <Check size={12} className="text-accent-primary" />}
+                        {net.name}
+                        {chainId === net.chainId && <Check size={12} className="text-accent-primary" />}
                       </button>
                     ))}
                   </motion.div>
