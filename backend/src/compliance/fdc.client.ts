@@ -1,5 +1,6 @@
 import { COMPLIANCE_REGISTRY_ABI } from "../shared/complianceRegistryAbi";
 import { CONTRACTS, getWalletClient, publicClient } from "../shared/chain";
+import { logger } from "../shared/logger";
 
 /**
  * INTERIM TRUST MODEL — matches ComplianceRegistry.sol's own NatSpec: a real
@@ -22,6 +23,7 @@ export interface ComplianceScreenResult {
 /** Screens `address` against the placeholder ruleset and records the real result on-chain via ATTESTER_ROLE. */
 export async function screenAddress(address: string): Promise<ComplianceScreenResult> {
   const clear = !BLOCKLIST.has(address.toLowerCase());
+  logger.info(`[compliance] screening ${address}: ${clear ? "clear" : "BLOCKED"} — recording on-chain`);
   const wallet = getWalletClient();
   const txHash = await wallet.writeContract({
     address: CONTRACTS.ComplianceRegistry as `0x${string}`,
@@ -32,6 +34,7 @@ export async function screenAddress(address: string): Promise<ComplianceScreenRe
     account: wallet.account!,
   });
   await publicClient.waitForTransactionReceipt({ hash: txHash });
+  logger.info(`[compliance] screen result for ${address} recorded: ${txHash}`);
   return { address, clear, txHash };
 }
 

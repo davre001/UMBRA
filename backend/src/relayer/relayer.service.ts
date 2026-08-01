@@ -1,5 +1,6 @@
 import { SHIELDED_VAULT_ABI } from "../shared/vaultAbi";
 import { CONTRACTS, getWalletClient, publicClient } from "../shared/chain";
+import { logger } from "../shared/logger";
 
 /**
  * Real gasless relaying: every ShieldedVault write here is already
@@ -31,6 +32,7 @@ export async function relay(action: RelayableAction, args: unknown[]): Promise<`
   }
 
   const wallet = getWalletClient();
+  logger.info(`[relayer] relaying ${action}() from ${wallet.account!.address}`);
   const txHash = await wallet.writeContract({
     address: CONTRACTS.ShieldedVault as `0x${string}`,
     abi: SHIELDED_VAULT_ABI,
@@ -39,6 +41,8 @@ export async function relay(action: RelayableAction, args: unknown[]): Promise<`
     chain: wallet.chain,
     account: wallet.account!,
   });
+  logger.info(`[relayer] ${action}() tx sent: ${txHash} — waiting for confirmation`);
   await publicClient.waitForTransactionReceipt({ hash: txHash });
+  logger.info(`[relayer] ${action}() confirmed: ${txHash}`);
   return txHash;
 }

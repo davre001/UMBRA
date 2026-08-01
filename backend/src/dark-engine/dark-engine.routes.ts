@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { CONTRACTS } from "../shared/chain";
 import { submitOrder, listOpenOrders, getMatch, listMatches, submitExternalProof, getMatchProofInputsSerialized } from "./matcher";
+import { logger } from "../shared/logger";
 import type { MatchRecord } from "./types";
 
 export const darkEngineRouter = Router();
@@ -17,10 +18,12 @@ function sideFullyAnnounced(record: MatchRecord, side: "A" | "B"): boolean {
 function requireMatcherSecret(req: import("express").Request, res: import("express").Response): boolean {
   const configured = process.env.MATCHER_INTERNAL_SECRET;
   if (!configured) {
+    logger.error("[dark-engine] rejecting matcher-worker request: MATCHER_INTERNAL_SECRET not configured on this deployment");
     res.status(503).json({ error: "MATCHER_INTERNAL_SECRET not configured on this deployment" });
     return false;
   }
   if (req.header("x-matcher-secret") !== configured) {
+    logger.warn(`[dark-engine] rejecting matcher-worker request to ${req.originalUrl}: invalid or missing x-matcher-secret header`);
     res.status(401).json({ error: "Invalid or missing x-matcher-secret header" });
     return false;
   }

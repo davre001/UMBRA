@@ -3,6 +3,7 @@ import { SHIELDED_VAULT_ABI } from "../shared/vaultAbi";
 import { STEALTH_ANNOUNCER_ABI } from "../shared/stealthAnnouncerAbi";
 import { CONTRACTS, getWalletClient, publicClient } from "../shared/chain";
 import { ZERO_VALUE } from "../shared/merkleTree";
+import { logger } from "../shared/logger";
 import type { MatchProofInputs, OrderIntent } from "./types";
 
 /** Same schemeId/metadata encoding as frontend/src/lib/noteWallet/announcer.ts — a matched note delivered this way is discoverable the same way a `pay()` note is. */
@@ -49,6 +50,7 @@ export async function submitMatch(
   inputs: MatchProofInputs
 ): Promise<{ txHash: `0x${string}`; leafIndices: MatchLeafIndices }> {
   const wallet = getWalletClient();
+  logger.info(`[submitter] submitting matchOrders() tx from ${wallet.account!.address}`);
   const txHash = await wallet.writeContract({
     address: CONTRACTS.ShieldedVault as `0x${string}`,
     abi: SHIELDED_VAULT_ABI,
@@ -66,7 +68,9 @@ export async function submitMatch(
     chain: wallet.chain,
     account: wallet.account!,
   });
+  logger.info(`[submitter] matchOrders() tx sent: ${txHash} — waiting for confirmation`);
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  logger.info(`[submitter] matchOrders() confirmed in block ${receipt.blockNumber}: ${txHash}`);
 
   const nextLeafIndex = await publicClient.readContract({
     address: CONTRACTS.ShieldedVault as `0x${string}`,
@@ -97,6 +101,7 @@ export async function announceMatchedNote(
 ): Promise<`0x${string}`> {
   const wallet = getWalletClient();
   const metadata = encodeAbiParameters(NOTE_METADATA_PARAMS, [assetId, amount, blinding, commitment]);
+  logger.info(`[submitter] announcing matched note to ${order.walletAddress} (asset ${assetId}, amount ${amount})`);
   const txHash = await wallet.writeContract({
     address: CONTRACTS.StealthAnnouncer as `0x${string}`,
     abi: STEALTH_ANNOUNCER_ABI,
@@ -106,6 +111,7 @@ export async function announceMatchedNote(
     account: wallet.account!,
   });
   await publicClient.waitForTransactionReceipt({ hash: txHash });
+  logger.info(`[submitter] matched-note announcement confirmed: ${txHash}`);
   return txHash;
 }
 
@@ -125,6 +131,7 @@ export async function announceResidualOrder(
     residual.commitment,
     BigInt(order.originalAmountIn),
   ]);
+  logger.info(`[submitter] announcing residual order to ${order.walletAddress} (amountIn ${residual.amountIn})`);
   const txHash = await wallet.writeContract({
     address: CONTRACTS.StealthAnnouncer as `0x${string}`,
     abi: STEALTH_ANNOUNCER_ABI,
@@ -134,5 +141,6 @@ export async function announceResidualOrder(
     account: wallet.account!,
   });
   await publicClient.waitForTransactionReceipt({ hash: txHash });
+  logger.info(`[submitter] residual-order announcement confirmed: ${txHash}`);
   return txHash;
 }

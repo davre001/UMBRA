@@ -1,4 +1,5 @@
 import { publicClient, type AssetSymbol } from "../shared/chain";
+import { logger } from "../shared/logger";
 
 const FTSO_V2 = "0xC4e9c78EA53db782E28f28Fdf80BaF59336B304d" as const;
 
@@ -41,13 +42,18 @@ export interface UsdPrice {
 }
 
 async function getUsdPrice(asset: AssetSymbol): Promise<UsdPrice> {
-  const [value, decimals, timestamp] = await publicClient.readContract({
-    address: FTSO_V2,
-    abi: FTSO_V2_ABI,
-    functionName: "getFeedById",
-    args: [FEED_IDS[asset]],
-  });
-  return { value: Number(value) / 10 ** decimals, decimals, timestampMs: Number(timestamp) * 1000 };
+  try {
+    const [value, decimals, timestamp] = await publicClient.readContract({
+      address: FTSO_V2,
+      abi: FTSO_V2_ABI,
+      functionName: "getFeedById",
+      args: [FEED_IDS[asset]],
+    });
+    return { value: Number(value) / 10 ** decimals, decimals, timestampMs: Number(timestamp) * 1000 };
+  } catch (err) {
+    logger.error(`[pricing] FTSOv2 feed read failed for ${asset}: ${err instanceof Error ? err.message : err}`);
+    throw err;
+  }
 }
 
 /** Real FTSOv2 midpoint cross-rate: 1 unit of `fromAsset` in units of `toAsset`, via each side's USD feed. */

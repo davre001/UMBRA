@@ -3,6 +3,7 @@ import { OrderBook } from "./engine";
 import { assembleMatchProofInputs, UnavailableMatchProver, type MatchProver } from "./prover";
 import { submitMatch, announceMatchedNote, announceResidualOrder, type MatchLeafIndices } from "./submitter";
 import { computeFill } from "./fillSizing";
+import { logger } from "../shared/logger";
 import type { OrderIntent, MatchRecord, MatchOrderSide } from "./types";
 
 const CONTRACTS_ASSET_COUNT = 3; // C2FLR / FXRP / USDT0 — see shared/chain.ts's ASSETS
@@ -64,10 +65,17 @@ export interface SubmitOrderResult {
  * later, same as an incompatible one would.
  */
 async function findFillableMatch(order: OrderIntent): Promise<{ counterparty: OrderIntent; fillA: bigint; fillB: bigint } | null> {
-  for (const candidate of book.findCandidates(order)) {
+  const candidates = book.findCandidates(order);
+  logger.debug(`[dark-engine] ${order.commitment}: ${candidates.length} asset-compatible candidate(s) on the book`);
+  for (const candidate of candidates) {
     const fill = await computeFill(order, candidate);
-    if (fill) return { counterparty: candidate, fillA: fill.fillA, fillB: fill.fillB };
-    console.warn(`[dark-engine] skipping match ${order.commitment}/${candidate.commitment}: no fillable size at the live rate`);
+    if (fill) {
+      logger.info(
+        `[dark-engine] fillable match found: ${order.commitment} x ${candidate.commitment} (fillA=${fill.fillA}, fillB=${fill.fillB})`
+      );
+      return { counterparty: candidate, fillA: fill.fillA, fillB: fill.fillB };
+    }
+    logger.warn(`[dark-engine] skipping match ${order.commitment}/${candidate.commitment}: no fillable size at the live rate`);
   }
   return null;
 }
@@ -75,9 +83,13 @@ async function findFillableMatch(order: OrderIntent): Promise<{ counterparty: Or
 /** Submits an order intent, attempting an immediate match against the resting book. Real matching + real commitment assembly; on-chain submission only happens if a real prover is wired in (see prover.ts). */
 export async function submitOrder(vaultAddress: `0x${string}`, body: unknown): Promise<SubmitOrderResult> {
   const order = validateOrder(body);
+  logger.info(
+    `[dark-engine] order submitted: ${order.commitment} (asset ${order.assetIn} -> ${order.assetOut}, amountIn=${order.amountIn}, minOut=${order.minAmountOut})`
+  );
   const found = await findFillableMatch(order);
   if (!found) {
     book.rest(order);
+    logger.info(`[dark-engine] ${order.commitment}: no fillable counterparty right now — resting on the book`);
     return { status: "resting" };
   }
   const { counterparty, fillA, fillB } = found;
@@ -98,15 +110,20 @@ export async function submitOrder(vaultAddress: `0x${string}`, body: unknown): P
     matchedAt: Date.now(),
   };
   matches.set(matchId, record);
+  logger.info(`[dark-engine] match ${matchId} assembled (${order.commitment} x ${counterparty.commitment}) — attempting immediate completion`);
 
   try {
     await completeMatch(matchId);
-  } catch {
+  } catch (err) {
     // Expected when no real prover is wired in (UnavailableMatchProver) —
-    // the match stays recorded as awaiting_proof; see prover.ts.
+    // the match stays recorded as awaiting_proof for the matcher-worker to
+    // pick up later; see prover.ts. Logged at info, not warn/error, because
+    // that's the normal path on this deployment, not a fault.
+    logger.info(`[dark-engine] match ${matchId} left awaiting_proof: ${err instanceof Error ? err.message : err}`);
   }
 
   const current = matches.get(matchId)!;
+  logger.info(`[dark-engine] match ${matchId} status after submission: ${current.status}`);
   return { status: "matched", matchId, matchStatus: current.status };
 }
 
@@ -124,6 +141,9 @@ function hexOf(value: bigint): string {
  */
 function relistResidual(original: OrderIntent, side: MatchOrderSide, leafIndex: number): void {
   if (!side.residual) return;
+  logger.info(
+    `[dark-engine] relisting residual for ${original.commitment}: amountIn=${side.residual.amountIn} at leaf ${leafIndex}`
+  );
   book.rest({
     commitment: hexOf(side.residual.commitment),
     leafIndex,
@@ -145,6 +165,7 @@ async function settleOnChain(record: MatchRecord, proof: `0x${string}`): Promise
   const { txHash, leafIndices } = await submitMatch(proof, record.proofInputs);
   record.status = "settled";
   record.txHash = txHash;
+  logger.info(`[dark-engine] match ${record.id} settled on-chain: ${txHash}`);
   relistResidualsFor(record, leafIndices);
 }
 
@@ -163,6 +184,7 @@ function relistResidualsFor(record: MatchRecord, leafIndices: MatchLeafIndices):
  * nonce (confirmed the hard way — see session notes).
  */
 async function deliverAnnouncements(record: MatchRecord): Promise<void> {
+  logger.info(`[dark-engine] match ${record.id}: delivering pending announcements`);
   if (!record.announcedNoteA) {
     await announceMatchedNote(
       record.orderA,
@@ -199,6 +221,7 @@ export async function completeMatch(matchId: string): Promise<MatchRecord> {
   if (!record) throw new Error(`No such match: ${matchId}`);
 
   if (record.status === "awaiting_proof") {
+    logger.info(`[dark-engine] match ${matchId}: requesting proof from the wired MatchProver`);
     const proof = await prover.proveMatch(record.proofInputs);
     // Settlement is real and final the instant the on-chain call confirms,
     // inside settleOnChain — regardless of whether announcing succeeds next.
@@ -213,6 +236,7 @@ export async function completeMatch(matchId: string): Promise<MatchRecord> {
 export async function submitExternalProof(matchId: string, proof: `0x${string}`): Promise<MatchRecord> {
   const record = matches.get(matchId);
   if (!record) throw new Error(`No such match: ${matchId}`);
+  logger.info(`[dark-engine] external proof received for match ${matchId} (current status: ${record.status})`);
 
   if (record.status === "awaiting_proof") {
     await settleOnChain(record, proof);
