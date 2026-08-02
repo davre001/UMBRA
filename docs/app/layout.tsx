@@ -2,13 +2,19 @@ import type { Metadata } from 'next';
 import { Footer, Layout, Navbar } from 'nextra-theme-docs';
 import { Head } from 'nextra/components';
 import { getPageMap } from 'nextra/page-map';
+import { Space_Grotesk } from 'next/font/google';
 import Image from 'next/image';
 import 'nextra-theme-docs/style.css';
 
+const spaceGrotesk = Space_Grotesk({
+  subsets: ['latin'],
+  weight: ['700'],
+});
+
 export const metadata: Metadata = {
   title: {
-    default: 'Umbra Protocol Docs',
-    template: '%s | Umbra Protocol',
+    default: 'Umbra Docs',
+    template: '%s | Umbra Docs',
   },
   description:
     'Documentation for Umbra Protocol — a privacy-preserving dark pool for FAssets on the Flare Network.',
@@ -23,9 +29,19 @@ export const metadata: Metadata = {
 const navbar = (
   <Navbar
     logo={
-      <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <Image src="/logo.svg" alt="" width={24} height={24} />
-        <b>Umbra</b>
+      <span style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+        <Image src="/logo.png" alt="" width={28} height={28} priority />
+        <span
+          className={spaceGrotesk.className}
+          style={{
+            fontWeight: 700,
+            letterSpacing: '0.1em',
+            fontSize: '1.125rem',
+            lineHeight: 1,
+          }}
+        >
+          UMBRA Docs
+        </span>
       </span>
     }
     projectLink="https://github.com/davre001/UMBRA"
