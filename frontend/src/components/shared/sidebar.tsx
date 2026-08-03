@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { useApp } from '@/providers/app-provider';
-import { LayoutDashboard, Shield, Send, RefreshCw, QrCode, Settings, ChevronLeft, ChevronRight, Activity, Zap, Droplets } from 'lucide-react';
+import { LayoutDashboard, Shield, Send, RefreshCw, Settings, ChevronLeft, ChevronRight, Activity, Zap, Droplets } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export const Sidebar: React.FC = () => {
@@ -21,7 +21,6 @@ export const Sidebar: React.FC = () => {
     { name: 'Shield Assets', icon: Shield, href: '/shield' },
     { name: 'Private Pay', icon: Send, href: '/pay' },
     { name: 'Dark Swap', icon: RefreshCw, href: '/swap' },
-    { name: 'Receive Funds', icon: QrCode, href: '/receive' },
     { name: 'Faucet', icon: Droplets, href: '/faucet' },
   ];
 

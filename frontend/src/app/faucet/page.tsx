@@ -177,6 +177,7 @@ export default function FaucetPage() {
           id: `${symbol}-${Date.now()}`,
           title: `${symbol} Received`,
           message,
+          asset: symbol,
         },
       ]);
     },
