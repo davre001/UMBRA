@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { erc20Abi, formatUnits } from 'viem';
 import { useChainId, usePublicClient } from 'wagmi';
 import { useQuery } from '@tanstack/react-query';
@@ -10,6 +10,7 @@ import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { GlowBorder } from '@/components/ui/glow-border';
+import { ToastStack, type ToastItem } from '@/components/ui/toast';
 import {
   Droplets,
   Wallet,
@@ -32,9 +33,9 @@ const COSTON2_CHAIN_ID = 114;
 // rather than simulate a mint, since the whole point of this app is genuine
 // FAssets integration, not a fake token.
 const REAL_ASSETS = [
-  { symbol: 'C2FLR', name: 'Coston2 Flare (native gas)', icon: 'FLR' },
-  { symbol: 'FXRP', name: 'FAssets XRP (real bridge)', icon: 'XRP' },
-  { symbol: 'USDT0', name: 'Tether USD (testnet)', icon: 'USDT' },
+  { symbol: 'C2FLR', name: 'Coston2 Flare (native gas)', icon: 'FLR', faucetAmount: '100' },
+  { symbol: 'FXRP', name: 'FAssets XRP (real bridge)', icon: 'XRP', faucetAmount: '10' },
+  { symbol: 'USDT0', name: 'Tether USD (testnet)', icon: 'USDT', faucetAmount: '10' },
 ] as const;
 
 type AssetSymbol = (typeof REAL_ASSETS)[number]['symbol'];
@@ -82,7 +83,7 @@ function FaucetAssetCard({
 }: {
   asset: (typeof REAL_ASSETS)[number];
   walletAddress: string | undefined;
-  onReceived: (symbol: AssetSymbol, formatted: string) => void;
+  onReceived: (symbol: AssetSymbol) => void;
 }) {
   const { balance, formatted, enabled } = useFaucetBalance(asset.symbol, walletAddress);
   const [watching, setWatching] = useState(false);
@@ -92,9 +93,9 @@ function FaucetAssetCard({
     if (!watching || balance === undefined || baselineRef.current === null) return;
     if (balance > baselineRef.current) {
       setWatching(false);
-      onReceived(asset.symbol, formatted ?? '');
+      onReceived(asset.symbol);
     }
-  }, [balance, watching, asset.symbol, formatted, onReceived]);
+  }, [balance, watching, asset.symbol, onReceived]);
 
   const handleOpenFaucet = () => {
     baselineRef.current = balance ?? BigInt(0);
@@ -150,6 +151,7 @@ function FaucetAssetCard({
 export default function FaucetPage() {
   const { isEntered, isWalletConnected, walletAddress, connectWallet, addNotification } = useApp();
   const [copied, setCopied] = useState(false);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const handleCopyAddress = () => {
     if (!walletAddress) return;
@@ -158,14 +160,34 @@ export default function FaucetPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleReceived = (symbol: AssetSymbol, formatted: string) => {
-    addNotification('Tokens Received', `Your ${symbol} balance just went up${formatted ? ` (now ${formatted})` : ''}.`, 'success');
-  };
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // Stable identity: FaucetAssetCard lists this in an effect dependency array,
+  // so a new function each render would re-run the balance-watch effect.
+  const handleReceived = useCallback(
+    (symbol: AssetSymbol) => {
+      const amount = REAL_ASSETS.find((a) => a.symbol === symbol)!.faucetAmount;
+      const message = `You have received ${amount} ${symbol}`;
+      addNotification('Tokens Received', message, 'success');
+      setToasts((prev) => [
+        ...prev,
+        {
+          id: `${symbol}-${Date.now()}`,
+          title: `${symbol} Received`,
+          message,
+        },
+      ]);
+    },
+    [addNotification],
+  );
 
   // Reachable from the landing header too, so no vault gate — only a wallet gate.
   return (
     <div className={`flex min-h-screen flex-col z-10 relative ${isEntered ? 'pt-16' : 'pt-8'}`}>
       <Navbar />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
 
       <div className="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         {/* Back to gateway — only when the vault chrome is hidden */}
