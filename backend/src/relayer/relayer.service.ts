@@ -1,5 +1,5 @@
 import { SHIELDED_VAULT_ABI } from "../shared/vaultAbi";
-import { CONTRACTS, getWalletClient, publicClient } from "../shared/chain";
+import { CONTRACTS, assertTxSuccess, getWalletClient, publicClient } from "../shared/chain";
 import { logger } from "../shared/logger";
 
 /**
@@ -42,7 +42,8 @@ export async function relay(action: RelayableAction, args: unknown[]): Promise<`
     account: wallet.account!,
   });
   logger.info(`[relayer] ${action}() tx sent: ${txHash} — waiting for confirmation`);
-  await publicClient.waitForTransactionReceipt({ hash: txHash });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  assertTxSuccess(receipt);
   logger.info(`[relayer] ${action}() confirmed: ${txHash}`);
   return txHash;
 }

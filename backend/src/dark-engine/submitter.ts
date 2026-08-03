@@ -1,7 +1,7 @@
 import { encodeAbiParameters } from "viem";
 import { SHIELDED_VAULT_ABI } from "../shared/vaultAbi";
 import { STEALTH_ANNOUNCER_ABI } from "../shared/stealthAnnouncerAbi";
-import { CONTRACTS, getWalletClient, publicClient } from "../shared/chain";
+import { CONTRACTS, assertTxSuccess, getWalletClient, publicClient } from "../shared/chain";
 import { ZERO_VALUE } from "../shared/merkleTree";
 import { logger } from "../shared/logger";
 import type { MatchProofInputs, OrderIntent } from "./types";
@@ -70,6 +70,7 @@ export async function submitMatch(
   });
   logger.info(`[submitter] matchOrders() tx sent: ${txHash} — waiting for confirmation`);
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  assertTxSuccess(receipt);
   logger.info(`[submitter] matchOrders() confirmed in block ${receipt.blockNumber}: ${txHash}`);
 
   const nextLeafIndex = await publicClient.readContract({
@@ -110,7 +111,8 @@ export async function announceMatchedNote(
     chain: wallet.chain,
     account: wallet.account!,
   });
-  await publicClient.waitForTransactionReceipt({ hash: txHash });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  assertTxSuccess(receipt);
   logger.info(`[submitter] matched-note announcement confirmed: ${txHash}`);
   return txHash;
 }
@@ -140,7 +142,8 @@ export async function announceResidualOrder(
     chain: wallet.chain,
     account: wallet.account!,
   });
-  await publicClient.waitForTransactionReceipt({ hash: txHash });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  assertTxSuccess(receipt);
   logger.info(`[submitter] residual-order announcement confirmed: ${txHash}`);
   return txHash;
 }

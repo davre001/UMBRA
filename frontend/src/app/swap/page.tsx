@@ -10,7 +10,7 @@ import { getDeployment } from '@/lib/noteWallet/deployments';
 import { SHIELDED_VAULT_ABI } from '@/lib/noteWallet/vaultAbi';
 import { nullifierHash as computeNullifierHash, ownerKey as computeOwnerKey } from '@/lib/noteWallet/poseidon2';
 import { provePlaceOrder, proveCancelOrder } from '@/lib/proving/prove';
-import { submitOrderToMatcher } from '@/lib/api';
+import { submitOrderToMatcher, fetchMatcherOrders } from '@/lib/api';
 import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
 import type { StoredNote, StoredOrderNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
@@ -28,6 +28,7 @@ import {
   ShieldCheck,
   Info,
   XCircle,
+  UploadCloud,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -70,6 +71,7 @@ export default function DarkPoolPage() {
   const [step, setStep] = useState<PlaceStep>('idle');
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
+  const [resubmittingId, setResubmittingId] = useState<string | null>(null);
 
   const assetInConfig = deployment?.assets[assetIn];
   const assetOutConfig = deployment?.assets[assetOut];
@@ -88,6 +90,26 @@ export default function DarkPoolPage() {
   const openOrders = useMemo(
     () => (notesQuery.data ?? []).filter((n): n is StoredOrderNote => n.kind === 'order'),
     [notesQuery.data]
+  );
+
+  // The matcher's book is in-memory on the backend with no persistence — an
+  // order can silently fall out of it (backend restart/redeploy, or being
+  // unreachable at submission time) while staying perfectly valid and
+  // unspent on-chain. Polled while "My Orders" is open so a dropped order's
+  // "Resubmit" action shows up without needing a manual refresh.
+  const matcherOrdersQuery = useQuery({
+    queryKey: ['matcherOrders'],
+    queryFn: fetchMatcherOrders,
+    enabled: activeTab === 'orders' && openOrders.length > 0,
+    refetchInterval: 15_000,
+  });
+
+  // Commitments are stored locally zero-padded to 64 hex chars but rest on
+  // the matcher's book as `"0x" + value.toString(16)` (no padding) — compare
+  // by numeric value, not string, so a real match isn't missed over formatting.
+  const matcherCommitments = useMemo(
+    () => new Set((matcherOrdersQuery.data ?? []).map((o) => BigInt(o.commitment).toString())),
+    [matcherOrdersQuery.data]
   );
 
   const handlePlaceOrder = async () => {
@@ -226,6 +248,41 @@ export default function DarkPoolPage() {
       addNotification('Cancel Failed', message, 'error');
     } finally {
       setCancelingId(null);
+    }
+  };
+
+  /**
+   * Re-hands an already-on-chain order's private details to the matcher —
+   * the same call handlePlaceOrder makes right after placeOrder(), for an
+   * order that's since fallen out of the matcher's in-memory book (a
+   * backend restart/redeploy, or the matcher being unreachable the first
+   * time). The order itself never left the chain — this only affects
+   * whether the matcher currently knows to try matching it.
+   */
+  const handleResubmitOrder = async (order: StoredOrderNote) => {
+    if (!walletAddress) return;
+    setResubmittingId(order.id);
+    try {
+      const spendingKey = await noteWallet.getSpendingKey();
+      await submitOrderToMatcher({
+        commitment: order.commitment,
+        leafIndex: order.leafIndex!,
+        spendingKey: spendingKey.toString(),
+        orderBlinding: order.blinding,
+        amountIn: order.amount,
+        assetIn: Number(order.assetId),
+        assetOut: Number(order.assetOut),
+        minAmountOut: order.minAmountOut,
+        ownerKey: computeOwnerKey(spendingKey).toString(),
+        walletAddress,
+      });
+      queryClient.invalidateQueries({ queryKey: ['matcherOrders'] });
+      addNotification('Order Resubmitted', "Your order is back on the matcher's book.", 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Resubmitting the order failed.';
+      addNotification('Resubmit Failed', message, 'error');
+    } finally {
+      setResubmittingId(null);
     }
   };
 
@@ -489,6 +546,11 @@ export default function DarkPoolPage() {
                       const remaining = BigInt(order.amount);
                       const filled = original - remaining;
                       const isPartiallyFilled = filled > BigInt(0);
+                      // Only trust a "not on the book" verdict once the query has
+                      // actually resolved at least once — otherwise every order
+                      // would flash a Resubmit button before we truly know.
+                      const matcherStatusKnown = matcherOrdersQuery.data !== undefined;
+                      const isOnMatcherBook = matcherCommitments.has(BigInt(order.commitment).toString());
                       return (
                         <div key={order.id} className="flex items-center justify-between p-4 rounded-lg border border-border-custom bg-surface/20">
                           <div>
@@ -502,23 +564,49 @@ export default function DarkPoolPage() {
                             ) : (
                               <span className="text-[9px] text-text-secondary">Pending match — order #{order.derivationIndex}</span>
                             )}
-                          </div>
-                          <AnimatedButton
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleCancelOrder(order)}
-                            disabled={cancelingId === order.id}
-                          >
-                            {cancelingId === order.id ? (
-                              <span className="flex items-center gap-1.5">
-                                <RefreshCw size={12} className="animate-spin" /> Cancelling...
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1.5">
-                                <XCircle size={12} /> Cancel
+                            {matcherStatusKnown && isOnMatcherBook && (
+                              <span className="flex items-center gap-1 text-[9px] text-success-state mt-0.5">
+                                <CheckCircle2 size={9} /> Live on matcher&apos;s order book
                               </span>
                             )}
-                          </AnimatedButton>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {matcherStatusKnown && !isOnMatcherBook && (
+                              <AnimatedButton
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => handleResubmitOrder(order)}
+                                disabled={resubmittingId === order.id}
+                                title="Not currently found on the matcher's order book — hand it your order details again so it can be matched."
+                              >
+                                {resubmittingId === order.id ? (
+                                  <span className="flex items-center gap-1.5">
+                                    <RefreshCw size={12} className="animate-spin" /> Resubmitting...
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center gap-1.5">
+                                    <UploadCloud size={12} /> Resubmit
+                                  </span>
+                                )}
+                              </AnimatedButton>
+                            )}
+                            <AnimatedButton
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleCancelOrder(order)}
+                              disabled={cancelingId === order.id}
+                            >
+                              {cancelingId === order.id ? (
+                                <span className="flex items-center gap-1.5">
+                                  <RefreshCw size={12} className="animate-spin" /> Cancelling...
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1.5">
+                                  <XCircle size={12} /> Cancel
+                                </span>
+                              )}
+                            </AnimatedButton>
+                          </div>
                         </div>
                       );
                     })

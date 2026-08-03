@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, http, type Address } from "viem";
+import { createPublicClient, createWalletClient, http, type Address, type TransactionReceipt } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { flareTestnet } from "viem/chains";
 import deployment from "./coston2Deployment.json";
@@ -58,4 +58,11 @@ export function assetById(assetId: number | bigint) {
   const entry = Object.entries(ASSETS).find(([, a]) => a.assetId === id);
   if (!entry) throw new Error(`Unknown assetId: ${assetId}`);
   return { symbol: entry[0] as AssetSymbol, ...entry[1] };
+}
+
+/** waitForTransactionReceipt resolves on a reverted tx too — it only rejects for things like a timeout, never for on-chain failure. Every backend service submitting a real transaction (compliance attester, relayer, dark-engine matcher) must check `status` itself, which is what this centralizes. */
+export function assertTxSuccess(receipt: TransactionReceipt): void {
+  if (receipt.status !== "success") {
+    throw new Error(`Transaction reverted on-chain (${receipt.transactionHash}).`);
+  }
 }

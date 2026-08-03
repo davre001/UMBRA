@@ -1,5 +1,5 @@
 import { COMPLIANCE_REGISTRY_ABI } from "../shared/complianceRegistryAbi";
-import { CONTRACTS, getWalletClient, publicClient } from "../shared/chain";
+import { CONTRACTS, assertTxSuccess, getWalletClient, publicClient } from "../shared/chain";
 import { logger } from "../shared/logger";
 
 /**
@@ -33,7 +33,8 @@ export async function screenAddress(address: string): Promise<ComplianceScreenRe
     chain: wallet.chain,
     account: wallet.account!,
   });
-  await publicClient.waitForTransactionReceipt({ hash: txHash });
+  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  assertTxSuccess(receipt);
   logger.info(`[compliance] screen result for ${address} recorded: ${txHash}`);
   return { address, clear, txHash };
 }

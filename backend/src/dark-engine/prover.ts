@@ -115,6 +115,9 @@ export interface MatchProver {
   proveMatch(inputs: MatchProofInputs): Promise<`0x${string}`>;
 }
 
+/** Thrown only by UnavailableMatchProver — lets callers distinguish "no prover wired in yet" (expected on this deployment) from a real failure elsewhere in completeMatch (e.g. submitMatch's on-chain revert), which should not be logged as if it were equally routine. */
+export class NoProverConfiguredError extends Error {}
+
 /**
  * Default prover for this deployment. Real `match_orders` proving needs
  * bb.js + the compiled circuit, which this backend deliberately does not
@@ -126,7 +129,7 @@ export interface MatchProver {
  */
 export class UnavailableMatchProver implements MatchProver {
   async proveMatch(): Promise<`0x${string}`> {
-    throw new Error(
+    throw new NoProverConfiguredError(
       "No match_orders prover configured for this deployment — proving needs bb.js, which this backend doesn't run. Wire a real MatchProver to complete on-chain matching."
     );
   }

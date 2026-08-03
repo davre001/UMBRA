@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { OrderBook } from "./engine";
-import { assembleMatchProofInputs, UnavailableMatchProver, type MatchProver } from "./prover";
+import { assembleMatchProofInputs, NoProverConfiguredError, UnavailableMatchProver, type MatchProver } from "./prover";
 import { submitMatch, announceMatchedNote, announceResidualOrder, type MatchLeafIndices } from "./submitter";
 import { computeFill } from "./fillSizing";
 import { logger } from "../shared/logger";
@@ -115,11 +115,19 @@ export async function submitOrder(vaultAddress: `0x${string}`, body: unknown): P
   try {
     await completeMatch(matchId);
   } catch (err) {
-    // Expected when no real prover is wired in (UnavailableMatchProver) —
-    // the match stays recorded as awaiting_proof for the matcher-worker to
-    // pick up later; see prover.ts. Logged at info, not warn/error, because
-    // that's the normal path on this deployment, not a fault.
-    logger.info(`[dark-engine] match ${matchId} left awaiting_proof: ${err instanceof Error ? err.message : err}`);
+    if (err instanceof NoProverConfiguredError) {
+      // Expected on this deployment — the match stays recorded as
+      // awaiting_proof for the matcher-worker to pick up later; see
+      // prover.ts. Logged at info, not warn/error, because that's the
+      // normal path here, not a fault.
+      logger.info(`[dark-engine] match ${matchId} left awaiting_proof: ${err.message}`);
+    } else {
+      // Anything else (e.g. matchOrders() itself reverting on-chain) is a
+      // real failure, not the routine "no prover yet" case above — the
+      // match correctly stays awaiting_proof (submitMatch throws before
+      // settleOnChain ever marks it settled), but this deserves attention.
+      logger.warn(`[dark-engine] match ${matchId} failed unexpectedly, left awaiting_proof: ${err instanceof Error ? err.message : err}`);
+    }
   }
 
   const current = matches.get(matchId)!;

@@ -1,4 +1,5 @@
 import { decodeAbiParameters, encodeAbiParameters, type PublicClient } from "viem";
+import { getLogsChunked } from "./getLogsChunked";
 
 /**
  * Delivers a `pay`-created note's private data (assetId, amount, blinding,
@@ -93,7 +94,7 @@ function decodeOrderMetadata(metadata: `0x${string}`, blockNumber: bigint): Anno
   }
 }
 
-type AnnouncerClient = Pick<PublicClient, "getLogs">;
+type AnnouncerClient = Pick<PublicClient, "getLogs" | "getBlockNumber">;
 
 const ANNOUNCEMENT_EVENT = {
   type: "event",
@@ -114,17 +115,19 @@ export async function fetchIncomingAnnouncements(
   recipient: `0x${string}`,
   fromBlock: bigint = BigInt(0)
 ): Promise<AnnouncedNote[]> {
-  const logs = await client.getLogs({
-    address: announcerAddress,
-    event: ANNOUNCEMENT_EVENT,
-    args: { schemeId: OWNER_KEY_NOTE_SCHEME_ID, stealthAddress: recipient },
+  const toBlock = await client.getBlockNumber();
+  const logs = (await getLogsChunked(
+    client,
+    announcerAddress,
+    ANNOUNCEMENT_EVENT,
     fromBlock,
-    toBlock: "latest",
-  });
+    toBlock,
+    { schemeId: OWNER_KEY_NOTE_SCHEME_ID, stealthAddress: recipient }
+  )) as { args: { metadata: `0x${string}` }; blockNumber: bigint }[];
 
   const notes: AnnouncedNote[] = [];
   for (const log of logs) {
-    const decoded = decodeNoteMetadata(log.args.metadata as `0x${string}`, log.blockNumber);
+    const decoded = decodeNoteMetadata(log.args.metadata, log.blockNumber);
     if (decoded) notes.push(decoded);
   }
   return notes;
@@ -137,17 +140,19 @@ export async function fetchIncomingOrderAnnouncements(
   recipient: `0x${string}`,
   fromBlock: bigint = BigInt(0)
 ): Promise<AnnouncedOrder[]> {
-  const logs = await client.getLogs({
-    address: announcerAddress,
-    event: ANNOUNCEMENT_EVENT,
-    args: { schemeId: ORDER_SCHEME_ID, stealthAddress: recipient },
+  const toBlock = await client.getBlockNumber();
+  const logs = (await getLogsChunked(
+    client,
+    announcerAddress,
+    ANNOUNCEMENT_EVENT,
     fromBlock,
-    toBlock: "latest",
-  });
+    toBlock,
+    { schemeId: ORDER_SCHEME_ID, stealthAddress: recipient }
+  )) as { args: { metadata: `0x${string}` }; blockNumber: bigint }[];
 
   const orders: AnnouncedOrder[] = [];
   for (const log of logs) {
-    const decoded = decodeOrderMetadata(log.args.metadata as `0x${string}`, log.blockNumber);
+    const decoded = decodeOrderMetadata(log.args.metadata, log.blockNumber);
     if (decoded) orders.push(decoded);
   }
   return orders;

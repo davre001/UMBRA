@@ -44,6 +44,28 @@ export async function submitOrderToMatcher(order: OrderIntentBody): Promise<Subm
   return res.json();
 }
 
+export interface MatcherOrderSummary {
+  commitment: string;
+  submittedAt: number;
+}
+
+/**
+ * Every order currently resting on the matcher's book (commitments only —
+ * same disclosed trust boundary as the rest of this matcher). The book is
+ * in-memory on the backend with no persistence, so an order can silently
+ * fall out of it (a backend restart/redeploy, or the matcher being
+ * unreachable when it was first submitted) while remaining perfectly valid
+ * and unspent on-chain — this is how the Swap page tells which of a
+ * wallet's open orders actually still need `submitOrderToMatcher` called
+ * again.
+ */
+export async function fetchMatcherOrders(): Promise<MatcherOrderSummary[]> {
+  const res = await fetch(`${API_URL}/api/dark-engine/orders`);
+  if (!res.ok) throw new Error(`Fetching the matcher's order book failed: ${res.status}`);
+  const body = (await res.json()) as { orders: MatcherOrderSummary[] };
+  return body.orders;
+}
+
 export interface ScreenAddressResult {
   address: string;
   clear: boolean;

@@ -1,6 +1,7 @@
 import { decodeFunctionData, type PublicClient } from "viem";
 import { SHIELDED_VAULT_ABI } from "./vaultAbi";
 import { ZERO_VALUE } from "./merkleTree";
+import { getLogsChunked } from "./getLogsChunked";
 
 // Only these methods are used — narrowing to them (rather than the full
 // PublicClient) sidesteps a real but irrelevant type mismatch: wagmi's
@@ -16,28 +17,6 @@ type ScanClient = Pick<PublicClient, "getLogs" | "readContract" | "getBlockNumbe
 };
 
 const LEAF_EVENTS = ["Shielded", "Paid", "OrderPlaced", "OrderCancelled"] as const;
-
-// drpc.org's free tier caps eth_getLogs at a 10,000-block range per call — a
-// single fromBlock=deployBlock..latest call (this scan's original shape)
-// now exceeds that as the chain has grown since deployment. 9999 keeps every
-// window comfortably under the cap.
-const MAX_LOG_RANGE = BigInt(9999);
-
-/** getLogs in <=MAX_LOG_RANGE-block windows, concatenated — see MAX_LOG_RANGE for why a single unbounded call no longer works. */
-async function getLogsChunked(
-  client: ScanClient,
-  address: `0x${string}`,
-  event: unknown,
-  fromBlock: bigint,
-  toBlock: bigint
-) {
-  const logs: unknown[] = [];
-  for (let start = fromBlock; start <= toBlock; start += MAX_LOG_RANGE + BigInt(1)) {
-    const end = start + MAX_LOG_RANGE < toBlock ? start + MAX_LOG_RANGE : toBlock;
-    logs.push(...(await client.getLogs({ address, event: event as never, fromBlock: start, toBlock: end })));
-  }
-  return logs;
-}
 
 interface LeafEvent {
   commitment: bigint;
