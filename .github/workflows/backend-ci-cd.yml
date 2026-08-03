@@ -1,12 +1,19 @@
 name: Backend CI/CD
 
-# Build/test the backend on every push and PR that touches it, then — for
-# pushes to main — poll Render's API for the deploy it triggers for that
+# Build/typecheck the backend on every push and PR that touches it, then —
+# for pushes to main — poll Render's API for the deploy it triggers for that
 # exact commit and fail the workflow (a red check on the commit) if Render's
 # deploy doesn't come back "live". This doesn't trigger the deploy itself;
 # Render's own GitHub integration already does that on push. This just
 # reports whether it actually succeeded, since Render doesn't post that back
 # to GitHub on its own the way Vercel does.
+#
+# `npm test` is deliberately NOT run here: the backend's test suite submits
+# real transactions against live Coston2 (shield deposits, compliance
+# screening, etc.) using a funded operator key, so it needs that key as
+# PRIVATE_KEY to run at all. Wiring a funded key into CI — reachable by
+# every push/PR — was a deliberate call not to make; run `npm test` locally
+# instead, same as before this workflow existed.
 
 on:
   push:
@@ -21,8 +28,8 @@ on:
       - ".github/workflows/backend-ci-cd.yml"
 
 jobs:
-  build-and-test:
-    name: Build & Test
+  build:
+    name: Build & Typecheck
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -38,11 +45,10 @@ jobs:
 
       - run: npm ci
       - run: npm run build
-      - run: npm test
 
   verify-render-deploy:
     name: Verify Render Deploy
-    needs: build-and-test
+    needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
@@ -111,5 +117,5 @@ jobs:
 #                      page shows an id starting with "srv-"
 #
 # Until both are set, the "Verify Render Deploy" job will fail with a clear
-# error rather than silently doing nothing — build-and-test still runs and
+# error rather than silently doing nothing — the build job still runs and
 # gates every push/PR regardless.
