@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useChainId, useSwitchChain } from 'wagmi';
 import { flare, flareTestnet } from 'wagmi/chains';
 import { useApp } from '@/providers/app-provider';
+import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
 import { Bell, Wallet, ShieldAlert, ShieldCheck, ChevronDown, Menu, X, Check, ArrowRight } from 'lucide-react';
 import { formatAddress } from '@/lib/utils';
 import { AnimatedButton } from '@/components/ui/animated-button';
@@ -54,7 +55,10 @@ export const Navbar: React.FC = () => {
     setShowNetworkMenu(false);
     if (targetChainId === chainId) return;
     try {
-      await switchChainAsync({ chainId: targetChainId });
+      // addEthereumChainParameter lets the wallet add this network on the
+      // fly if it doesn't already have it configured, instead of just
+      // failing with "unrecognized chain ID".
+      await switchChainAsync({ chainId: targetChainId, addEthereumChainParameter: ADD_CHAIN_PARAMS[targetChainId] });
     } catch {
       addNotification('Network Switch Failed', 'Please switch networks manually in your wallet.', 'error');
     }

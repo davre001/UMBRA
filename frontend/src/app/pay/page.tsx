@@ -14,6 +14,7 @@ import { encodeNoteMetadata, OWNER_KEY_NOTE_SCHEME_ID } from '@/lib/noteWallet/a
 import { nullifierHash as computeNullifierHash } from '@/lib/noteWallet/poseidon2';
 import { provePay } from '@/lib/proving/prove';
 import { assertTxSuccess } from '@/lib/utils';
+import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
 import type { StoredNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -253,7 +254,7 @@ export default function PrivatePayPage() {
       return;
     }
     if (!onCoston2) {
-      switchChainAsync({ chainId: COSTON2_CHAIN_ID }).catch(() => {
+      switchChainAsync({ chainId: COSTON2_CHAIN_ID, addEthereumChainParameter: ADD_CHAIN_PARAMS[COSTON2_CHAIN_ID] }).catch(() => {
         addNotification('Network Switch Failed', 'Please switch your wallet to the Coston2 testnet manually.', 'error');
       });
       return;

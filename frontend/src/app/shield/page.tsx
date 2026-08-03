@@ -1,16 +1,19 @@
 "use client";
 
 import React, { useMemo, useState } from 'react';
-import { erc20Abi, formatUnits, parseEventLogs, parseUnits } from 'viem';
+import { erc20Abi, formatUnits, isAddress, parseEventLogs, parseUnits } from 'viem';
 import { useChainId, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '@/providers/app-provider';
 import { useNoteWallet } from '@/lib/noteWallet/useNoteWallet';
 import { getDeployment } from '@/lib/noteWallet/deployments';
 import { SHIELDED_VAULT_ABI } from '@/lib/noteWallet/vaultAbi';
+import { COMPLIANCE_REGISTRY_ABI } from '@/lib/noteWallet/complianceRegistryAbi';
 import { nullifierHash as computeNullifierHash } from '@/lib/noteWallet/poseidon2';
 import { proveWithdraw } from '@/lib/proving/prove';
+import { screenAddress } from '@/lib/api';
 import { assertTxSuccess } from '@/lib/utils';
+import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
 import type { StoredNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -31,7 +34,7 @@ import Link from 'next/link';
 
 type Tab = 'deposit' | 'withdraw';
 type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0';
-type FlowStep = 'idle' | 'approving' | 'submitting' | 'proving' | 'confirming' | 'finalized';
+type FlowStep = 'idle' | 'approving' | 'screening' | 'submitting' | 'proving' | 'confirming' | 'finalized';
 
 const COSTON2_CHAIN_ID = 114;
 const ASSET_OPTIONS: { sym: AssetSymbol; name: string }[] = [
@@ -56,6 +59,7 @@ const DEPOSIT_TIMELINE_NATIVE = [
 ] as const;
 
 const WITHDRAW_TIMELINE = [
+  { key: 'screening', label: 'Compliance Screening' },
   { key: 'proving', label: 'Generate ZK Proof' },
   { key: 'submitting', label: 'Submit Withdrawal' },
   { key: 'confirming', label: 'Confirm On-Chain' },
@@ -107,6 +111,18 @@ export default function ShieldPage() {
     queryKey: ['unspentNotes', walletAddress],
     queryFn: () => noteWallet.listUnspentNotes(),
     enabled: !!walletAddress,
+  });
+
+  const destinationScreenedQuery = useQuery({
+    queryKey: ['isScreened', chainId, effectiveDestination],
+    queryFn: () =>
+      publicClient!.readContract({
+        address: deployment!.compliance,
+        abi: COMPLIANCE_REGISTRY_ABI,
+        functionName: 'isScreened',
+        args: [effectiveDestination as `0x${string}`],
+      }),
+    enabled: !!publicClient && !!deployment && activeTab === 'withdraw' && isAddress(effectiveDestination),
   });
 
   const assetNotes: StoredNote[] = useMemo(() => {
@@ -186,6 +202,35 @@ export default function ShieldPage() {
     }
   };
 
+  /**
+   * ShieldedVault.withdraw() gates on ComplianceRegistry.isScreened(recipient)
+   * — a destination that's never been screened (or was previously blocked)
+   * makes the withdraw tx revert on-chain. Checks the real on-chain status
+   * first and only calls the backend attester if it isn't already clear, so
+   * repeat withdrawals to the same address don't re-screen every time.
+   * Throws if the address comes back blocked, before any proof/gas is spent.
+   */
+  const ensureDestinationScreened = async (
+    destination: `0x${string}`,
+    onStep?: (step: 'screening') => void
+  ): Promise<void> => {
+    if (!publicClient || !deployment) throw new Error('No public client / deployment');
+    onStep?.('screening');
+    const alreadyClear = await publicClient.readContract({
+      address: deployment.compliance,
+      abi: COMPLIANCE_REGISTRY_ABI,
+      functionName: 'isScreened',
+      args: [destination],
+    });
+    if (alreadyClear) return;
+
+    const result = await screenAddress(destination);
+    if (!result.clear) {
+      throw new Error('Destination address failed compliance screening and cannot receive a withdrawal.');
+    }
+    queryClient.invalidateQueries({ queryKey: ['isScreened', chainId, destination] });
+  };
+
   /** Proves + submits one withdrawal, waits for confirmation, returns the tx hash. Shared by the single-note flow and Unshield All — `onStep` lets a caller drive its own progress UI, or omit it for a silent/batched call. */
   const withdrawOneNote = async (
     note: StoredNote,
@@ -243,6 +288,7 @@ export default function ShieldPage() {
 
     try {
       const amountValue = BigInt(note.amount);
+      await ensureDestinationScreened(effectiveDestination as `0x${string}`, setStep);
       const withdrawHash = await withdrawOneNote(note, effectiveDestination as `0x${string}`, setStep);
       await noteWallet.refreshSpentStatus();
 
@@ -270,6 +316,14 @@ export default function ShieldPage() {
     }
     const notes = assetNotes.filter((n) => n.kind === 'note');
     if (notes.length === 0) return;
+
+    try {
+      await ensureDestinationScreened(effectiveDestination as `0x${string}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Compliance screening failed.';
+      addNotification('Compliance Screening Failed', message, 'error');
+      return;
+    }
 
     setBulkWithdrawing(true);
     setBulkProgress({ done: 0, total: notes.length });
@@ -332,7 +386,7 @@ export default function ShieldPage() {
       return;
     }
     if (!onCoston2) {
-      switchChainAsync({ chainId: COSTON2_CHAIN_ID }).catch(() => {
+      switchChainAsync({ chainId: COSTON2_CHAIN_ID, addEthereumChainParameter: ADD_CHAIN_PARAMS[COSTON2_CHAIN_ID] }).catch(() => {
         addNotification('Network Switch Failed', 'Please switch your wallet to the Coston2 testnet manually.', 'error');
       });
       return;
@@ -366,6 +420,7 @@ export default function ShieldPage() {
 
   const stepLabel: Record<Exclude<FlowStep, 'idle' | 'finalized'>, string> = {
     approving: 'Approving token...',
+    screening: 'Verifying compliance status...',
     submitting: activeTab === 'deposit' ? 'Submitting deposit...' : 'Submitting withdrawal...',
     proving: 'Generating ZK proof in browser...',
     confirming: 'Confirming on-chain...',
@@ -555,7 +610,24 @@ export default function ShieldPage() {
                     </div>
 
                     <div>
-                      <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Destination Address</label>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light">Destination Address</label>
+                        {isAddress(effectiveDestination) && (
+                          <span className={`text-[9px] uppercase tracking-wider font-mono ${
+                            destinationScreenedQuery.isLoading
+                              ? 'text-text-secondary'
+                              : destinationScreenedQuery.data
+                                ? 'text-success-state'
+                                : 'text-accent-secondary'
+                          }`}>
+                            {destinationScreenedQuery.isLoading
+                              ? 'Checking compliance...'
+                              : destinationScreenedQuery.data
+                                ? 'Screened Clear'
+                                : 'Not Yet Screened'}
+                          </span>
+                        )}
+                      </div>
                       <input
                         type="text"
                         value={effectiveDestination}
@@ -564,6 +636,11 @@ export default function ShieldPage() {
                         className="w-full bg-surface/30 border border-border-custom rounded-lg px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60 font-mono"
                         required
                       />
+                      {isAddress(effectiveDestination) && destinationScreenedQuery.data === false && (
+                        <p className="text-[9px] text-accent-secondary/80 mt-1.5 leading-relaxed">
+                          Not screened yet — withdrawing will screen this address automatically before submitting.
+                        </p>
+                      )}
                     </div>
                   </>
                 )}

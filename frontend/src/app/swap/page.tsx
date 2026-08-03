@@ -11,6 +11,7 @@ import { SHIELDED_VAULT_ABI } from '@/lib/noteWallet/vaultAbi';
 import { nullifierHash as computeNullifierHash, ownerKey as computeOwnerKey } from '@/lib/noteWallet/poseidon2';
 import { provePlaceOrder, proveCancelOrder } from '@/lib/proving/prove';
 import { submitOrderToMatcher } from '@/lib/api';
+import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
 import type { StoredNote, StoredOrderNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -235,7 +236,7 @@ export default function DarkPoolPage() {
       return;
     }
     if (!onCoston2) {
-      switchChainAsync({ chainId: COSTON2_CHAIN_ID }).catch(() => {
+      switchChainAsync({ chainId: COSTON2_CHAIN_ID, addEthereumChainParameter: ADD_CHAIN_PARAMS[COSTON2_CHAIN_ID] }).catch(() => {
         addNotification('Network Switch Failed', 'Please switch your wallet to the Coston2 testnet manually.', 'error');
       });
       return;

@@ -43,3 +43,29 @@ export async function submitOrderToMatcher(order: OrderIntentBody): Promise<Subm
   }
   return res.json();
 }
+
+export interface ScreenAddressResult {
+  address: string;
+  clear: boolean;
+  txHash: `0x${string}`;
+}
+
+/**
+ * Screens `address` against the compliance ruleset and records the result
+ * on-chain via the backend's ATTESTER_ROLE key — ShieldedVault.withdraw()
+ * gates on ComplianceRegistry.isScreened(recipient), so an address that's
+ * never been screened (or was previously blocked) needs this called before
+ * a withdrawal to it can succeed.
+ */
+export async function screenAddress(address: string): Promise<ScreenAddressResult> {
+  const res = await fetch(`${API_URL}/api/compliance/screen`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ address }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Compliance screening failed: ${res.status}`);
+  }
+  return res.json();
+}
