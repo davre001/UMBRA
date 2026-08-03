@@ -1,12 +1,15 @@
 name: Backend CI/CD
 
 # Build/typecheck the backend on every push and PR that touches it, then —
-# for pushes to main — poll Render's API for the deploy it triggers for that
-# exact commit and fail the workflow (a red check on the commit) if Render's
-# deploy doesn't come back "live". This doesn't trigger the deploy itself;
-# Render's own GitHub integration already does that on push. This just
-# reports whether it actually succeeded, since Render doesn't post that back
-# to GitHub on its own the way Vercel does.
+# for pushes to main — actually trigger the Render deploy via Render's API
+# and poll it to completion, failing the check (a red X on the commit) if it
+# doesn't come back "live". This workflow is the deploy trigger, not just a
+# status reporter: Render's own GitHub-push auto-deploy for this service
+# turned out to be disconnected (confirmed by hand — every prior deploy was
+# manual/API-triggered, never from a push webhook), so relying on Render to
+# deploy on its own wasn't safe to assume. If that GitHub connection ever
+# gets reconnected in Render's dashboard, both it and this workflow would
+# trigger a deploy per push — redundant but harmless, just a wasted build.
 #
 # `npm test` is deliberately NOT run here: the backend's test suite submits
 # real transactions against live Coston2 (shield deposits, compliance
@@ -46,13 +49,13 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-  verify-render-deploy:
-    name: Verify Render Deploy
+  deploy:
+    name: Deploy to Render
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Poll Render until this commit's deploy finishes
+      - name: Trigger a Render deploy and wait for it to finish
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
@@ -64,47 +67,44 @@ jobs:
             exit 1
           fi
 
-          SHA="${{ github.sha }}"
-          echo "Watching for a Render deploy of commit $SHA on service $RENDER_SERVICE_ID..."
+          echo "Triggering a Render deploy of commit ${{ github.sha }}..."
+          TRIGGER_RESPONSE=$(curl -sf -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            -H "Content-Type: application/json" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys" \
+            -d '{}')
 
-          # Render's own GitHub integration triggers the deploy asynchronously
-          # on push, same as this workflow — give it a little room to show up
-          # before polling, then poll every 15s for up to 10 minutes.
-          sleep 20
+          DEPLOY_ID=$(echo "$TRIGGER_RESPONSE" | jq -r '.id // empty')
+          if [ -z "$DEPLOY_ID" ]; then
+            echo "::error::Render didn't return a deploy id. Response: $TRIGGER_RESPONSE"
+            exit 1
+          fi
+          echo "Render deploy $DEPLOY_ID started — polling every 15s for up to 15 minutes..."
 
-          for i in $(seq 1 40); do
-            RESPONSE=$(curl -sf -H "Authorization: Bearer $RENDER_API_KEY" \
-              "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys?limit=20")
+          for i in $(seq 1 60); do
+            DEPLOY=$(curl -sf -H "Authorization: Bearer $RENDER_API_KEY" \
+              "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys/$DEPLOY_ID")
 
-            STATUS=$(echo "$RESPONSE" | jq -r --arg sha "$SHA" \
-              '[.[] | .deploy // .][] | select(.commit.id == $sha) | .status' | head -n1)
+            STATUS=$(echo "$DEPLOY" | jq -r '.status // empty')
+            echo "Render deploy status: ${STATUS:-unknown}"
 
-            if [ -n "${STATUS:-}" ]; then
-              echo "Render deploy status for $SHA: $STATUS"
-              case "$STATUS" in
-                live)
-                  echo "Deploy succeeded."
-                  exit 0
-                  ;;
-                build_failed|update_failed|pre_deploy_failed)
-                  echo "::error::Render deploy failed with status: $STATUS"
-                  exit 1
-                  ;;
-                canceled|deactivated)
-                  echo "::error::Render deploy for this commit ended as '$STATUS' rather than going live."
-                  exit 1
-                  ;;
-                # created / queued / build_in_progress / pre_deploy_in_progress
-                # / update_in_progress — still running, keep polling.
-              esac
-            else
-              echo "No Render deploy found yet for this commit — waiting..."
-            fi
+            case "$STATUS" in
+              live)
+                echo "Deploy succeeded."
+                exit 0
+                ;;
+              build_failed|update_failed|pre_deploy_failed|canceled|deactivated)
+                echo "::error::Render deploy $DEPLOY_ID ended with status: $STATUS"
+                exit 1
+                ;;
+              # created / queued / build_in_progress / pre_deploy_in_progress
+              # / update_in_progress — still running, keep polling.
+            esac
 
             sleep 15
           done
 
-          echo "::error::Timed out after ~10 minutes waiting for Render to finish deploying commit $SHA"
+          echo "::error::Timed out after ~15 minutes waiting for Render deploy $DEPLOY_ID to finish"
           exit 1
 
 # --- One-time setup ---
@@ -116,6 +116,6 @@ jobs:
 #   RENDER_SERVICE_ID Render dashboard -> the umbra-backend service -> its URL/settings
 #                      page shows an id starting with "srv-"
 #
-# Until both are set, the "Verify Render Deploy" job will fail with a clear
+# Until both are set, the "Deploy to Render" job will fail with a clear
 # error rather than silently doing nothing — the build job still runs and
 # gates every push/PR regardless.
