@@ -1,0 +1,115 @@
+name: Backend CI/CD
+
+# Build/test the backend on every push and PR that touches it, then — for
+# pushes to main — poll Render's API for the deploy it triggers for that
+# exact commit and fail the workflow (a red check on the commit) if Render's
+# deploy doesn't come back "live". This doesn't trigger the deploy itself;
+# Render's own GitHub integration already does that on push. This just
+# reports whether it actually succeeded, since Render doesn't post that back
+# to GitHub on its own the way Vercel does.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci-cd.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci-cd.yml"
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  verify-render-deploy:
+    name: Verify Render Deploy
+    needs: build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Poll Render until this commit's deploy finishes
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${RENDER_API_KEY:-}" ] || [ -z "${RENDER_SERVICE_ID:-}" ]; then
+            echo "::error::RENDER_API_KEY and/or RENDER_SERVICE_ID repo secrets are not set. See the setup notes in this workflow file (.github/workflows/backend-ci-cd.yml) for how to add them."
+            exit 1
+          fi
+
+          SHA="${{ github.sha }}"
+          echo "Watching for a Render deploy of commit $SHA on service $RENDER_SERVICE_ID..."
+
+          # Render's own GitHub integration triggers the deploy asynchronously
+          # on push, same as this workflow — give it a little room to show up
+          # before polling, then poll every 15s for up to 10 minutes.
+          sleep 20
+
+          for i in $(seq 1 40); do
+            RESPONSE=$(curl -sf -H "Authorization: Bearer $RENDER_API_KEY" \
+              "https://api.render.com/v1/services/$RENDER_SERVICE_ID/deploys?limit=20")
+
+            STATUS=$(echo "$RESPONSE" | jq -r --arg sha "$SHA" \
+              '[.[] | .deploy // .][] | select(.commit.id == $sha) | .status' | head -n1)
+
+            if [ -n "${STATUS:-}" ]; then
+              echo "Render deploy status for $SHA: $STATUS"
+              case "$STATUS" in
+                live)
+                  echo "Deploy succeeded."
+                  exit 0
+                  ;;
+                build_failed|update_failed|pre_deploy_failed)
+                  echo "::error::Render deploy failed with status: $STATUS"
+                  exit 1
+                  ;;
+                canceled|deactivated)
+                  echo "::error::Render deploy for this commit ended as '$STATUS' rather than going live."
+                  exit 1
+                  ;;
+                # created / queued / build_in_progress / pre_deploy_in_progress
+                # / update_in_progress — still running, keep polling.
+              esac
+            else
+              echo "No Render deploy found yet for this commit — waiting..."
+            fi
+
+            sleep 15
+          done
+
+          echo "::error::Timed out after ~10 minutes waiting for Render to finish deploying commit $SHA"
+          exit 1
+
+# --- One-time setup ---
+#
+# This workflow needs two GitHub repo secrets (Settings -> Secrets and
+# variables -> Actions -> New repository secret):
+#
+#   RENDER_API_KEY    Render dashboard -> Account Settings -> API Keys -> Create API Key
+#   RENDER_SERVICE_ID Render dashboard -> the umbra-backend service -> its URL/settings
+#                      page shows an id starting with "srv-"
+#
+# Until both are set, the "Verify Render Deploy" job will fail with a clear
+# error rather than silently doing nothing — build-and-test still runs and
+# gates every push/PR regardless.
