@@ -8,6 +8,7 @@ import { useApp } from '@/providers/app-provider';
 import { useNoteWallet } from '@/lib/noteWallet/useNoteWallet';
 import { getDeployment } from '@/lib/noteWallet/deployments';
 import { OWNER_KEY_REGISTRY_ABI } from '@/lib/noteWallet/ownerKeyRegistryAbi';
+import { assertTxSuccess } from '@/lib/utils';
 import type { AnnouncedOrder } from '@/lib/noteWallet/announcer';
 import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -79,7 +80,8 @@ export default function ReceivePage() {
         functionName: 'register',
         args: [ownOwnerKey],
       });
-      await publicClient!.waitForTransactionReceipt({ hash });
+      const receipt = await publicClient!.waitForTransactionReceipt({ hash });
+      assertTxSuccess(receipt);
       queryClient.invalidateQueries({ queryKey: ['ownerKeyOf', chainId, walletAddress] });
       addNotification('Payment Key Registered', 'Others can now pay you privately.', 'success');
     } catch (err) {

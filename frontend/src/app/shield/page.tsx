@@ -10,6 +10,7 @@ import { getDeployment } from '@/lib/noteWallet/deployments';
 import { SHIELDED_VAULT_ABI } from '@/lib/noteWallet/vaultAbi';
 import { nullifierHash as computeNullifierHash } from '@/lib/noteWallet/poseidon2';
 import { proveWithdraw } from '@/lib/proving/prove';
+import { assertTxSuccess } from '@/lib/utils';
 import type { StoredNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -152,7 +153,8 @@ export default function ShieldPage() {
             functionName: 'approve',
             args: [vaultAddress, amountBaseUnits],
           });
-          await publicClient.waitForTransactionReceipt({ hash: approveHash });
+          const approveReceipt = await publicClient.waitForTransactionReceipt({ hash: approveHash });
+          assertTxSuccess(approveReceipt);
         }
         setStep('submitting');
       }
@@ -222,7 +224,8 @@ export default function ShieldPage() {
     });
 
     onStep?.('confirming');
-    await publicClient.waitForTransactionReceipt({ hash: withdrawHash });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash: withdrawHash });
+    assertTxSuccess(receipt);
     return withdrawHash;
   };
 

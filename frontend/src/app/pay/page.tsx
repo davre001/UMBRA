@@ -13,6 +13,7 @@ import { STEALTH_ANNOUNCER_ABI } from '@/lib/noteWallet/stealthAnnouncerAbi';
 import { encodeNoteMetadata, OWNER_KEY_NOTE_SCHEME_ID } from '@/lib/noteWallet/announcer';
 import { nullifierHash as computeNullifierHash } from '@/lib/noteWallet/poseidon2';
 import { provePay } from '@/lib/proving/prove';
+import { assertTxSuccess } from '@/lib/utils';
 import type { StoredNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -132,7 +133,8 @@ export default function PrivatePayPage() {
         functionName: 'register',
         args: [ownOwnerKey],
       });
-      await publicClient!.waitForTransactionReceipt({ hash });
+      const receipt = await publicClient!.waitForTransactionReceipt({ hash });
+      assertTxSuccess(receipt);
       queryClient.invalidateQueries({ queryKey: ['ownerKeyOf', chainId, walletAddress] });
       addNotification('Payment Key Registered', 'Others can now pay you privately.', 'success');
     } catch (err) {
@@ -206,6 +208,7 @@ export default function PrivatePayPage() {
 
       setStep('confirming');
       const receipt = await publicClient.waitForTransactionReceipt({ hash: payHash });
+      assertTxSuccess(receipt);
       const [paidLog] = parseEventLogs({ abi: SHIELDED_VAULT_ABI, eventName: 'Paid', logs: receipt.logs });
       if (!paidLog) throw new Error('Paid event not found in transaction receipt.');
 
@@ -222,7 +225,8 @@ export default function PrivatePayPage() {
         functionName: 'announce',
         args: [OWNER_KEY_NOTE_SCHEME_ID, recipient as `0x${string}`, '0x', metadata],
       });
-      await publicClient.waitForTransactionReceipt({ hash: announceHash });
+      const announceReceipt = await publicClient.waitForTransactionReceipt({ hash: announceHash });
+      assertTxSuccess(announceReceipt);
 
       await noteWallet.refreshSpentStatus();
 

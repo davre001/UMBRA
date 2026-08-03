@@ -50,7 +50,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [disconnectModalOpen, setDisconnectModalOpen] = useState(false);
 
   // Real wallet state from wagmi
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, connector } = useAccount();
   const { disconnect } = useDisconnect();
   const router = useRouter();
 
@@ -87,9 +87,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const requestDisconnect = () => setDisconnectModalOpen(true);
 
-  const disconnectWallet = () => {
+  const disconnectWallet = async () => {
     setDisconnectModalOpen(false);
     setWalletModalOpen(false);
+
+    // Injected wallets (MetaMask, Rabby, Trust, Phantom) have no real "log
+    // out" — wagmi's own attempt at this (wallet_revokePermissions) uses a
+    // 100ms timeout that's too tight to ever actually complete, so it
+    // silently no-ops even on wallets that support it. That's why the app
+    // correctly shows disconnected but the wallet still reconnects the same
+    // account with one click and no prompt. Try the real revoke here first,
+    // with room to actually finish, before wagmi tears down local state.
+    if (connector?.type === 'injected') {
+      try {
+        const provider = (await connector.getProvider()) as
+          | { request(args: { method: string; params?: unknown[] }): Promise<unknown> }
+          | undefined;
+        await provider?.request({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] });
+      } catch {
+        // Not supported by this wallet — nothing more we can do from the dApp side.
+      }
+    }
+
     disconnect();
     addNotification('Wallet Disconnected', 'Secure connection terminated.', 'warning');
     // End the vault session and return to the gateway so the next connect starts clean
