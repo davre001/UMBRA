@@ -53,6 +53,65 @@ const SEND_TIMELINE = [
   { key: 'finalized', label: 'Settlement' },
 ] as const;
 
+const RECEIVE_TIMELINE = [
+  { key: 'announced', label: 'Payment Announced' },
+  { key: 'verified', label: 'Ownership Verified' },
+  { key: 'claiming', label: 'Claim to Wallet' },
+  { key: 'claimed', label: 'Available to Spend' },
+] as const;
+
+type StepStatus = 'done' | 'active' | 'pending';
+
+/** Shared step track for both the send and receive timelines. */
+function TimelineTrack({ steps }: { steps: { label: string; status: StepStatus; note?: string }[] }) {
+  return (
+    <div className="relative pl-6 space-y-6">
+      <div className="absolute left-2.5 top-2 bottom-2 w-0.5 bg-border-custom z-0" />
+      {steps.map((s, idx) => (
+        <div key={s.label} className="relative z-10 flex items-start gap-4">
+          <div
+            className={`h-6.5 w-6.5 rounded-full border-2 flex items-center justify-center bg-bg-base transition-colors duration-300 flex-shrink-0 ${
+              s.status === 'done'
+                ? 'border-success-state text-success-state'
+                : s.status === 'active'
+                  ? 'border-accent-primary text-accent-primary animate-pulse'
+                  : 'border-border-custom text-text-secondary'
+            }`}
+          >
+            {s.status === 'done' ? (
+              <CheckCircle2 size={12} className="fill-success-state/15" />
+            ) : (
+              <span className="text-[9px] font-bold font-mono">{idx + 1}</span>
+            )}
+          </div>
+          <div>
+            <span
+              className={`text-xs font-semibold block uppercase tracking-wide ${
+                s.status === 'done'
+                  ? 'text-text-primary'
+                  : s.status === 'active'
+                    ? 'text-accent-primary'
+                    : 'text-text-secondary'
+              }`}
+            >
+              {s.label}
+            </span>
+            {s.note ? (
+              <span
+                className={`text-[9px] mt-0.5 block leading-none ${
+                  s.status === 'done' ? 'text-success-state/60' : 'text-text-secondary/70'
+                }`}
+              >
+                {s.note}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function PrivatePayPage() {
   const { isEntered, isWalletConnected, walletAddress, connectWallet, addNotification } = useApp();
   const queryClient = useQueryClient();
@@ -123,6 +182,7 @@ export default function PrivatePayPage() {
   });
 
   const [claimingCommitment, setClaimingCommitment] = useState<bigint | null>(null);
+  const [lastClaimed, setLastClaimed] = useState<{ amount: bigint; assetId: bigint } | null>(null);
 
   const handleRegister = async () => {
     if (!registryAddress) return;
@@ -150,6 +210,7 @@ export default function PrivatePayPage() {
       await noteWallet.claimIncomingNote(candidate);
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
       queryClient.invalidateQueries({ queryKey: ['incomingAnnouncements', chainId, walletAddress] });
+      setLastClaimed({ amount: candidate.amount, assetId: candidate.assetId });
       addNotification('Payment Claimed', 'Saved to your shielded notes.', 'success');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Claim failed.';
@@ -278,6 +339,53 @@ export default function PrivatePayPage() {
   }
 
   const currentStepIdx = SEND_TIMELINE.findIndex((t) => t.key === step);
+
+  /** Announced amounts carry only an assetId, so resolve it back to the deployment's symbol/decimals. */
+  const describeAmount = (amount: bigint, assetId: bigint) => {
+    const entry = Object.entries(deployment?.assets ?? {}).find(
+      ([, cfg]) => BigInt(cfg.assetId) === assetId,
+    );
+    if (!entry) return `${formatUnits(amount, 18)} (asset ${assetId.toString()})`;
+    const [symbol, cfg] = entry;
+    return `${formatUnits(amount, cfg.decimals)} ${symbol}`;
+  };
+
+  const claimable = incomingQuery.data ?? [];
+  const isClaiming = claimingCommitment !== null;
+
+  // The announcement is what makes a payment visible at all, and scanIncomingNotes
+  // only returns candidates whose commitment it already recomputed against our own
+  // ownerKey — so by the time anything reaches this list, announce and verify are
+  // both settled facts. Only the claim itself is still in flight.
+  const receiveSteps: { label: string; status: StepStatus; note?: string }[] = (() => {
+    const seen = claimable.length > 0;
+    const claimed = lastClaimed !== null;
+    if (!seen && !claimed) {
+      return RECEIVE_TIMELINE.map((t, idx) => ({
+        label: t.label,
+        status: 'pending' as StepStatus,
+        note: idx === 0 ? (incomingQuery.isFetching ? 'Scanning…' : 'Waiting for a payment') : undefined,
+      }));
+    }
+    return [
+      {
+        label: RECEIVE_TIMELINE[0].label,
+        status: 'done' as StepStatus,
+        note: seen ? `${claimable.length} pending` : 'Received',
+      },
+      { label: RECEIVE_TIMELINE[1].label, status: 'done' as StepStatus, note: 'Commitment matched' },
+      {
+        label: RECEIVE_TIMELINE[2].label,
+        status: isClaiming ? 'active' : claimed ? 'done' : 'pending',
+        note: isClaiming ? 'Saving note…' : claimed ? 'Claimed' : 'Press Claim to continue',
+      },
+      {
+        label: RECEIVE_TIMELINE[3].label,
+        status: claimed && !isClaiming ? 'done' : 'pending',
+        note: claimed && !isClaiming ? describeAmount(lastClaimed.amount, lastClaimed.assetId) : undefined,
+      },
+    ];
+  })();
 
   const stepLabel: Record<Exclude<SendStep, 'idle' | 'finalized'>, string> = {
     proving: 'Generating ZK proof in browser...',
@@ -506,28 +614,24 @@ export default function PrivatePayPage() {
                     </div>
                   ) : incomingQuery.data && incomingQuery.data.length > 0 ? (
                     <div className="space-y-2">
-                      {incomingQuery.data.map((candidate) => {
-                        const sym = ASSET_OPTIONS.find((a) => deployment?.assets[a.sym]?.assetId === Number(candidate.assetId))?.sym ?? `asset ${candidate.assetId}`;
-                        const decimals = deployment?.assets[sym as AssetSymbol]?.decimals ?? 18;
-                        return (
-                          <div
-                            key={candidate.commitment.toString()}
-                            className="flex items-center justify-between p-3 rounded-lg border border-border-custom bg-surface/20"
+                      {incomingQuery.data.map((candidate) => (
+                        <div
+                          key={candidate.commitment.toString()}
+                          className="flex items-center justify-between p-3 rounded-lg border border-border-custom bg-surface/20"
+                        >
+                          <span className="text-xs font-mono font-bold text-text-primary">
+                            {describeAmount(candidate.amount, candidate.assetId)}
+                          </span>
+                          <AnimatedButton
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleClaim(candidate)}
+                            disabled={claimingCommitment === candidate.commitment}
                           >
-                            <span className="text-xs font-mono font-bold text-text-primary">
-                              {formatUnits(candidate.amount, decimals)} {sym}
-                            </span>
-                            <AnimatedButton
-                              variant="primary"
-                              size="sm"
-                              onClick={() => handleClaim(candidate)}
-                              disabled={claimingCommitment === candidate.commitment}
-                            >
-                              {claimingCommitment === candidate.commitment ? 'Claiming...' : 'Claim'}
-                            </AnimatedButton>
-                          </div>
-                        );
-                      })}
+                            {claimingCommitment === candidate.commitment ? 'Claiming...' : 'Claim'}
+                          </AnimatedButton>
+                        </div>
+                      ))}
                     </div>
                   ) : (
                     <div className="rounded-lg border border-border-custom bg-surface/20 p-4 text-center text-[10px] text-text-secondary">
@@ -541,7 +645,18 @@ export default function PrivatePayPage() {
 
           {/* Timeline Panel (Span 5) */}
           <div className="lg:col-span-5">
-            <GlowBorder active={step !== 'idle'} glowColor={step === 'finalized' ? 'success' : 'purple'}>
+            <GlowBorder
+              active={activeTab === 'incoming' ? claimable.length > 0 || isClaiming || lastClaimed !== null : step !== 'idle'}
+              glowColor={
+                activeTab === 'incoming'
+                  ? lastClaimed && !isClaiming
+                    ? 'success'
+                    : 'purple'
+                  : step === 'finalized'
+                    ? 'success'
+                    : 'purple'
+              }
+            >
               <GlassCard className="p-6 min-h-[380px] flex flex-col justify-between" hoverGlow={false}>
                 <div>
                   <div className="flex items-center gap-2 border-b border-border-custom pb-4 mb-6">
@@ -549,7 +664,9 @@ export default function PrivatePayPage() {
                     <h2 className="text-sm uppercase tracking-wider font-display font-bold">Execution Timeline</h2>
                   </div>
 
-                  {step === 'idle' ? (
+                  {activeTab === 'incoming' ? (
+                    <TimelineTrack steps={receiveSteps} />
+                  ) : step === 'idle' ? (
                     <div className="flex flex-col items-center justify-center py-10 text-center text-text-secondary">
                       <ShieldCheck size={36} className="text-border-custom mb-3" />
                       <span className="text-xs uppercase tracking-widest">Awaiting execution</span>
@@ -558,47 +675,45 @@ export default function PrivatePayPage() {
                       </p>
                     </div>
                   ) : (
-                    <div className="relative pl-6 space-y-6">
-                      <div className="absolute left-2.5 top-2 bottom-2 w-0.5 bg-border-custom z-0" />
-                      {SEND_TIMELINE.map((t, idx) => {
+                    <TimelineTrack
+                      steps={SEND_TIMELINE.map((t, idx) => {
                         // currentStepIdx never exceeds the last step's own index, so
                         // without the `step === 'finalized'` check the final step would
                         // never flip to "done" even after the whole flow succeeded.
                         const isDone = currentStepIdx > idx || step === 'finalized';
-                        const isCurrent = currentStepIdx === idx;
-                        return (
-                          <div key={t.key} className="relative z-10 flex items-start gap-4">
-                            <div className={`h-6.5 w-6.5 rounded-full border-2 flex items-center justify-center bg-bg-base transition-colors duration-300 flex-shrink-0 ${
-                              isDone
-                                ? 'border-success-state text-success-state'
-                                : isCurrent
-                                  ? 'border-accent-primary text-accent-primary animate-pulse'
-                                  : 'border-border-custom text-text-secondary'
-                            }`}>
-                              {isDone ? (
-                                <CheckCircle2 size={12} className="fill-success-state/15" />
-                              ) : (
-                                <span className="text-[9px] font-bold font-mono">{idx + 1}</span>
-                              )}
-                            </div>
-                            <div>
-                              <span className={`text-xs font-semibold block uppercase tracking-wide ${
-                                isDone ? 'text-text-primary' : isCurrent ? 'text-accent-primary' : 'text-text-secondary'
-                              }`}>
-                                {t.label}
-                              </span>
-                              {isDone && (
-                                <span className="text-[9px] text-success-state/60 mt-0.5 block leading-none">Completed</span>
-                              )}
-                            </div>
-                          </div>
-                        );
+                        return {
+                          label: t.label,
+                          status: isDone ? 'done' : currentStepIdx === idx ? 'active' : 'pending',
+                          note: isDone ? 'Completed' : undefined,
+                        };
                       })}
-                    </div>
+                    />
                   )}
                 </div>
 
-                {step === 'finalized' && (
+                {activeTab === 'incoming' && lastClaimed && !isClaiming && (
+                  <div className="mt-6 border-t border-border-custom/40 pt-4 flex flex-col gap-2 bg-success-state/5 p-3 rounded-lg border border-success-state/10 animate-fade-in">
+                    <div className="flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <Check className="text-success-state" size={16} />
+                        <span className="text-[10px] font-bold text-success-state uppercase tracking-wider">
+                          Claimed to shielded notes
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setLastClaimed(null)}
+                        className="text-[9px] text-text-secondary hover:text-text-primary underline cursor-pointer"
+                      >
+                        Clear State
+                      </button>
+                    </div>
+                    <span className="text-[9px] text-text-secondary/70 font-mono">
+                      {describeAmount(lastClaimed.amount, lastClaimed.assetId)} is now spendable.
+                    </span>
+                  </div>
+                )}
+
+                {activeTab === 'send' && step === 'finalized' && (
                   <div className="mt-6 border-t border-border-custom/40 pt-4 flex flex-col gap-2 bg-success-state/5 p-3 rounded-lg border border-success-state/10 animate-fade-in">
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2">
