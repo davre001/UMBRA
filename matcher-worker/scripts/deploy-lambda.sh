@@ -99,7 +99,11 @@ else
 fi
 ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
 
-ENV_VARS="Variables={BACKEND_URL=${BACKEND_URL},MATCHER_INTERNAL_SECRET=${MATCHER_INTERNAL_SECRET}}"
+# CRS_PATH: @aztec/bb.js defaults its reference-string cache to
+# homedir()/.bb-crs, which Lambda's read-only filesystem rejects outright —
+# every proving attempt failed with "Read-only file system" until this was
+# set. /tmp is the one writable path in a Lambda execution environment.
+ENV_VARS="Variables={BACKEND_URL=${BACKEND_URL},MATCHER_INTERNAL_SECRET=${MATCHER_INTERNAL_SECRET},CRS_PATH=/tmp/.bb-crs}"
 
 if aws lambda get-function --function-name "$FUNCTION_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
   echo "Updating existing function code..."
