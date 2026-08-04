@@ -10,7 +10,7 @@ import { getDeployment } from '@/lib/noteWallet/deployments';
 import { SHIELDED_VAULT_ABI } from '@/lib/noteWallet/vaultAbi';
 import { nullifierHash as computeNullifierHash, ownerKey as computeOwnerKey } from '@/lib/noteWallet/poseidon2';
 import { provePlaceOrder, proveCancelOrder } from '@/lib/proving/prove';
-import { submitOrderToMatcher, fetchMatcherOrders, fetchRate } from '@/lib/api';
+import { submitOrderToMatcher, fetchMatcherOrders, fetchRate, fetchRecentMatches } from '@/lib/api';
 import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
 import type { AnnouncedOrder } from '@/lib/noteWallet/announcer';
 import type { StoredNote, StoredOrderNote } from '@/lib/noteWallet/store';
@@ -31,6 +31,7 @@ import {
   XCircle,
   UploadCloud,
   Inbox,
+  History,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -52,6 +53,143 @@ const PLACE_TIMELINE = [
   { key: 'finalized', label: 'Order Placed' },
 ] as const;
 
+/** Coarse "Xm/Xh/Xd ago" — good enough for "how long has this been resting/how recently did this settle", not a precision clock. */
+function timeAgo(ms: number): string {
+  const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}h ago`;
+  return `${Math.floor(diffHour / 24)}d ago`;
+}
+
+/** Symbol + decimals for an on-chain assetId, falling back to a raw label for anything outside the three known assets. */
+function symbolFor(deployment: ReturnType<typeof getDeployment>, assetId: number | string): { sym: string; decimals: number } {
+  const found = ASSET_OPTIONS.find((a) => deployment?.assets[a.sym]?.assetId === Number(assetId));
+  return { sym: found?.sym ?? `asset ${assetId}`, decimals: found ? (deployment?.assets[found.sym]?.decimals ?? 18) : 18 };
+}
+
+/**
+ * One row in "My Orders" — its own component (not inlined in a .map) because
+ * it needs its own live-rate query: different open orders can each be a
+ * different asset pair, so one page-level rate query can't cover all of
+ * them. React Query dedupes by key, so orders sharing a pair only cost one
+ * real request regardless of how many rows ask for it.
+ */
+function OrderRow({
+  order,
+  deployment,
+  matcherStatusKnown,
+  isOnMatcherBook,
+  resubmittingId,
+  cancelingId,
+  onResubmit,
+  onCancel,
+}: {
+  order: StoredOrderNote;
+  deployment: ReturnType<typeof getDeployment>;
+  matcherStatusKnown: boolean;
+  isOnMatcherBook: boolean;
+  resubmittingId: string | null;
+  cancelingId: string | null;
+  onResubmit: (order: StoredOrderNote) => void;
+  onCancel: (order: StoredOrderNote) => void;
+}) {
+  const { sym: assetInSym, decimals: inDecimals } = symbolFor(deployment, order.assetId);
+  const { sym: assetOutSym, decimals: outDecimals } = symbolFor(deployment, order.assetOut);
+  const original = BigInt(order.originalAmountIn);
+  const remaining = BigInt(order.amount);
+  const filled = original - remaining;
+  const isPartiallyFilled = filled > BigInt(0);
+
+  const rateQuery = useQuery({
+    queryKey: ['rate', assetInSym, assetOutSym],
+    queryFn: () => fetchRate(assetInSym, assetOutSym),
+    enabled: assetInSym !== assetOutSym && !assetInSym.startsWith('asset '),
+    refetchInterval: 30_000,
+  });
+
+  // Cheap arithmetic on values already fresh this render — not worth a
+  // useMemo (and mixing locally-derived bigints/props in its deps is exactly
+  // what trips react-hooks/preserve-manual-memoization for no real benefit).
+  const impliedPctVsMarket = (() => {
+    if (!rateQuery.data) return null;
+    const remainingHuman = Number(formatUnits(remaining, inDecimals));
+    const minOutHuman = Number(formatUnits(BigInt(order.minAmountOut), outDecimals));
+    if (!remainingHuman || !minOutHuman) return null;
+    const impliedRate = minOutHuman / remainingHuman;
+    return ((impliedRate - rateQuery.data.rate) / rateQuery.data.rate) * 100;
+  })();
+
+  return (
+    <div className="flex items-center justify-between p-4 rounded-lg border border-border-custom bg-surface/20">
+      <div>
+        <span className="text-xs font-mono font-bold text-text-primary block">
+          {formatUnits(remaining, inDecimals)} {assetInSym} → min {formatUnits(BigInt(order.minAmountOut), outDecimals)} {assetOutSym}
+        </span>
+        {isPartiallyFilled ? (
+          <span className="text-[9px] text-accent-primary block">
+            {formatUnits(filled, inDecimals)} / {formatUnits(original, inDecimals)} {assetInSym} filled — rest still open
+          </span>
+        ) : (
+          <span className="text-[9px] text-text-secondary block">Resting since {timeAgo(order.createdAt)} — order #{order.derivationIndex}</span>
+        )}
+        {matcherStatusKnown && isOnMatcherBook && (
+          <span className="flex items-center gap-1 text-[9px] text-success-state mt-0.5">
+            <CheckCircle2 size={9} /> Live on matcher&apos;s order book
+          </span>
+        )}
+        {rateQuery.data && impliedPctVsMarket !== null && (
+          <span
+            className={`block text-[9px] mt-0.5 ${
+              impliedPctVsMarket > 0.5 ? 'text-accent-secondary' : impliedPctVsMarket < -0.5 ? 'text-success-state' : 'text-text-secondary'
+            }`}
+          >
+            {impliedPctVsMarket > 0.5
+              ? `${impliedPctVsMarket.toFixed(1)}% above market — this is likely why it hasn't matched`
+              : impliedPctVsMarket < -0.5
+                ? `${Math.abs(impliedPctVsMarket).toFixed(1)}% below market — should match soon`
+                : 'Priced at market'}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        {matcherStatusKnown && !isOnMatcherBook && (
+          <AnimatedButton
+            variant="secondary"
+            size="sm"
+            onClick={() => onResubmit(order)}
+            disabled={resubmittingId === order.id}
+            title="Not currently found on the matcher's order book — hand it your order details again so it can be matched."
+          >
+            {resubmittingId === order.id ? (
+              <span className="flex items-center gap-1.5">
+                <RefreshCw size={12} className="animate-spin" /> Resubmitting...
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <UploadCloud size={12} /> Resubmit
+              </span>
+            )}
+          </AnimatedButton>
+        )}
+        <AnimatedButton variant="secondary" size="sm" onClick={() => onCancel(order)} disabled={cancelingId === order.id}>
+          {cancelingId === order.id ? (
+            <span className="flex items-center gap-1.5">
+              <RefreshCw size={12} className="animate-spin" /> Cancelling...
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5">
+              <XCircle size={12} /> Cancel
+            </span>
+          )}
+        </AnimatedButton>
+      </div>
+    </div>
+  );
+}
+
 export default function DarkPoolPage() {
   const { isEntered, isWalletConnected, walletAddress, connectWallet, addNotification } = useApp();
   const queryClient = useQueryClient();
@@ -70,18 +208,18 @@ export default function DarkPoolPage() {
   const [assetIn, setAssetIn] = useState<AssetSymbol>('C2FLR');
   const [assetOut, setAssetOut] = useState<AssetSymbol>('FXRP');
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  // What the trader actually typed — only meaningful once `minAmountOutTouched`
-  // is true; otherwise the live-rate suggestion below is what's shown/used.
+  // What the trader typed while in manual-price mode — ignored entirely
+  // while `useBestPrice` is on.
   const [minAmountOutRaw, setMinAmountOutRaw] = useState('');
+  // Default on: fills at (a shade under) the live rate with no pricing
+  // decision required at all. Switching off reveals a manual minimum, for
+  // anyone who actually wants a specific limit price.
+  const [useBestPrice, setUseBestPrice] = useState(true);
   const [step, setStep] = useState<PlaceStep>('idle');
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const [resubmittingId, setResubmittingId] = useState<string | null>(null);
   const [claimingCommitment, setClaimingCommitment] = useState<bigint | null>(null);
-  // Whether the trader has typed their own minimum for the *current*
-  // note/assetOut selection — once true, the live-rate suggestion stops
-  // overwriting what they typed, even as the rate itself refreshes.
-  const [minAmountOutTouched, setMinAmountOutTouched] = useState(false);
 
   const assetInConfig = deployment?.assets[assetIn];
   const assetOutConfig = deployment?.assets[assetOut];
@@ -113,23 +251,24 @@ export default function DarkPoolPage() {
     refetchInterval: 20_000,
   });
 
-  // A fresh note/assetOut pairing gets its own fresh suggestion, even if the
-  // trader had customized the minimum for a previous selection. Adjusted
-  // directly during render (React's documented pattern for "reset state when
-  // a key changes") rather than in an effect, which would cost an extra
-  // render and trip react-hooks/set-state-in-effect for no benefit here.
+  // A fresh note/assetOut pairing defaults back to best-price mode, even if
+  // the trader had switched to manual for a previous selection — a manual
+  // price typed for a different note's amount wouldn't mean anything here.
+  // Adjusted directly during render (React's documented pattern for "reset
+  // state when a key changes") rather than in an effect, which would cost an
+  // extra render and trip react-hooks/set-state-in-effect for no benefit.
   const selectionKey = `${selectedNoteId ?? ''}:${assetOut}`;
   const [lastSelectionKey, setLastSelectionKey] = useState(selectionKey);
   if (selectionKey !== lastSelectionKey) {
     setLastSelectionKey(selectionKey);
-    if (minAmountOutTouched) setMinAmountOutTouched(false);
+    if (!useBestPrice) setUseBestPrice(true);
   }
 
   // 1% under the live rate — an order priced slightly below fair value is one
   // that actually gets filled quickly, unlike one priced above market (or, as
   // happened before this existed, priced at double the real rate) which just
-  // sits unmatched indefinitely. Purely derived, so untouched always tracks
-  // the live rate as it refreshes with no effect needed.
+  // sits unmatched indefinitely. Purely derived, so best-price mode always
+  // tracks the live rate as it refreshes with no effect needed.
   const suggestedMinAmountOut = useMemo(() => {
     if (!selectedNote || !assetInConfig || !assetOutConfig || !rateQuery.data) return '';
     const amountInHuman = Number(formatUnits(BigInt(selectedNote.amount), assetInConfig.decimals));
@@ -137,7 +276,7 @@ export default function DarkPoolPage() {
     return suggested.toFixed(Math.min(assetOutConfig.decimals, 6));
   }, [selectedNote, assetInConfig, assetOutConfig, rateQuery.data]);
 
-  const minAmountOut = minAmountOutTouched ? minAmountOutRaw : suggestedMinAmountOut;
+  const minAmountOut = useBestPrice ? suggestedMinAmountOut : minAmountOutRaw;
 
   // How far the currently-entered minimum sits from the live rate, as a
   // percentage — positive means asking for more than fair (may not fill),
@@ -184,6 +323,27 @@ export default function DarkPoolPage() {
     queryFn: () => noteWallet.scanIncomingOrders(announcerAddress!),
     enabled: !!announcerAddress && !!walletAddress && activeTab === 'orders',
   });
+
+  // Network-wide settled matches (commitments/amounts never exposed — same
+  // privacy boundary as the rest of this matcher) shown while idle, as the
+  // only positive proof anywhere in the UI that matching is actually real —
+  // otherwise the only feedback a trader ever gets is their own balance
+  // quietly changing on Portfolio.
+  const recentMatchesQuery = useQuery({
+    queryKey: ['recentMatches'],
+    queryFn: fetchRecentMatches,
+    enabled: step === 'idle',
+    refetchInterval: 20_000,
+  });
+
+  const recentSettled = useMemo(
+    () =>
+      (recentMatchesQuery.data ?? [])
+        .filter((m) => m.status === 'settled')
+        .sort((a, b) => b.matchedAt - a.matchedAt)
+        .slice(0, 5),
+    [recentMatchesQuery.data]
+  );
 
   const handlePlaceOrder = async () => {
     if (!walletAddress || !publicClient || !deployment || !assetInConfig || !assetOutConfig || !vaultAddress) return;
@@ -243,7 +403,7 @@ export default function DarkPoolPage() {
       setStep('finalized');
       setSelectedNoteId(null);
       setMinAmountOutRaw('');
-      setMinAmountOutTouched(false);
+      setUseBestPrice(true);
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
 
       // Hand the order's private details to the matcher — the on-chain
@@ -577,18 +737,39 @@ export default function DarkPoolPage() {
 
                   {/* Min amount out */}
                   <div>
-                    <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Minimum Acceptable Amount</label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        value={minAmountOut}
-                        onChange={(e) => { setMinAmountOutRaw(e.target.value); setMinAmountOutTouched(true); }}
-                        placeholder="0.00"
-                        className="no-spinner w-full bg-surface/30 border border-border-custom rounded-lg pl-4 pr-20 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60 font-mono"
-                        required
-                      />
-                      <span className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-xs text-text-secondary font-bold font-mono">{assetOut}</span>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light">Minimum Acceptable Amount</label>
+                      <label className="flex items-center gap-1.5 text-[9px] text-text-secondary uppercase tracking-wider cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={useBestPrice}
+                          onChange={(e) => {
+                            if (!e.target.checked) setMinAmountOutRaw(suggestedMinAmountOut);
+                            setUseBestPrice(e.target.checked);
+                          }}
+                          className="accent-accent-primary cursor-pointer"
+                        />
+                        Best available price
+                      </label>
                     </div>
+                    {useBestPrice ? (
+                      <div className="w-full bg-surface/20 border border-dashed border-border-custom rounded-lg px-4 py-3 text-sm text-text-primary font-mono flex items-center justify-between">
+                        <span>{minAmountOut || '—'} {assetOut}</span>
+                        <span className="text-[9px] text-text-secondary uppercase tracking-wider">Updates with the live rate</span>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={minAmountOut}
+                          onChange={(e) => setMinAmountOutRaw(e.target.value)}
+                          placeholder="0.00"
+                          className="no-spinner w-full bg-surface/30 border border-border-custom rounded-lg pl-4 pr-20 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60 font-mono"
+                          required
+                        />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-xs text-text-secondary font-bold font-mono">{assetOut}</span>
+                      </div>
+                    )}
                     {rateQuery.data && (
                       <p className="text-[9px] text-text-secondary mt-1.5 leading-relaxed">
                         Live rate: 1 {assetIn} ≈ {rateQuery.data.rate.toFixed(6)} {assetOut}
@@ -684,76 +865,23 @@ export default function DarkPoolPage() {
                     </div>
                   ) : (
                     openOrders.map((order) => {
-                      const assetInSym = ASSET_OPTIONS.find((a) => deployment?.assets[a.sym]?.assetId === Number(order.assetId))?.sym ?? `asset ${order.assetId}`;
-                      const assetOutSym = ASSET_OPTIONS.find((a) => deployment?.assets[a.sym]?.assetId === Number(order.assetOut))?.sym ?? `asset ${order.assetOut}`;
-                      const inDecimals = deployment?.assets[assetInSym as AssetSymbol]?.decimals ?? 18;
-                      const outDecimals = deployment?.assets[assetOutSym as AssetSymbol]?.decimals ?? 18;
-                      const original = BigInt(order.originalAmountIn);
-                      const remaining = BigInt(order.amount);
-                      const filled = original - remaining;
-                      const isPartiallyFilled = filled > BigInt(0);
                       // Only trust a "not on the book" verdict once the query has
                       // actually resolved at least once — otherwise every order
                       // would flash a Resubmit button before we truly know.
                       const matcherStatusKnown = matcherOrdersQuery.data !== undefined;
                       const isOnMatcherBook = matcherCommitments.has(BigInt(order.commitment).toString());
                       return (
-                        <div key={order.id} className="flex items-center justify-between p-4 rounded-lg border border-border-custom bg-surface/20">
-                          <div>
-                            <span className="text-xs font-mono font-bold text-text-primary block">
-                              {formatUnits(remaining, inDecimals)} {assetInSym} → min {formatUnits(BigInt(order.minAmountOut), outDecimals)} {assetOutSym}
-                            </span>
-                            {isPartiallyFilled ? (
-                              <span className="text-[9px] text-accent-primary">
-                                {formatUnits(filled, inDecimals)} / {formatUnits(original, inDecimals)} {assetInSym} filled — rest still open
-                              </span>
-                            ) : (
-                              <span className="text-[9px] text-text-secondary">Pending match — order #{order.derivationIndex}</span>
-                            )}
-                            {matcherStatusKnown && isOnMatcherBook && (
-                              <span className="flex items-center gap-1 text-[9px] text-success-state mt-0.5">
-                                <CheckCircle2 size={9} /> Live on matcher&apos;s order book
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {matcherStatusKnown && !isOnMatcherBook && (
-                              <AnimatedButton
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => handleResubmitOrder(order)}
-                                disabled={resubmittingId === order.id}
-                                title="Not currently found on the matcher's order book — hand it your order details again so it can be matched."
-                              >
-                                {resubmittingId === order.id ? (
-                                  <span className="flex items-center gap-1.5">
-                                    <RefreshCw size={12} className="animate-spin" /> Resubmitting...
-                                  </span>
-                                ) : (
-                                  <span className="flex items-center gap-1.5">
-                                    <UploadCloud size={12} /> Resubmit
-                                  </span>
-                                )}
-                              </AnimatedButton>
-                            )}
-                            <AnimatedButton
-                              variant="secondary"
-                              size="sm"
-                              onClick={() => handleCancelOrder(order)}
-                              disabled={cancelingId === order.id}
-                            >
-                              {cancelingId === order.id ? (
-                                <span className="flex items-center gap-1.5">
-                                  <RefreshCw size={12} className="animate-spin" /> Cancelling...
-                                </span>
-                              ) : (
-                                <span className="flex items-center gap-1.5">
-                                  <XCircle size={12} /> Cancel
-                                </span>
-                              )}
-                            </AnimatedButton>
-                          </div>
-                        </div>
+                        <OrderRow
+                          key={order.id}
+                          order={order}
+                          deployment={deployment}
+                          matcherStatusKnown={matcherStatusKnown}
+                          isOnMatcherBook={isOnMatcherBook}
+                          resubmittingId={resubmittingId}
+                          cancelingId={cancelingId}
+                          onResubmit={handleResubmitOrder}
+                          onCancel={handleCancelOrder}
+                        />
                       );
                     })
                   )}
@@ -768,18 +896,46 @@ export default function DarkPoolPage() {
               <GlassCard className="p-6 min-h-[380px] flex flex-col justify-between" hoverGlow={false}>
                 <div>
                   <div className="flex items-center gap-2 border-b border-border-custom pb-4 mb-6">
-                    <Clock size={16} className="text-accent-primary" />
-                    <h2 className="text-sm uppercase tracking-wider font-display font-bold">Execution Timeline</h2>
+                    {step === 'idle' ? <History size={16} className="text-accent-primary" /> : <Clock size={16} className="text-accent-primary" />}
+                    <h2 className="text-sm uppercase tracking-wider font-display font-bold">
+                      {step === 'idle' ? 'Recent Matches' : 'Execution Timeline'}
+                    </h2>
                   </div>
 
                   {step === 'idle' ? (
-                    <div className="flex flex-col items-center justify-center py-10 text-center text-text-secondary">
-                      <ShieldCheck size={36} className="text-border-custom mb-3" />
-                      <span className="text-xs uppercase tracking-widest">Awaiting execution</span>
-                      <p className="text-[10px] text-text-secondary/60 mt-1 max-w-[200px] leading-relaxed">
-                        Submit the form to place a hidden order on Coston2.
-                      </p>
-                    </div>
+                    recentSettled.length > 0 ? (
+                      <div className="space-y-3">
+                        <p className="text-[9px] text-text-secondary/70 uppercase tracking-widest">
+                          Network-wide — proof matching genuinely settles on-chain
+                        </p>
+                        {recentSettled.map((m) => (
+                          <a
+                            key={m.id}
+                            href={m.txHash ? `https://coston2-explorer.flare.network/tx/${m.txHash}` : undefined}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`flex items-center justify-between p-3 rounded-lg border border-border-custom bg-surface/20 ${m.txHash ? 'hover:border-accent-primary/40' : 'pointer-events-none'}`}
+                          >
+                            <span className="flex items-center gap-2 text-xs text-text-primary">
+                              <CheckCircle2 size={13} className="text-success-state" /> Match settled
+                            </span>
+                            <span className="flex items-center gap-1 text-[9px] text-text-secondary font-mono">
+                              {timeAgo(m.matchedAt)} <ChevronRight size={10} />
+                            </span>
+                          </a>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-10 text-center text-text-secondary">
+                        <ShieldCheck size={36} className="text-border-custom mb-3" />
+                        <span className="text-xs uppercase tracking-widest">Awaiting execution</span>
+                        <p className="text-[10px] text-text-secondary/60 mt-1 max-w-[200px] leading-relaxed">
+                          {recentMatchesQuery.isLoading
+                            ? 'Checking recent network activity...'
+                            : 'No matches settled recently. Submit the form to place a hidden order on Coston2.'}
+                        </p>
+                      </div>
+                    )
                   ) : (
                     <div className="relative pl-6 space-y-6">
                       <div className="absolute left-2.5 top-2 bottom-2 w-0.5 bg-border-custom z-0" />

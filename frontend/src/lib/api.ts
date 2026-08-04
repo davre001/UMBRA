@@ -66,6 +66,27 @@ export async function fetchMatcherOrders(): Promise<MatcherOrderSummary[]> {
   return body.orders;
 }
 
+export interface MatchSummary {
+  id: string;
+  status: "awaiting_proof" | "settled" | "failed";
+  txHash?: `0x${string}`;
+  matchedAt: number;
+}
+
+/**
+ * Every match the matcher has ever recorded, network-wide (no per-wallet
+ * filtering — matches don't expose which orders belong to whom, same
+ * privacy boundary as the rest of this matcher). Used purely to show that
+ * matching genuinely happens: there's otherwise no feedback anywhere in the
+ * UI that settlement is real, only your own balance quietly changing.
+ */
+export async function fetchRecentMatches(): Promise<MatchSummary[]> {
+  const res = await fetch(`${API_URL}/api/dark-engine/matches`);
+  if (!res.ok) throw new Error(`Fetching recent matches failed: ${res.status}`);
+  const body = (await res.json()) as { matches: MatchSummary[] };
+  return body.matches;
+}
+
 export interface RateResult {
   fromAsset: string;
   toAsset: string;
