@@ -66,6 +66,26 @@ export async function fetchMatcherOrders(): Promise<MatcherOrderSummary[]> {
   return body.orders;
 }
 
+export interface RateResult {
+  fromAsset: string;
+  toAsset: string;
+  rate: number;
+}
+
+/**
+ * Live FTSOv2-derived rate — units of `toAsset` per unit of `fromAsset`. The
+ * same rate the backend's own fill sizing (dark-engine/fillSizing.ts) uses
+ * to size a match, surfaced here so a trader can see what a realistic
+ * minimum actually looks like before placing an order that can never clear
+ * (e.g. asking for double the real rate, which the matcher will silently
+ * never fill since it only sizes fills off this same live rate).
+ */
+export async function fetchRate(fromAsset: string, toAsset: string): Promise<RateResult> {
+  const res = await fetch(`${API_URL}/api/pricing/${fromAsset}/${toAsset}`);
+  if (!res.ok) throw new Error(`Fetching the live rate failed: ${res.status}`);
+  return res.json();
+}
+
 export interface ScreenAddressResult {
   address: string;
   clear: boolean;

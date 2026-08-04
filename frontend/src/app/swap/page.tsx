@@ -10,8 +10,9 @@ import { getDeployment } from '@/lib/noteWallet/deployments';
 import { SHIELDED_VAULT_ABI } from '@/lib/noteWallet/vaultAbi';
 import { nullifierHash as computeNullifierHash, ownerKey as computeOwnerKey } from '@/lib/noteWallet/poseidon2';
 import { provePlaceOrder, proveCancelOrder } from '@/lib/proving/prove';
-import { submitOrderToMatcher, fetchMatcherOrders } from '@/lib/api';
+import { submitOrderToMatcher, fetchMatcherOrders, fetchRate } from '@/lib/api';
 import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
+import type { AnnouncedOrder } from '@/lib/noteWallet/announcer';
 import type { StoredNote, StoredOrderNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -29,6 +30,7 @@ import {
   Info,
   XCircle,
   UploadCloud,
+  Inbox,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -60,6 +62,7 @@ export default function DarkPoolPage() {
 
   const deployment = useMemo(() => getDeployment(chainId), [chainId]);
   const vaultAddress = deployment?.vault;
+  const announcerAddress = deployment?.stealthAnnouncer;
   const noteWallet = useNoteWallet(vaultAddress, deployment?.deployBlock !== undefined ? BigInt(deployment.deployBlock) : undefined);
   const onCoston2 = chainId === COSTON2_CHAIN_ID;
 
@@ -67,11 +70,18 @@ export default function DarkPoolPage() {
   const [assetIn, setAssetIn] = useState<AssetSymbol>('C2FLR');
   const [assetOut, setAssetOut] = useState<AssetSymbol>('FXRP');
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
-  const [minAmountOut, setMinAmountOut] = useState('');
+  // What the trader actually typed — only meaningful once `minAmountOutTouched`
+  // is true; otherwise the live-rate suggestion below is what's shown/used.
+  const [minAmountOutRaw, setMinAmountOutRaw] = useState('');
   const [step, setStep] = useState<PlaceStep>('idle');
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const [resubmittingId, setResubmittingId] = useState<string | null>(null);
+  const [claimingCommitment, setClaimingCommitment] = useState<bigint | null>(null);
+  // Whether the trader has typed their own minimum for the *current*
+  // note/assetOut selection — once true, the live-rate suggestion stops
+  // overwriting what they typed, even as the rate itself refreshes.
+  const [minAmountOutTouched, setMinAmountOutTouched] = useState(false);
 
   const assetInConfig = deployment?.assets[assetIn];
   const assetOutConfig = deployment?.assets[assetOut];
@@ -86,6 +96,60 @@ export default function DarkPoolPage() {
     if (!notesQuery.data || !assetInConfig) return [];
     return notesQuery.data.filter((n) => n.kind === 'note' && n.assetId === String(assetInConfig.assetId));
   }, [notesQuery.data, assetInConfig]);
+
+  const selectedNote = useMemo(
+    () => spendableNotes.find((n) => n.id === selectedNoteId),
+    [spendableNotes, selectedNoteId]
+  );
+
+  // Same live rate the backend's own fill sizing uses — without this, a
+  // trader has no way to know a minimum like "2 XRP per USDT" is double the
+  // real rate and will just sit unfilled forever. Kept fresh with a light
+  // poll since the fair rate moves continuously.
+  const rateQuery = useQuery({
+    queryKey: ['rate', assetIn, assetOut],
+    queryFn: () => fetchRate(assetIn, assetOut),
+    enabled: assetIn !== assetOut,
+    refetchInterval: 20_000,
+  });
+
+  // A fresh note/assetOut pairing gets its own fresh suggestion, even if the
+  // trader had customized the minimum for a previous selection. Adjusted
+  // directly during render (React's documented pattern for "reset state when
+  // a key changes") rather than in an effect, which would cost an extra
+  // render and trip react-hooks/set-state-in-effect for no benefit here.
+  const selectionKey = `${selectedNoteId ?? ''}:${assetOut}`;
+  const [lastSelectionKey, setLastSelectionKey] = useState(selectionKey);
+  if (selectionKey !== lastSelectionKey) {
+    setLastSelectionKey(selectionKey);
+    if (minAmountOutTouched) setMinAmountOutTouched(false);
+  }
+
+  // 1% under the live rate — an order priced slightly below fair value is one
+  // that actually gets filled quickly, unlike one priced above market (or, as
+  // happened before this existed, priced at double the real rate) which just
+  // sits unmatched indefinitely. Purely derived, so untouched always tracks
+  // the live rate as it refreshes with no effect needed.
+  const suggestedMinAmountOut = useMemo(() => {
+    if (!selectedNote || !assetInConfig || !assetOutConfig || !rateQuery.data) return '';
+    const amountInHuman = Number(formatUnits(BigInt(selectedNote.amount), assetInConfig.decimals));
+    const suggested = amountInHuman * rateQuery.data.rate * 0.99;
+    return suggested.toFixed(Math.min(assetOutConfig.decimals, 6));
+  }, [selectedNote, assetInConfig, assetOutConfig, rateQuery.data]);
+
+  const minAmountOut = minAmountOutTouched ? minAmountOutRaw : suggestedMinAmountOut;
+
+  // How far the currently-entered minimum sits from the live rate, as a
+  // percentage — positive means asking for more than fair (may not fill),
+  // negative means offering a discount (fills easily).
+  const impliedPctVsMarket = useMemo(() => {
+    if (!rateQuery.data || !selectedNote || !assetInConfig) return null;
+    const amountInHuman = Number(formatUnits(BigInt(selectedNote.amount), assetInConfig.decimals));
+    const minOutHuman = Number(minAmountOut);
+    if (!amountInHuman || !minOutHuman || Number.isNaN(minOutHuman)) return null;
+    const impliedRate = minOutHuman / amountInHuman;
+    return ((impliedRate - rateQuery.data.rate) / rateQuery.data.rate) * 100;
+  }, [rateQuery.data, selectedNote, assetInConfig, minAmountOut]);
 
   const openOrders = useMemo(
     () => (notesQuery.data ?? []).filter((n): n is StoredOrderNote => n.kind === 'order'),
@@ -112,9 +176,18 @@ export default function DarkPoolPage() {
     [matcherOrdersQuery.data]
   );
 
+  // A partial fill's leftover arrives as a residual order announced to this
+  // wallet (same StealthAnnouncer delivery a payment uses, different scheme
+  // id — see announcer.ts) — not yet a spendable local note until claimed.
+  const incomingOrdersQuery = useQuery({
+    queryKey: ['incomingOrderAnnouncements', chainId, walletAddress],
+    queryFn: () => noteWallet.scanIncomingOrders(announcerAddress!),
+    enabled: !!announcerAddress && !!walletAddress && activeTab === 'orders',
+  });
+
   const handlePlaceOrder = async () => {
     if (!walletAddress || !publicClient || !deployment || !assetInConfig || !assetOutConfig || !vaultAddress) return;
-    const note = spendableNotes.find((n) => n.id === selectedNoteId);
+    const note = selectedNote;
     if (!note || note.kind !== 'note') {
       addNotification('No Note Selected', 'Choose a shielded note to place an order with.', 'error');
       return;
@@ -169,7 +242,8 @@ export default function DarkPoolPage() {
       setLastTxHash(hash);
       setStep('finalized');
       setSelectedNoteId(null);
-      setMinAmountOut('');
+      setMinAmountOutRaw('');
+      setMinAmountOutTouched(false);
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
 
       // Hand the order's private details to the matcher — the on-chain
@@ -283,6 +357,22 @@ export default function DarkPoolPage() {
       addNotification('Resubmit Failed', message, 'error');
     } finally {
       setResubmittingId(null);
+    }
+  };
+
+  /** Saves a partial fill's announced residual as a spendable local order — after this it behaves exactly like any other entry in "My Orders" (matchable, cancellable). */
+  const handleClaimOrder = async (candidate: AnnouncedOrder) => {
+    setClaimingCommitment(candidate.commitment);
+    try {
+      await noteWallet.claimIncomingOrder(candidate);
+      queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
+      queryClient.invalidateQueries({ queryKey: ['incomingOrderAnnouncements', chainId, walletAddress] });
+      addNotification('Order Claimed', 'Saved to your open orders.', 'success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Claim failed.';
+      addNotification('Claim Failed', message, 'error');
+    } finally {
+      setClaimingCommitment(null);
     }
   };
 
@@ -492,13 +582,36 @@ export default function DarkPoolPage() {
                       <input
                         type="number"
                         value={minAmountOut}
-                        onChange={(e) => setMinAmountOut(e.target.value)}
+                        onChange={(e) => { setMinAmountOutRaw(e.target.value); setMinAmountOutTouched(true); }}
                         placeholder="0.00"
                         className="no-spinner w-full bg-surface/30 border border-border-custom rounded-lg pl-4 pr-20 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60 font-mono"
                         required
                       />
                       <span className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-xs text-text-secondary font-bold font-mono">{assetOut}</span>
                     </div>
+                    {rateQuery.data && (
+                      <p className="text-[9px] text-text-secondary mt-1.5 leading-relaxed">
+                        Live rate: 1 {assetIn} ≈ {rateQuery.data.rate.toFixed(6)} {assetOut}
+                        {impliedPctVsMarket !== null && (
+                          <span
+                            className={
+                              impliedPctVsMarket > 0.5
+                                ? ' text-accent-secondary'
+                                : impliedPctVsMarket < -0.5
+                                  ? ' text-success-state'
+                                  : ' text-text-secondary'
+                            }
+                          >
+                            {' — your minimum is '}
+                            {impliedPctVsMarket > 0.5
+                              ? `${impliedPctVsMarket.toFixed(1)}% above market (may sit unfilled a while)`
+                              : impliedPctVsMarket < -0.5
+                                ? `${Math.abs(impliedPctVsMarket).toFixed(1)}% below market (should fill quickly)`
+                                : 'at market'}
+                          </span>
+                        )}
+                      </p>
+                    )}
                   </div>
 
                   {isWalletConnected && !onCoston2 && (
@@ -530,6 +643,39 @@ export default function DarkPoolPage() {
                 </form>
               ) : (
                 <div className="p-6 space-y-3">
+                  {incomingOrdersQuery.data && incomingOrdersQuery.data.length > 0 && (
+                    <div className="space-y-2 pb-3 mb-3 border-b border-border-custom/40">
+                      <div className="flex items-center gap-1.5 text-[10px] text-accent-secondary uppercase tracking-widest">
+                        <Inbox size={11} /> Unclaimed residual orders
+                      </div>
+                      {incomingOrdersQuery.data.map((candidate) => {
+                        const inSym = ASSET_OPTIONS.find((a) => deployment?.assets[a.sym]?.assetId === Number(candidate.assetIn))?.sym ?? `asset ${candidate.assetIn}`;
+                        const outSym = ASSET_OPTIONS.find((a) => deployment?.assets[a.sym]?.assetId === Number(candidate.assetOut))?.sym ?? `asset ${candidate.assetOut}`;
+                        const inDecimals = deployment?.assets[inSym as AssetSymbol]?.decimals ?? 18;
+                        return (
+                          <div
+                            key={candidate.commitment.toString()}
+                            className="flex items-center justify-between p-3 rounded-lg border border-accent-secondary/30 bg-accent-secondary/5"
+                          >
+                            <div>
+                              <span className="text-[9px] text-text-secondary uppercase tracking-wide block">Leftover from a partial fill</span>
+                              <span className="text-xs font-mono font-bold text-text-primary">
+                                {formatUnits(candidate.amountIn, inDecimals)} {inSym} → {outSym}
+                              </span>
+                            </div>
+                            <AnimatedButton
+                              variant="primary"
+                              size="sm"
+                              onClick={() => handleClaimOrder(candidate)}
+                              disabled={claimingCommitment === candidate.commitment}
+                            >
+                              {claimingCommitment === candidate.commitment ? 'Claiming...' : 'Claim'}
+                            </AnimatedButton>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                   {openOrders.length === 0 ? (
                     <div className="rounded-lg border border-border-custom bg-surface/20 p-6 text-center">
                       <p className="text-[10px] text-text-secondary leading-relaxed">

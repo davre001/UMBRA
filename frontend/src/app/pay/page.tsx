@@ -506,24 +506,28 @@ export default function PrivatePayPage() {
                     </div>
                   ) : incomingQuery.data && incomingQuery.data.length > 0 ? (
                     <div className="space-y-2">
-                      {incomingQuery.data.map((candidate) => (
-                        <div
-                          key={candidate.commitment.toString()}
-                          className="flex items-center justify-between p-3 rounded-lg border border-border-custom bg-surface/20"
-                        >
-                          <span className="text-xs font-mono font-bold text-text-primary">
-                            {formatUnits(candidate.amount, 18)} (asset {candidate.assetId.toString()})
-                          </span>
-                          <AnimatedButton
-                            variant="primary"
-                            size="sm"
-                            onClick={() => handleClaim(candidate)}
-                            disabled={claimingCommitment === candidate.commitment}
+                      {incomingQuery.data.map((candidate) => {
+                        const sym = ASSET_OPTIONS.find((a) => deployment?.assets[a.sym]?.assetId === Number(candidate.assetId))?.sym ?? `asset ${candidate.assetId}`;
+                        const decimals = deployment?.assets[sym as AssetSymbol]?.decimals ?? 18;
+                        return (
+                          <div
+                            key={candidate.commitment.toString()}
+                            className="flex items-center justify-between p-3 rounded-lg border border-border-custom bg-surface/20"
                           >
-                            {claimingCommitment === candidate.commitment ? 'Claiming...' : 'Claim'}
-                          </AnimatedButton>
-                        </div>
-                      ))}
+                            <span className="text-xs font-mono font-bold text-text-primary">
+                              {formatUnits(candidate.amount, decimals)} {sym}
+                            </span>
+                            <AnimatedButton
+                              variant="primary"
+                              size="sm"
+                              onClick={() => handleClaim(candidate)}
+                              disabled={claimingCommitment === candidate.commitment}
+                            >
+                              {claimingCommitment === candidate.commitment ? 'Claiming...' : 'Claim'}
+                            </AnimatedButton>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="rounded-lg border border-border-custom bg-surface/20 p-4 text-center text-[10px] text-text-secondary">
