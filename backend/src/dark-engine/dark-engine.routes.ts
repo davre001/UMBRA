@@ -7,7 +7,7 @@ import type { MatchRecord } from "./types";
 export const darkEngineRouter = Router();
 
 const VAULT = CONTRACTS.ShieldedVault as `0x${string}`;
-const MATCH_STATUSES: MatchRecord["status"][] = ["awaiting_proof", "settled"];
+const MATCH_STATUSES: MatchRecord["status"][] = ["awaiting_proof", "settled", "failed"];
 
 /** True once every announcement due for that side (matched note, plus a residual order if a partial fill left one) has gone out. */
 function sideFullyAnnounced(record: MatchRecord, side: "A" | "B"): boolean {

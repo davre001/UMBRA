@@ -10,6 +10,13 @@ const CONTRACTS_ASSET_COUNT = 3; // C2FLR / FXRP / USDT0 — see shared/chain.ts
 
 const book = new OrderBook();
 const matches = new Map<string, MatchRecord>();
+// Which match (if any) a commitment is already tied up in — checked by
+// submitOrder before ever attempting a fresh match, so resubmitting an
+// order that's already matched (e.g. a trader clicking "resubmit" on one
+// that only looks dropped because a matched order is correctly removed
+// from the book) can't create a second, doomed-to-fail duplicate match for
+// the same underlying nullifier.
+const commitmentToMatchId = new Map<string, string>();
 
 // Swappable so a future deployment with real proving capacity can wire one
 // in without touching the rest of this file — see prover.ts's own comment.
@@ -86,6 +93,18 @@ export async function submitOrder(vaultAddress: `0x${string}`, body: unknown): P
   logger.info(
     `[dark-engine] order submitted: ${order.commitment} (asset ${order.assetIn} -> ${order.assetOut}, amountIn=${order.amountIn}, minOut=${order.minAmountOut})`
   );
+
+  const existingMatchId = commitmentToMatchId.get(order.commitment);
+  if (existingMatchId) {
+    const existing = matches.get(existingMatchId)!;
+    logger.info(`[dark-engine] ${order.commitment}: already part of match ${existingMatchId} (${existing.status}) — ignoring duplicate submission`);
+    return { status: "matched", matchId: existingMatchId, matchStatus: existing.status };
+  }
+  if (book.get(order.commitment)) {
+    logger.info(`[dark-engine] ${order.commitment}: already resting on the book — ignoring duplicate submission`);
+    return { status: "resting" };
+  }
+
   const found = await findFillableMatch(order);
   if (!found) {
     book.rest(order);
@@ -110,6 +129,8 @@ export async function submitOrder(vaultAddress: `0x${string}`, body: unknown): P
     matchedAt: Date.now(),
   };
   matches.set(matchId, record);
+  commitmentToMatchId.set(order.commitment, matchId);
+  commitmentToMatchId.set(counterparty.commitment, matchId);
   logger.info(`[dark-engine] match ${matchId} assembled (${order.commitment} x ${counterparty.commitment}) — attempting immediate completion`);
 
   try {
@@ -122,10 +143,13 @@ export async function submitOrder(vaultAddress: `0x${string}`, body: unknown): P
       // normal path here, not a fault.
       logger.info(`[dark-engine] match ${matchId} left awaiting_proof: ${err.message}`);
     } else {
-      // Anything else (e.g. matchOrders() itself reverting on-chain) is a
-      // real failure, not the routine "no prover yet" case above — the
-      // match correctly stays awaiting_proof (submitMatch throws before
-      // settleOnChain ever marks it settled), but this deserves attention.
+      // Anything else is a real failure, not the routine "no prover yet"
+      // case above. A NullifierAlreadySpent revert (a duplicate of this
+      // exact match) is handled inside settleOnChain itself, which marks
+      // the match failed rather than throwing — so reaching here means
+      // something else went wrong (invalid proof, wrong root, network
+      // issue, ...) and the match correctly stays awaiting_proof, still
+      // retryable, but this deserves attention.
       logger.warn(`[dark-engine] match ${matchId} failed unexpectedly, left awaiting_proof: ${err instanceof Error ? err.message : err}`);
     }
   }
@@ -168,9 +192,34 @@ function relistResidual(original: OrderIntent, side: MatchOrderSide, leafIndex: 
   });
 }
 
-/** Submits a proven match on-chain and transitions it to `settled` — only ever runs once per match (both callers guard on `status === "awaiting_proof"` first). Re-lists any residuals onto the book immediately, before announcing, so they're matchable right away rather than waiting on the trader to notice and reclaim them. */
+/**
+ * Submits a proven match on-chain and transitions it to `settled` — only
+ * ever runs once per match (both callers guard on `status === "awaiting_proof"`
+ * first). Re-lists any residuals onto the book immediately, before
+ * announcing, so they're matchable right away rather than waiting on the
+ * trader to notice and reclaim them.
+ *
+ * A `NullifierAlreadySpent` revert means one side's order was already
+ * consumed by a different match (submitOrder's dedup check exists to stop
+ * new instances of this, but can't undo one already in flight when it was
+ * added) — that can never succeed no matter how many times it's retried, so
+ * the match is marked `failed` here rather than left `awaiting_proof`
+ * forever. Anything else (a network blip, an unrelated revert) stays
+ * `awaiting_proof` and is still retryable.
+ */
 async function settleOnChain(record: MatchRecord, proof: `0x${string}`): Promise<void> {
-  const { txHash, leafIndices } = await submitMatch(proof, record.proofInputs);
+  let txHash: `0x${string}`;
+  let leafIndices: MatchLeafIndices;
+  try {
+    ({ txHash, leafIndices } = await submitMatch(proof, record.proofInputs));
+  } catch (err) {
+    if (err instanceof Error && err.message.includes("NullifierAlreadySpent")) {
+      record.status = "failed";
+      logger.error(`[dark-engine] match ${record.id} permanently failed (nullifier already spent by another match): ${err.message}`);
+      return;
+    }
+    throw err;
+  }
   record.status = "settled";
   record.txHash = txHash;
   logger.info(`[dark-engine] match ${record.id} settled on-chain: ${txHash}`);
@@ -236,7 +285,9 @@ export async function completeMatch(matchId: string): Promise<MatchRecord> {
     await settleOnChain(record, proof);
   }
 
-  await deliverAnnouncements(record);
+  // A newly-failed match has nothing to announce — neither side's output
+  // note was ever actually inserted on-chain.
+  if (record.status === "settled") await deliverAnnouncements(record);
   return record;
 }
 
@@ -250,7 +301,9 @@ export async function submitExternalProof(matchId: string, proof: `0x${string}`)
     await settleOnChain(record, proof);
   }
 
-  await deliverAnnouncements(record);
+  // A newly-failed match has nothing to announce — neither side's output
+  // note was ever actually inserted on-chain.
+  if (record.status === "settled") await deliverAnnouncements(record);
   return record;
 }
 

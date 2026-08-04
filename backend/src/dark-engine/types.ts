@@ -83,8 +83,17 @@ export interface MatchRecord {
    * can never leave a genuinely-settled match still reporting
    * `awaiting_proof` (which would make it look retriable when re-submitting
    * the same proof would just revert with NullifierAlreadySpent).
+   *
+   * `failed` is the same idea applied to a match that can *never* settle: a
+   * `matchOrders` revert of `NullifierAlreadySpent` means one side's order
+   * was already consumed elsewhere (typically a duplicate match formed from
+   * the same order being submitted more than once — see submitOrder's own
+   * dedup check, which exists to stop new duplicates from forming, not to
+   * fix ones that already exist). Retrying a `failed` match would revert
+   * identically forever, so it's excluded from the awaiting_proof poll
+   * instead of wasting a proving run every cycle.
    */
-  status: "awaiting_proof" | "settled";
+  status: "awaiting_proof" | "settled" | "failed";
   txHash?: `0x${string}`;
   /**
    * Independent per-announcement delivery tracking — a settled match can
