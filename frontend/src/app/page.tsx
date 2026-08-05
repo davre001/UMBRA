@@ -327,7 +327,6 @@ export default function Home() {
               { name: 'AWS Lambda', role: 'Match Proving' },
               { name: 'FTSO', role: 'Price Oracle' },
               { name: 'FDC', role: 'Compliance' },
-              { name: 'WebAuthn', role: 'Passkey Auth' },
             ].map((t, i) => (
               <FadeUp key={i} delay={(i % 4) * 0.07}>
                 <div className="p-4 rounded-xl border border-border-custom/60 bg-surface/65 hover:border-accent-primary/40 hover:bg-surface/80 transition-all text-center">

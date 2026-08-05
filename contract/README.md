@@ -34,8 +34,8 @@ npm run deploy:coston2
 | `mocks/MockERC20.sol` | — | Test-only mintable ERC20, never deployed to Coston2. |
 | `UmbraForwarder.sol` | — | **Currently unused.** No forwarder is needed for withdraw/pay/order actions — the ZK proof itself is the authorization, so anyone can already submit those calls directly. Kept in case a real meta-tx use case (e.g. gasless `shield` via `ERC20Permit`) shows up later. |
 
-`pricing` and `auth` need no new contracts — pricing reads the real `FtsoV2`
-directly (not yet wired into these contracts), and passkey auth stays off-chain.
+`pricing` needs no new contracts — it reads the real `FtsoV2` directly (not yet
+wired into these contracts).
 
 ## How the vault actually works
 

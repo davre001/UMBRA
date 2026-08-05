@@ -114,15 +114,10 @@ real. That keeps the API contract stable while the underlying primitives
 
 | Module | Responsibility |
 | --- | --- |
-| `vault` | Shielded balances: shield, withdraw, private pay (in-memory per address) |
-| `portfolio` | Aggregates vault balances into net worth, allocation, and history |
-| `dark-engine` | Swap intents: routes, matches, and settles against a midpoint rate |
-| `pricing` | FTSO-style midpoint rate lookup |
-| `compliance` | FDC-style sanction screening and compliance viewing-key export |
-| `stealth` | One-time stealth address derivation and recipient resolution |
-| `prover` | Simulated Noir witness/proof generation |
-| `relayer` | Simulated gasless transaction relaying |
-| `auth` | WebAuthn-style passkey challenge/verify |
+| `dark-engine` | Dark-pool order book: matches resting orders, assembles proof inputs, submits/settles on-chain |
+| `pricing` | Live FTSOv2 midpoint rate lookup |
+| `compliance` | Real on-chain address screening against ComplianceRegistry |
+| `relayer` | Real gasless relaying — proof-authorized ShieldedVault writes submitted on a user's behalf |
 
 ### Getting Started
 

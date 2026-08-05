@@ -8,7 +8,6 @@ import { darkEngineRouter } from "./dark-engine/dark-engine.routes";
 import { pricingRouter } from "./pricing/pricing.routes";
 import { complianceRouter } from "./compliance/compliance.routes";
 import { relayerRouter } from "./relayer/relayer.routes";
-import { authRouter } from "./auth/auth.routes";
 
 export function createApp() {
   const app = express();
@@ -43,7 +42,6 @@ export function createApp() {
   app.use("/api/pricing", pricingRouter);
   app.use("/api/compliance", complianceRouter);
   app.use("/api/relayer", relayerRouter);
-  app.use("/api/auth", authRouter);
 
   app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     req.log.error({ err }, `Unhandled error on ${req.method} ${req.url}: ${err.message}`);

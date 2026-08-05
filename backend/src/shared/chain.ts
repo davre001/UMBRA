@@ -1,4 +1,4 @@
-import { createPublicClient, createWalletClient, http, type Address, type TransactionReceipt } from "viem";
+import { createPublicClient, createWalletClient, http, type TransactionReceipt } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { flareTestnet } from "viem/chains";
 import deployment from "./coston2Deployment.json";
@@ -37,21 +37,11 @@ export function getWalletClient() {
   return walletClientSingleton;
 }
 
-export function getOperatorAddress(): Address {
-  return privateKeyToAccount(requireOperatorKey()).address;
-}
-
 export const CONTRACTS = deployment.contracts;
 export const ASSETS = deployment.assets;
 export const DEPLOY_BLOCK = BigInt(deployment.deployBlock);
 
 export type AssetSymbol = keyof typeof ASSETS;
-
-export function assetBySymbol(symbol: string) {
-  const asset = ASSETS[symbol as AssetSymbol];
-  if (!asset) throw new Error(`Unknown asset: ${symbol}`);
-  return asset;
-}
 
 export function assetById(assetId: number | bigint) {
   const id = Number(assetId);

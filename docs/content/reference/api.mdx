@@ -1,13 +1,13 @@
 ---
 title: Backend API
-description: REST endpoints for the dark engine, pricing, compliance, relayer, and auth.
+description: REST endpoints for the dark engine, pricing, compliance, and relayer.
 ---
 
 # Backend API
 
 import { Callout } from 'nextra/components';
 
-The backend is an Express app serving five routers under `/api`, plus a live
+The backend is an Express app serving four routers under `/api`, plus a live
 Swagger UI.
 
 | | |
@@ -76,13 +76,6 @@ Relaying lets a proof be submitted by an address other than the one it
 benefits, so exiting the pool doesn't require the destination address to hold
 gas. `withdraw`'s `recipient` is a public circuit input, so a relayer cannot
 redirect the payout.
-
-## `/api/auth`
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `POST` | `/passkey/challenge` | Issue a WebAuthn challenge |
-| `POST` | `/passkey/verify` | Verify a passkey assertion |
 
 ## What the backend never holds
 

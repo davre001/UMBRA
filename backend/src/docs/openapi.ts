@@ -12,7 +12,6 @@ export const openapiSpec = {
     { name: "Pricing" },
     { name: "Compliance" },
     { name: "Relayer" },
-    { name: "Auth" },
   ],
   paths: {
     "/health": {
@@ -191,32 +190,6 @@ export const openapiSpec = {
           "200": { description: "Relay transaction hash" },
           "400": { description: "Unknown action or wrong argument count" },
         },
-      },
-    },
-    "/api/auth/passkey/challenge": {
-      post: {
-        tags: ["Auth"],
-        summary: "Create a WebAuthn passkey challenge",
-        responses: { "200": { description: "Challenge id" } },
-      },
-    },
-    "/api/auth/passkey/verify": {
-      post: {
-        tags: ["Auth"],
-        summary: "Verify a WebAuthn passkey challenge",
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["challengeId"],
-                properties: { challengeId: { type: "string" } },
-              },
-            },
-          },
-        },
-        responses: { "200": { description: "Verification result" } },
       },
     },
   },

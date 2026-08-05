@@ -75,11 +75,6 @@ export async function saveNote(note: StoredNote): Promise<void> {
   await db.put("notes", note);
 }
 
-export async function getNoteByCommitment(commitment: string): Promise<StoredNote | undefined> {
-  const db = await getDB();
-  return db.getFromIndex("notes", "byCommitment", commitment);
-}
-
 export async function getNotesForWallet(walletAddress: string): Promise<StoredNote[]> {
   const db = await getDB();
   return db.getAllFromIndex("notes", "byWallet", walletAddress);
