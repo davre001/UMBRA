@@ -12,6 +12,14 @@ and MEV extraction possible. Umbra keeps balances, orders, and counterparties
 private, while proving in zero knowledge — verifiable by anyone — that every
 settlement followed the rules.
 
+![Next.js](https://img.shields.io/badge/Next.js_16-000000?logo=nextdotjs&logoColor=white)
+![React](https://img.shields.io/badge/React_19-149ECA?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Solidity](https://img.shields.io/badge/Solidity-363636?logo=solidity&logoColor=white)
+![Noir](https://img.shields.io/badge/Noir-ZK_circuits-9D5CFF)
+![Node.js](https://img.shields.io/badge/Node.js-Express-339933?logo=nodedotjs&logoColor=white)
+![Flare](https://img.shields.io/badge/Flare-Coston2_testnet-E62058)
+
 📖 **Full documentation:** [docs-umbra.vercel.app](https://docs-umbra.vercel.app/)
 
 ---
@@ -20,6 +28,7 @@ settlement followed the rules.
 
 - [What stays private](#what-stays-private)
 - [How it works](#how-it-works)
+- [Architecture](#architecture)
 - [Repository layout](#repository-layout)
 - [Quick start](#quick-start)
 - [Backend](#backend)
@@ -71,6 +80,54 @@ for the guided version.
 | Pricing | Flare Time Series Oracle (FTSOv2) |
 | Compliance | Flare Data Connector (FDC) — on-chain address screening |
 | Assets | FAssets (FXRP, and more) |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Browser["🖥️ Browser"]
+        FE["Frontend (Next.js)<br/>wallet connect · client-side ZK proving"]
+    end
+
+    subgraph API["⚙️ Backend (Express)"]
+        DE["dark-engine<br/>order book + matcher"]
+        PR["pricing"]
+        CO["compliance"]
+        RL["relayer"]
+    end
+
+    MW["🔐 matcher-worker<br/>(AWS Lambda)<br/>match_orders proving"]
+    DB[("🗄️ Turso<br/>order book / match state")]
+    FTSO["📈 FTSOv2 oracle"]
+
+    subgraph Coston2["⛓️ Flare Coston2"]
+        SV["ShieldedVault"]
+        OKR["OwnerKeyRegistry"]
+        SA["StealthAnnouncer"]
+        CR["ComplianceRegistry"]
+    end
+
+    FE -->|"proof-authorized txs<br/>shield · pay · order · withdraw"| SV
+    FE -->|submit order| DE
+    FE -->|register / lookup key| OKR
+    FE -->|discover incoming notes| SA
+    FE -->|screen address| CO
+
+    DE <-->|persist| DB
+    DE -->|awaiting proof| MW
+    MW -->|proof| DE
+    DE -->|settle match| SV
+    DE -->|announce| SA
+
+    PR -->|live rate| FTSO
+    CO -->|record screen| CR
+    RL -->|gasless relay| SV
+    SV -->|withdraw gate| CR
+```
+
+Every write to `ShieldedVault` is authorized by a ZK proof, not by who submits
+the transaction — that's what lets the backend relay gaslessly and the
+matcher see order details without ever being able to touch funds.
 
 ## Repository layout
 
