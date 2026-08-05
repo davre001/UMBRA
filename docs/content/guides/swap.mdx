@@ -55,9 +55,12 @@ leftover automatically re-commits as a smaller residual order under your own
 key, with the minimum scaled pro-rata.
 
 <Callout type="info">
-  You don't have to do anything for a residual to keep working. It's announced
-  to you on-chain and re-listed on the matcher's book immediately — you'll see
-  it appear in your open orders and on the [Receive](/guides/receive) page.
+  You don't have to do anything for a residual to keep working — it's
+  announced to you on-chain and re-listed on the matcher's book immediately,
+  so it's live and matchable whether or not you've claimed it yet. Claiming
+  just adds it to *your* view: it'll show up under "Unclaimed residual
+  orders" on this page's My Orders tab, ready to claim into your own
+  open-orders list.
 </Callout>
 
 ## How fills are priced
@@ -84,5 +87,6 @@ and the refund note's opaque commitment become public.
 
 Neither trader needs to be online at match time. Once your order is on the
 book, the matcher can pair it and generate the proof without you. Matched
-proceeds arrive as a shielded note you claim on the
-[Receive](/guides/receive) page.
+proceeds arrive as a shielded note you claim on the [Pay](/guides/pay) page's
+Incoming tab — a partial fill's leftover, if any, is claimed separately here
+on Swap instead, since it's a residual order rather than a note.

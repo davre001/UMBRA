@@ -10,8 +10,8 @@ regulatory compliance by combining Flare's native infrastructure with
 modern cryptographic technologies.
 
 Using **FAssets**, **Flare Time Series Oracle (FTSO)**, **Flare Data
-Connector (FDC)**, **Zero-Knowledge Proofs (ZKPs)**, and **Trusted
-Execution Environments (TEEs)**, Umbra enables users to:
+Connector (FDC)**, and **Zero-Knowledge Proofs (ZKPs)**, Umbra enables users
+to:
 
 -   Shield token balances and trading activity
 -   Execute private trades without MEV or front-running
@@ -33,15 +33,15 @@ the trust assumptions of decentralized finance.
 ## Solution
 
 Umbra combines Flare's ecosystem with privacy-preserving technologies: -
-FAssets - Zero-Knowledge Proofs - Trusted Execution Environments
-(TEEs) - Flare Time Series Oracle (FTSO) - Flare Data Connector (FDC)
+FAssets - Zero-Knowledge Proofs - Flare Time Series Oracle (FTSO) - Flare
+Data Connector (FDC)
 
 ## Architecture
 
 ### 1. Shielded Vault
 
 -   FAssets
--   Noir / Circom
+-   Noir
 -   Flare EVM
 
 Users deposit public FAssets (such as FXRP or FBTC) into the Umbra smart
@@ -50,11 +50,14 @@ ZK-SNARK proofs.
 
 ### 2. Dark Engine
 
--   Google Cloud Confidential Space
--   Trusted Execution Environments (TEE)
+-   Off-chain order matcher (`backend/src/dark-engine`)
+-   ZK proof-authorized settlement
 
-Encrypted trade intents are matched securely inside a TEE to prevent MEV
-and front-running before submitting cryptographic proofs back to Flare.
+Orders are private on-chain (amount and asset hidden) and matched off-chain
+by a matcher that can see order details to find a counterparty, but cannot
+steal or redirect funds — every settlement is authorized by a ZK proof bound
+to each trader's own key, not by who submits the transaction. See
+`circuits/DESIGN.md` for the full trust-boundary writeup.
 
 ### 3. Fair Pricing Engine
 
@@ -72,9 +75,9 @@ before allowing deposits.
   -------- -------------------------------------------- -----------------
   Screen   Compliance verification                      FDC
   Shield   Deposit FAssets and mint shielded balances   FAssets + ZK
-  Order    Submit encrypted order                       Flare EVM + TEE
-  Match    Match using decentralized pricing            FTSO + TEE
-  Settle   Finalize anonymous settlement                Flare EVM
+  Order    Submit a private order commitment             Flare EVM + ZK
+  Match    Match using live FTSO pricing                 FTSO + off-chain matcher
+  Settle   Finalize anonymous settlement                Flare EVM + ZK
 
 ## Technology Stack
 
@@ -85,32 +88,31 @@ before allowing deposits.
 -   FAssets
 -   FTSO
 -   FDC
--   Noir / Circom
--   Google Cloud Confidential Space
+-   Noir (ZK circuits)
 
 ## Repository Layout
 
 ```
 UMBRA/
 ├── backend/     # Node.js + TypeScript API (active)
-├── contract/    # Solidity smart contracts (scaffolded, not yet implemented)
+├── contract/    # Solidity contracts + Noir circuits, deployed to Coston2 (active)
 ├── frontend/    # Next.js 16 + React 19 app (active)
 └── README.md
 ```
 
-`contract/` is currently an empty placeholder folder reserved for the
-on-chain Solidity contracts. `backend/` and `frontend/` both contain working
-code, described below.
+All three — `backend/`, `contract/`, and `frontend/` — contain working code,
+described below.
 
 ## Backend
 
 The backend is an Express + TypeScript API that backs the flows the frontend
-exercises. Each domain concern is its own module under `backend/src/`, and
-each module talks over in-memory state — there's no database, real Flare
-node, ZK circuit, or TEE wired up yet, so behavior (proof bytes, relay hashes,
-oracle rates, sanction screens) is simulated rather than cryptographically
-real. That keeps the API contract stable while the underlying primitives
-(Noir circuits, TEE matcher, live FTSO/FDC clients) are built out.
+exercises. Each domain concern is its own module under `backend/src/`. It
+talks to the real, deployed Coston2 contracts and a real live FTSOv2 feed —
+there's no simulation left in the request paths below. The dark-engine's
+order book and match records persist to a durable store (Turso) so they
+survive a restart; everything else is in-memory and safely rebuildable
+(rate lookups, compliance screening) since it holds no state that can't be
+freshly re-derived.
 
 | Module | Responsibility |
 | --- | --- |
@@ -151,9 +153,9 @@ Current pages under `frontend/src/app/`:
 -   `/` — landing / entry into the protocol vault
 -   `/portfolio` — portfolio dashboard
 -   `/shield` — shield assets (deposit FAssets into shielded balances)
--   `/pay` — private pay (stealth payments)
--   `/swap` — dark swap (private trading)
--   `/receive` — receive funds
+-   `/pay` — private pay (send, and claim incoming stealth payments)
+-   `/swap` — dark swap (private trading; also where residual/partial-fill orders are claimed)
+-   `/faucet` — deep-links to Flare's Coston2 faucet for testnet assets
 
 ### Getting Started
 

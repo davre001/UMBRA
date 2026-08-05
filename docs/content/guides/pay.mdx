@@ -7,18 +7,33 @@ description: Send a shielded note to another registered wallet without revealing
 
 import { Callout } from 'nextra/components';
 
-**Pay** sends one of your shielded notes to someone else. Funds never leave
-the shielded pool — the recipient gets a note, not a transfer.
+**Pay** has two tabs: **Send**, which moves one of your shielded notes to
+someone else, and **Incoming**, which lists notes and residual-order
+proceeds waiting for you to claim. Funds never leave the shielded pool on a
+send — the recipient gets a note, not a transfer.
 
-## Before you can pay someone
+## Publishing your payment key
 
-The recipient must have **published their payment key** on
-`OwnerKeyRegistry`. A wallet address alone isn't enough to build a note for
-someone; deriving their `ownerKey` requires their own signature.
+Before anyone can pay you, you need to **publish your payment key** on
+`OwnerKeyRegistry`. Click **Register** on this page. This writes your
+`ownerKey` — the public value derived from your spending key — to the
+registry.
+
+It's a one-time on-chain transaction per wallet. Until it lands, nobody can
+send you a private payment, because they have no key to build a note
+against. Once registered, the page shows **Published — ready to receive**.
+
+Publishing is safe. An `ownerKey` lets someone build a note *for* you. It
+does not let anyone spend one, and it doesn't reveal your spending key.
+
+## Before you can pay someone else
+
+The recipient must have published their own payment key the same way. A
+wallet address alone isn't enough to build a note for someone; deriving
+their `ownerKey` requires their own signature.
 
 If the address you enter hasn't registered, the app refuses rather than
-inserting a leaf nobody can spend. Point them at the
-[Receive](/guides/receive) page.
+inserting a leaf nobody can spend.
 
 ## Sending
 
@@ -78,3 +93,26 @@ That announcement is in the clear. As explained in
 [Note Delivery](/concepts/stealth-addresses), it adds no privacy loss beyond
 what `pay()` already puts on-chain: the `blinding` is the only genuinely new
 value, and on its own it doesn't let anyone but the key holder spend the note.
+
+## Claiming incoming payments
+
+The **Incoming** tab lists notes someone sent you with `pay`, discovered
+through `StealthAnnouncer` announcements addressed to your `ownerKey`.
+Claiming saves one to your shielded notes, after which you can spend it like
+any other.
+
+The note already exists on-chain the moment the sender's transaction
+confirmed — claiming doesn't create anything or cost gas. It reads the
+announced private values, verifies they reconstruct a commitment you
+actually own, and writes the note into your local wallet so it becomes
+spendable.
+
+Nothing is lost if you don't claim promptly. The announcement stays in the
+chain's event log, and your wallet finds it on the next scan.
+
+<Callout type="info">
+  A dark-pool match's proceeds arrive the same way and show up in this same
+  Incoming tab. A partially-filled order's *leftover*, though, is a residual
+  order rather than a note — that's claimed on the [Swap](/guides/swap) page
+  instead, in My Orders.
+</Callout>
