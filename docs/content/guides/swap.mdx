@@ -25,6 +25,7 @@ stay private — this is the strongest privacy Umbra offers.
 | Generate ZK Proof | The `place_order` circuit runs in your browser |
 | Submit Order | `placeOrder()` — the note's nullifier is spent, the order commitment inserted |
 | Confirm On-Chain | Wait for the `OrderPlaced` event and its leaf index |
+| Self-Announce | A second confirmation — announces the order to yourself via `StealthAnnouncer`, so it's recoverable from another device (see below) |
 | Order Placed | Order details go to the matcher |
 
 ### Two separate things happen
@@ -40,13 +41,22 @@ error, because nothing failed.
 
 ## What's public
 
-Only two values: the spent note's `nullifierHash` and an opaque
-`orderCommitment`. Nobody watching the chain can tell what you're selling,
-what you want, how much, or at what limit.
+Two values from `placeOrder()` itself: the spent note's `nullifierHash` and
+an opaque `orderCommitment`. Nobody watching the chain can tell what you're
+selling, what you want, how much, or at what limit.
 
-The matcher, who receives your order details off-chain, does know. See the
-[tradeoff note in Dark Pool Matching](/concepts/dark-pool) for exactly what
-that discloses.
+The self-announce step adds one more public fact: an announcement to your
+own wallet address, in the same block as the `OrderPlaced` event. That's a
+small new correlation that didn't exist before it — someone watching the
+chain can now link "this wallet placed an order around this time," which
+the placement transaction alone never revealed. It doesn't disclose the
+order's contents, only that involvement. See [Note Delivery](/concepts/stealth-addresses)
+for why announcing to yourself uses the same mechanism as announcing to
+someone else.
+
+The matcher, who receives your order details off-chain, does know the
+contents. See the [tradeoff note in Dark Pool Matching](/concepts/dark-pool)
+for exactly what that discloses.
 
 ## Partial fills
 
@@ -79,9 +89,13 @@ layer on top, not the thing keeping you safe.
 Open orders are listed on the same page. Cancel one and the `cancel_order`
 circuit spends the order commitment and inserts a regular note commitment
 back — the refund, for the original amount and asset, under your own key.
+The refund is then self-announced too, the same reason and same tradeoff as
+placing an order (above) — recoverable from another device, at the cost of
+one more on-chain link between your wallet and this cancellation.
 
-Cancelling reveals nothing about what the order contained. Only the nullifier
-and the refund note's opaque commitment become public.
+Cancelling reveals nothing about what the order contained. Only the
+nullifier, the refund note's opaque commitment, and that self-announcement
+become public.
 
 ## Waiting for a match
 
