@@ -13,7 +13,8 @@ import { provePlaceOrder, proveCancelOrder } from '@/lib/proving/prove';
 import { submitOrderToMatcher, fetchMatcherOrders, fetchRate, fetchRecentMatches } from '@/lib/api';
 import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
 import { getErrorMessage } from '@/lib/utils';
-import type { AnnouncedOrder } from '@/lib/noteWallet/announcer';
+import { encodeNoteMetadata, encodeOrderMetadata, OWNER_KEY_NOTE_SCHEME_ID, ORDER_SCHEME_ID, type AnnouncedOrder } from '@/lib/noteWallet/announcer';
+import { STEALTH_ANNOUNCER_ABI } from '@/lib/noteWallet/stealthAnnouncerAbi';
 import type { StoredNote, StoredOrderNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
 import { GlassCard } from '@/components/ui/glass-card';
@@ -400,6 +401,37 @@ export default function DarkPoolPage() {
       await noteWallet.confirmNote(orderPrepared, placedLog.args.leafIndex);
       await noteWallet.refreshSpentStatus();
 
+      // Self-announce the order — otherwise it exists only in this
+      // browser's local IndexedDB, with no way to find it again from a
+      // different device (unlike everything else here, which is already
+      // recoverable by scanning the chain: incoming payments, matched
+      // proceeds, residual orders). Best-effort: the order is already
+      // fully placed and valid on-chain regardless of whether this succeeds.
+      if (announcerAddress) {
+        try {
+          const selfOrderMetadata = encodeOrderMetadata({
+            assetIn: assetInId,
+            assetOut: assetOutId,
+            amountIn,
+            minAmountOut: minOutBaseUnits,
+            blinding: orderPrepared.blinding,
+            commitment: orderPrepared.commitment,
+            originalAmountIn: amountIn,
+          });
+          const selfAnnounceHash = await writeContractAsync({
+            address: announcerAddress,
+            abi: STEALTH_ANNOUNCER_ABI,
+            functionName: 'announce',
+            args: [ORDER_SCHEME_ID, walletAddress as `0x${string}`, '0x', selfOrderMetadata],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: selfAnnounceHash });
+        } catch {
+          // Not fatal — the order is already placed. It just won't be
+          // recoverable from a different device until resubmitted from
+          // this one.
+        }
+      }
+
       setLastTxHash(hash);
       setStep('finalized');
       setSelectedNoteId(null);
@@ -481,6 +513,31 @@ export default function DarkPoolPage() {
       if (!cancelledLog) throw new Error('OrderCancelled event not found in transaction receipt.');
       await noteWallet.confirmNote(refundPrepared, cancelledLog.args.leafIndex);
       await noteWallet.refreshSpentStatus();
+
+      // Self-announce the refund note — same reasoning as the order
+      // self-announce in handlePlaceOrder. Best-effort: the refund is
+      // already valid on-chain regardless of whether this succeeds.
+      if (announcerAddress) {
+        try {
+          const refundMetadata = encodeNoteMetadata({
+            assetId: assetInId,
+            amount: amountIn,
+            blinding: refundPrepared.blinding,
+            commitment: refundPrepared.commitment,
+          });
+          const selfAnnounceHash = await writeContractAsync({
+            address: announcerAddress,
+            abi: STEALTH_ANNOUNCER_ABI,
+            functionName: 'announce',
+            args: [OWNER_KEY_NOTE_SCHEME_ID, walletAddress as `0x${string}`, '0x', refundMetadata],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: selfAnnounceHash });
+        } catch {
+          // Not fatal — the refund note is already valid on-chain. It just
+          // won't be recoverable from a different device until this one
+          // re-syncs its local store.
+        }
+      }
 
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
       const { sym: refundSym, decimals: refundDecimals } = symbolFor(deployment, order.assetId);

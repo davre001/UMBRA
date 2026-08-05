@@ -82,6 +82,36 @@ export interface AnnouncedOrder {
   blockNumber: bigint;
 }
 
+/**
+ * Encodes an order's own private fields for announcement — previously only
+ * ever built backend-side (a residual order, announced by the matcher after
+ * a partial fill). Needed here too so a trader can self-announce their own
+ * freshly-placed order: without it, it exists only in this browser's local
+ * IndexedDB, with no way to reconstruct it by scanning the chain from a
+ * different device (unlike everything that already goes through
+ * StealthAnnouncer today). A cancel-order refund uses `encodeNoteMetadata`
+ * above instead — it's a regular note, not an order.
+ */
+export function encodeOrderMetadata(params: {
+  assetIn: bigint;
+  assetOut: bigint;
+  amountIn: bigint;
+  minAmountOut: bigint;
+  blinding: bigint;
+  commitment: bigint;
+  originalAmountIn: bigint;
+}): `0x${string}` {
+  return encodeAbiParameters(ORDER_METADATA_PARAMS, [
+    params.assetIn,
+    params.assetOut,
+    params.amountIn,
+    params.minAmountOut,
+    params.blinding,
+    params.commitment,
+    params.originalAmountIn,
+  ]);
+}
+
 function decodeOrderMetadata(metadata: `0x${string}`, blockNumber: bigint): AnnouncedOrder | null {
   try {
     const [assetIn, assetOut, amountIn, minAmountOut, blinding, commitment, originalAmountIn] = decodeAbiParameters(
