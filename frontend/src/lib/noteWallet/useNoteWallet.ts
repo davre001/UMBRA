@@ -240,7 +240,12 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       const [announcements, ownOwnerKey, known] = await Promise.all([
         fetchIncomingAnnouncements(publicClient, announcerAddress, address as `0x${string}`, deployBlock),
         getOwnerKey(),
-        getUnspentNotesForWallet(address),
+        // Every locally-known note, not just unspent ones — the announcement
+        // itself never leaves StealthAnnouncer's event log once claimed and
+        // later spent, so filtering to unspent-only would make an
+        // already-claimed-and-spent note look claimable again, and re-saving
+        // it would collide with the store's own commitment uniqueness index.
+        getNotesForWallet(address),
       ]);
       const knownCommitments = new Set(known.map((n) => n.commitment.toLowerCase()));
 
@@ -297,7 +302,9 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       const [announcements, ownOwnerKey, known] = await Promise.all([
         fetchIncomingOrderAnnouncements(publicClient, announcerAddress, address as `0x${string}`, deployBlock),
         getOwnerKey(),
-        getUnspentNotesForWallet(address),
+        // See scanIncomingNotes's own comment — same reasoning applies to
+        // residual orders that were claimed and have since matched/settled.
+        getNotesForWallet(address),
       ]);
       const knownCommitments = new Set(known.map((n) => n.commitment.toLowerCase()));
 
