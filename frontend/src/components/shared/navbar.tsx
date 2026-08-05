@@ -8,7 +8,7 @@ import { useChainId, useSwitchChain } from 'wagmi';
 import { flare, flareTestnet } from 'wagmi/chains';
 import { useApp } from '@/providers/app-provider';
 import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
-import { Bell, Wallet, ShieldAlert, ShieldCheck, ChevronDown, Menu, X, Check, ArrowRight } from 'lucide-react';
+import { Bell, Wallet, ShieldAlert, ShieldCheck, ChevronDown, Menu, X, Check, ArrowRight, CheckCircle2, XCircle, AlertTriangle, Info, ExternalLink } from 'lucide-react';
 import { formatAddress } from '@/lib/utils';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { UmbraLogo } from '@/components/shared/logo';
@@ -20,6 +20,13 @@ const NETWORKS = [
   { chainId: flareTestnet.id, name: 'Coston2 Testnet' },
   { chainId: flare.id, name: 'Flare Mainnet' },
 ] as const;
+
+const NOTIF_STYLES: Record<'info' | 'success' | 'warning' | 'error', { icon: typeof Check; color: string }> = {
+  success: { icon: CheckCircle2, color: 'text-success-state' },
+  error: { icon: XCircle, color: 'text-red-400' },
+  warning: { icon: AlertTriangle, color: 'text-amber-400' },
+  info: { icon: Info, color: 'text-sky-400' },
+};
 
 export const Navbar: React.FC = () => {
   const pathname = usePathname();
@@ -213,17 +220,35 @@ export const Navbar: React.FC = () => {
                       {notifications.length === 0 ? (
                         <div className="p-6 text-center text-xs text-text-secondary">No active signals</div>
                       ) : (
-                        notifications.map((notif) => (
-                          <div key={notif.id} className="p-3 hover:bg-surface/50 transition-all">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[11px] font-semibold text-text-primary">{notif.title}</span>
-                              <span className="text-[9px] text-text-secondary">
-                                {notif.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
+                        notifications.map((notif) => {
+                          const { icon: NotifIcon, color } = NOTIF_STYLES[notif.type];
+                          return (
+                            <div key={notif.id} className="p-3 hover:bg-surface/50 transition-all">
+                              <div className="flex items-start gap-2">
+                                <NotifIcon size={13} className={`mt-0.5 flex-shrink-0 ${color}`} />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-semibold text-text-primary">{notif.title}</span>
+                                    <span className="text-[9px] text-text-secondary flex-shrink-0">
+                                      {notif.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-text-secondary mt-1 leading-normal">{notif.message}</p>
+                                  {notif.txHash && (
+                                    <a
+                                      href={`https://coston2-explorer.flare.network/tx/${notif.txHash}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="mt-1 inline-flex items-center gap-1 text-[9px] font-medium text-accent-primary hover:underline"
+                                    >
+                                      View on Explorer <ExternalLink size={9} />
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                            <p className="text-[10px] text-text-secondary mt-1 leading-normal">{notif.message}</p>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   </motion.div>

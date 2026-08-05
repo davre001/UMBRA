@@ -10,6 +10,8 @@ type Notification = {
   message: string;
   type: 'info' | 'success' | 'warning' | 'error';
   timestamp: Date;
+  /** Coston2 explorer link shown on the toast/bell entry when this notification is about a specific transaction. */
+  txHash?: `0x${string}`;
 };
 
 type AppContextType = {
@@ -28,8 +30,13 @@ type AppContextType = {
   setDisconnectModalOpen: (open: boolean) => void;
   // Notifications
   notifications: Notification[];
-  addNotification: (title: string, message: string, type?: Notification['type']) => void;
+  /** `skipToast` — the bell history still logs it, but no popup fires. For call sites (e.g. the faucet) that already show their own dedicated toast for the same event, so the two don't stack. */
+  addNotification: (title: string, message: string, type?: Notification['type'], txHash?: `0x${string}`, skipToast?: boolean) => void;
   clearNotifications: () => void;
+  // Transient on-screen toasts — a subset of `notifications` currently
+  // visible as a popup, independent of the persistent bell history above.
+  activeToasts: Notification[];
+  dismissToast: (id: string) => void;
   // Anonymity
   anonymityScore: number;
   setAnonymityScore: (score: number) => void;
@@ -45,6 +52,7 @@ const ENTERED_STORAGE_KEY = 'umbra:isEntered';
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isEntered, setIsEntered] = useState<boolean>(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [activeToasts, setActiveToasts] = useState<Notification[]>([]);
   const [anonymityScore, setAnonymityScore] = useState<number>(85);
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const [disconnectModalOpen, setDisconnectModalOpen] = useState(false);
@@ -116,18 +124,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     router.push('/');
   };
 
-  const addNotification = (title: string, message: string, type: Notification['type'] = 'info') => {
+  const addNotification = (
+    title: string,
+    message: string,
+    type: Notification['type'] = 'info',
+    txHash?: `0x${string}`,
+    skipToast = false
+  ) => {
     const newNotif: Notification = {
       id: Math.random().toString(36).substring(2, 9),
       title,
       message,
       type,
       timestamp: new Date(),
+      txHash,
     };
     setNotifications(prev => [newNotif, ...prev].slice(0, 15));
+    if (!skipToast) setActiveToasts(prev => [...prev, newNotif]);
   };
 
   const clearNotifications = () => setNotifications([]);
+
+  const dismissToast = (id: string) => setActiveToasts(prev => prev.filter(t => t.id !== id));
 
   return (
     <AppContext.Provider value={{
@@ -145,6 +163,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       notifications,
       addNotification,
       clearNotifications,
+      activeToasts,
+      dismissToast,
       anonymityScore,
       setAnonymityScore,
     }}>

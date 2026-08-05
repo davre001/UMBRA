@@ -19,15 +19,16 @@ const WALLET_META: Record<string, { label: string }> = {
 interface WalletModalProps {
   open: boolean;
   onClose: () => void;
-  onConnected?: (address: string) => void;
 }
 
-export function WalletModal({ open, onClose, onConnected }: WalletModalProps) {
+export function WalletModal({ open, onClose }: WalletModalProps) {
+  // No onConnected notification here — app-provider.tsx's own isConnected/
+  // address effect already fires "Wallet Connected" for every connection
+  // (this one included, since it's driven by the same wagmi state), so a
+  // second one here was a straight duplicate.
   const { connectors, connect, isPending, error } = useConnect({
     mutation: {
-      onSuccess(data) {
-        const account = data.accounts[0];
-        onConnected?.(typeof account === 'string' ? account : account.address);
+      onSuccess() {
         onClose();
       },
     },

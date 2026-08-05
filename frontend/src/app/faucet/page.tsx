@@ -170,7 +170,10 @@ export default function FaucetPage() {
     (symbol: AssetSymbol) => {
       const amount = REAL_ASSETS.find((a) => a.symbol === symbol)!.faucetAmount;
       const message = `You have received ${amount} ${symbol}`;
-      addNotification('Tokens Received', message, 'success');
+      // skipToast: this page already shows its own asset-themed toast for
+      // this exact event (below) — still logs to the bell history, just
+      // doesn't also pop the generic toast on top of it.
+      addNotification('Tokens Received', message, 'success', undefined, true);
       setToasts((prev) => [
         ...prev,
         {

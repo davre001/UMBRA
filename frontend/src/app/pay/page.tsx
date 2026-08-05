@@ -13,7 +13,7 @@ import { STEALTH_ANNOUNCER_ABI } from '@/lib/noteWallet/stealthAnnouncerAbi';
 import { encodeNoteMetadata, OWNER_KEY_NOTE_SCHEME_ID } from '@/lib/noteWallet/announcer';
 import { nullifierHash as computeNullifierHash } from '@/lib/noteWallet/poseidon2';
 import { provePay } from '@/lib/proving/prove';
-import { assertTxSuccess } from '@/lib/utils';
+import { assertTxSuccess, getErrorMessage } from '@/lib/utils';
 import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
 import type { StoredNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
@@ -197,9 +197,9 @@ export default function PrivatePayPage() {
       const receipt = await publicClient!.waitForTransactionReceipt({ hash });
       assertTxSuccess(receipt);
       queryClient.invalidateQueries({ queryKey: ['ownerKeyOf', chainId, walletAddress] });
-      addNotification('Payment Key Registered', 'Others can now pay you privately.', 'success');
+      addNotification('Payment Key Registered', 'Others can now pay you privately.', 'success', hash);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Registration failed.';
+      const message = getErrorMessage(err, 'Registration failed.');
       addNotification('Registration Failed', message, 'error');
     }
   };
@@ -211,9 +211,9 @@ export default function PrivatePayPage() {
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
       queryClient.invalidateQueries({ queryKey: ['incomingAnnouncements', chainId, walletAddress] });
       setLastClaimed({ amount: candidate.amount, assetId: candidate.assetId });
-      addNotification('Payment Claimed', 'Saved to your shielded notes.', 'success');
+      addNotification('Payment Claimed', `${describeAmount(candidate.amount, candidate.assetId)} saved to your shielded notes.`, 'success');
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Claim failed.';
+      const message = getErrorMessage(err, 'Claim failed.');
       addNotification('Claim Failed', message, 'error');
     } finally {
       setClaimingCommitment(null);
@@ -299,10 +299,11 @@ export default function PrivatePayPage() {
       addNotification(
         'Payment Sent',
         `Privately paid ${formatUnits(amountValue, assetConfig.decimals)} ${asset} to ${recipient.slice(0, 6)}...${recipient.slice(-4)}.`,
-        'success'
+        'success',
+        payHash
       );
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Payment failed.';
+      const message = getErrorMessage(err, 'Payment failed.');
       addNotification('Payment Failed', message, 'error');
       setStep('idle');
     }

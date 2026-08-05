@@ -12,6 +12,7 @@ import { nullifierHash as computeNullifierHash, ownerKey as computeOwnerKey } fr
 import { provePlaceOrder, proveCancelOrder } from '@/lib/proving/prove';
 import { submitOrderToMatcher, fetchMatcherOrders, fetchRate, fetchRecentMatches } from '@/lib/api';
 import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
+import { getErrorMessage } from '@/lib/utils';
 import type { AnnouncedOrder } from '@/lib/noteWallet/announcer';
 import type { StoredNote, StoredOrderNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
@@ -423,16 +424,22 @@ export default function DarkPoolPage() {
           ownerKey: computeOwnerKey(spendingKey).toString(),
           walletAddress,
         });
-        addNotification('Order Placed', 'Your dark-pool order is live and waiting to be matched.', 'success');
+        addNotification(
+          'Order Placed',
+          `Selling ${formatUnits(amountIn, assetInConfig.decimals)} ${assetIn} for at least ${formatUnits(minOutBaseUnits, assetOutConfig.decimals)} ${assetOut} — live and waiting to be matched.`,
+          'success',
+          hash
+        );
       } catch {
         addNotification(
           'Order Placed',
-          'Order is on-chain, but the matcher could not be reached — it will need to be resubmitted for matching.',
-          'error'
+          `${formatUnits(amountIn, assetInConfig.decimals)} ${assetIn} order is on-chain, but the matcher could not be reached — it will need to be resubmitted for matching.`,
+          'error',
+          hash
         );
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Placing the order failed.';
+      const message = getErrorMessage(err, 'Placing the order failed.');
       addNotification('Order Failed', message, 'error');
       setStep('idle');
     }
@@ -476,9 +483,15 @@ export default function DarkPoolPage() {
       await noteWallet.refreshSpentStatus();
 
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
-      addNotification('Order Cancelled', 'Your funds were refunded as a fresh shielded note.', 'success');
+      const { sym: refundSym, decimals: refundDecimals } = symbolFor(deployment, order.assetId);
+      addNotification(
+        'Order Cancelled',
+        `${formatUnits(amountIn, refundDecimals)} ${refundSym} refunded as a fresh shielded note.`,
+        'success',
+        hash
+      );
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Cancelling the order failed.';
+      const message = getErrorMessage(err, 'Cancelling the order failed.');
       addNotification('Cancel Failed', message, 'error');
     } finally {
       setCancelingId(null);
@@ -510,6 +523,8 @@ export default function DarkPoolPage() {
         ownerKey: computeOwnerKey(spendingKey).toString(),
         walletAddress,
       });
+      const { sym: resubmitSym, decimals: resubmitDecimals } = symbolFor(deployment, order.assetId);
+      const resubmitAmount = `${formatUnits(BigInt(order.amount), resubmitDecimals)} ${resubmitSym}`;
       if (result.status === 'already_settled') {
         // This order's nullifier is already spent on-chain — it matched and
         // settled in a matcher process that no longer remembers it (e.g. a
@@ -517,13 +532,13 @@ export default function DarkPoolPage() {
         // state instead of leaving a stale "open" order in the list.
         await noteWallet.refreshSpentStatus();
         queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
-        addNotification('Already Settled', 'This order already matched and settled — check your notes for the proceeds.', 'success');
+        addNotification('Already Settled', `Your ${resubmitAmount} order already matched and settled — check your notes for the proceeds.`, 'success');
       } else {
         queryClient.invalidateQueries({ queryKey: ['matcherOrders'] });
-        addNotification('Order Resubmitted', "Your order is back on the matcher's book.", 'success');
+        addNotification('Order Resubmitted', `Your ${resubmitAmount} order is back on the matcher's book.`, 'success');
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Resubmitting the order failed.';
+      const message = getErrorMessage(err, 'Resubmitting the order failed.');
       addNotification('Resubmit Failed', message, 'error');
     } finally {
       setResubmittingId(null);
@@ -537,9 +552,14 @@ export default function DarkPoolPage() {
       await noteWallet.claimIncomingOrder(candidate);
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
       queryClient.invalidateQueries({ queryKey: ['incomingOrderAnnouncements', chainId, walletAddress] });
-      addNotification('Order Claimed', 'Saved to your open orders.', 'success');
+      const { sym: claimedSym, decimals: claimedDecimals } = symbolFor(deployment, Number(candidate.assetIn));
+      addNotification(
+        'Order Claimed',
+        `${formatUnits(candidate.amountIn, claimedDecimals)} ${claimedSym} residual saved to your open orders.`,
+        'success'
+      );
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Claim failed.';
+      const message = getErrorMessage(err, 'Claim failed.');
       addNotification('Claim Failed', message, 'error');
     } finally {
       setClaimingCommitment(null);

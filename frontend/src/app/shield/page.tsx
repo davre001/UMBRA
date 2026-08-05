@@ -12,7 +12,7 @@ import { COMPLIANCE_REGISTRY_ABI } from '@/lib/noteWallet/complianceRegistryAbi'
 import { nullifierHash as computeNullifierHash } from '@/lib/noteWallet/poseidon2';
 import { proveWithdraw } from '@/lib/proving/prove';
 import { screenAddress } from '@/lib/api';
-import { assertTxSuccess } from '@/lib/utils';
+import { assertTxSuccess, getErrorMessage } from '@/lib/utils';
 import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
 import type { StoredNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
@@ -194,9 +194,9 @@ export default function ShieldPage() {
       setStep('finalized');
       queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
       queryClient.invalidateQueries({ queryKey: ['publicBalance', chainId, asset, walletAddress] });
-      addNotification('Deposit Shielded', `Successfully shielded ${amount} ${asset} privately.`, 'success');
+      addNotification('Deposit Shielded', `Successfully shielded ${amount} ${asset} privately.`, 'success', shieldHash);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Shield deposit failed.';
+      const message = getErrorMessage(err, 'Shield deposit failed.');
       addNotification('Shield Request Failed', message, 'error');
       setStep('idle');
     }
@@ -300,10 +300,11 @@ export default function ShieldPage() {
       addNotification(
         'Funds Withdrawn',
         `Successfully withdrew ${formatUnits(amountValue, assetConfig.decimals)} ${asset} privately.`,
-        'success'
+        'success',
+        withdrawHash
       );
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Withdrawal failed.';
+      const message = getErrorMessage(err, 'Withdrawal failed.');
       addNotification('Withdraw Request Failed', message, 'error');
       setStep('idle');
     }
@@ -320,7 +321,7 @@ export default function ShieldPage() {
     try {
       await ensureDestinationScreened(effectiveDestination as `0x${string}`);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Compliance screening failed.';
+      const message = getErrorMessage(err, 'Compliance screening failed.');
       addNotification('Compliance Screening Failed', message, 'error');
       return;
     }
@@ -372,7 +373,7 @@ export default function ShieldPage() {
         count > 0 ? 'success' : 'info'
       );
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Recovery failed.';
+      const message = getErrorMessage(err, 'Recovery failed.');
       addNotification('Recovery Failed', message, 'error');
     } finally {
       setRecovering(false);
