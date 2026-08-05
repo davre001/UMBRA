@@ -83,6 +83,19 @@ Every note in the tree is a candidate.
 You withdraw a whole note, not an arbitrary amount from a balance. If you want
 finer granularity, shield in the denominations you expect to use.
 
+### Withdrawing multiple notes at once
+
+**Unshield All** withdraws every note you hold in the selected asset to one
+destination. Each note still needs its own proof — that part is unavoidable,
+one proof per note — but proving is local computation with no signature
+involved. Submission is batched through `BatchWithdrawer`, a small
+permissionless helper contract, so unshielding any number of notes costs
+**one signature**, not one per note. See [Deployed Contracts](/reference/contracts)
+for how it works and why it needs no privilege of its own.
+
+One item failing (say, a note whose Merkle root has gone stale) doesn't block
+the rest — you'll see a count of how many succeeded and how many didn't.
+
 ## If you want privacy on both ends
 
 Shielding is public and withdrawing to your own address is public — doing both

@@ -29,12 +29,21 @@ scan outright.
 | `ComplianceRegistry` | `0xC9192Ecaf662c977B28c614e49F558AAAB832577` |
 | `OwnerKeyRegistry` | `0x48C77021624f7b4baC092570CDD56EB163eC3e71` |
 | `StealthAnnouncer` | `0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1` |
+| `BatchWithdrawer` | `0x4E90ECc46d47FF8B8a13F5396931838b256A3fC1` |
 
 `ShieldedVault` holds the funds, the Merkle tree, and the nullifier set, and
-calls the per-circuit verifiers. The other three are standalone helpers —
-`OwnerKeyRegistry` and `StealthAnnouncer` are read and written entirely
-off-chain by clients, and `ComplianceRegistry` is only consulted by the vault
-on `withdraw`.
+calls the per-circuit verifiers. `OwnerKeyRegistry` and `StealthAnnouncer`
+are standalone helpers read and written entirely off-chain by clients, and
+`ComplianceRegistry` is only consulted by the vault on `withdraw`.
+
+`BatchWithdrawer` is a permissionless call-forwarder: "Unshield All" proves
+every selected note locally (no signature needed for that), then submits
+them all through this contract in one transaction instead of one
+`withdraw()` signature per note. It holds no funds — each `withdraw()` still
+pays its own `recipient` directly — and needs no constructor wiring, since
+it takes the vault address as a call-time parameter. A failing item (a stale
+root, an already-spent nullifier) doesn't block the rest of the batch; see
+[`BatchWithdrawer.sol`](https://github.com/davre001/UMBRA/blob/main/contract/contracts/BatchWithdrawer.sol).
 
 ## Assets
 

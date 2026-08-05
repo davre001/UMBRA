@@ -8,6 +8,7 @@ import { useApp } from '@/providers/app-provider';
 import { useNoteWallet } from '@/lib/noteWallet/useNoteWallet';
 import { getDeployment } from '@/lib/noteWallet/deployments';
 import { SHIELDED_VAULT_ABI } from '@/lib/noteWallet/vaultAbi';
+import { BATCH_WITHDRAWER_ABI } from '@/lib/noteWallet/batchWithdrawerAbi';
 import { COMPLIANCE_REGISTRY_ABI } from '@/lib/noteWallet/complianceRegistryAbi';
 import { nullifierHash as computeNullifierHash } from '@/lib/noteWallet/poseidon2';
 import { proveWithdraw } from '@/lib/proving/prove';
@@ -310,8 +311,26 @@ export default function ShieldPage() {
     }
   };
 
+  /** Shared tail for both Unshield All paths below — reports the outcome and refreshes local/query state the same way regardless of how the withdrawals were actually submitted. */
+  const finishUnshieldAll = async (succeeded: number, failed: number, totalAmount: bigint, txHash?: `0x${string}`) => {
+    await noteWallet.refreshSpentStatus();
+    queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
+    queryClient.invalidateQueries({ queryKey: ['publicBalance', chainId, asset, walletAddress] });
+
+    if (succeeded > 0) {
+      addNotification(
+        'Unshield All Complete',
+        `Withdrew ${succeeded} note${succeeded === 1 ? '' : 's'} (${formatUnits(totalAmount, assetConfig!.decimals)} ${asset})${failed ? `, ${failed} failed` : ''}.`,
+        failed ? 'warning' : 'success',
+        txHash
+      );
+    } else {
+      addNotification('Unshield All Failed', 'None of the selected notes could be withdrawn.', 'error');
+    }
+  };
+
   const handleUnshieldAll = async () => {
-    if (!walletAddress || !assetConfig || !effectiveDestination) {
+    if (!walletAddress || !publicClient || !vaultAddress || !assetConfig || !effectiveDestination) {
       addNotification('Missing Destination', 'Enter a destination address.', 'error');
       return;
     }
@@ -328,34 +347,87 @@ export default function ShieldPage() {
 
     setBulkWithdrawing(true);
     setBulkProgress({ done: 0, total: notes.length });
-    let succeeded = 0;
-    let failed = 0;
-    let totalAmount = BigInt(0);
-    for (let i = 0; i < notes.length; i++) {
-      try {
-        await withdrawOneNote(notes[i], effectiveDestination as `0x${string}`);
-        succeeded += 1;
-        totalAmount += BigInt(notes[i].amount);
-      } catch {
-        failed += 1;
-      }
-      setBulkProgress({ done: i + 1, total: notes.length });
-    }
-    await noteWallet.refreshSpentStatus();
-    setBulkWithdrawing(false);
-    setBulkProgress(null);
-    setSelectedNoteId(null);
-    queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
-    queryClient.invalidateQueries({ queryKey: ['publicBalance', chainId, asset, walletAddress] });
+    const batchWithdrawerAddress = deployment?.batchWithdrawer;
 
-    if (succeeded > 0) {
-      addNotification(
-        'Unshield All Complete',
-        `Withdrew ${succeeded} note${succeeded === 1 ? '' : 's'} (${formatUnits(totalAmount, assetConfig.decimals)} ${asset})${failed ? `, ${failed} failed` : ''}.`,
-        failed ? 'warning' : 'success'
-      );
-    } else {
-      addNotification('Unshield All Failed', 'None of the selected notes could be withdrawn.', 'error');
+    try {
+      if (batchWithdrawerAddress) {
+        // Proving is still done one note at a time (pure local computation,
+        // no signature) — only submission is batched into a single
+        // transaction, so N notes costs one signature instead of N.
+        const calls: { proof: `0x${string}`; root: bigint; nullifierHash: bigint; amount: bigint; assetId: bigint; recipient: `0x${string}` }[] = [];
+        for (let i = 0; i < notes.length; i++) {
+          const note = notes[i];
+          const merklePath = await noteWallet.getMerkleProof(note);
+          const spendingKey = await noteWallet.getSpendingKey();
+          const amountValue = BigInt(note.amount);
+          const assetIdValue = BigInt(note.assetId);
+          const nullifierHashValue = computeNullifierHash(BigInt(note.commitment), spendingKey);
+          const proofHex = await proveWithdraw({
+            root: merklePath.root,
+            nullifierHash: nullifierHashValue,
+            amount: amountValue,
+            assetId: assetIdValue,
+            recipient: BigInt(effectiveDestination),
+            note: {
+              spendingKey,
+              blinding: BigInt(note.blinding),
+              merklePath: { pathElements: merklePath.pathElements, pathIndices: merklePath.pathIndices },
+            },
+          });
+          calls.push({
+            proof: proofHex,
+            root: merklePath.root,
+            nullifierHash: nullifierHashValue,
+            amount: amountValue,
+            assetId: assetIdValue,
+            recipient: effectiveDestination as `0x${string}`,
+          });
+          setBulkProgress({ done: i + 1, total: notes.length });
+        }
+
+        const hash = await writeContractAsync({
+          address: batchWithdrawerAddress,
+          abi: BATCH_WITHDRAWER_ABI,
+          functionName: 'batchWithdraw',
+          args: [vaultAddress, calls],
+        });
+        const receipt = await publicClient.waitForTransactionReceipt({ hash });
+        assertTxSuccess(receipt);
+        const attempts = parseEventLogs({ abi: BATCH_WITHDRAWER_ABI, eventName: 'WithdrawAttempted', logs: receipt.logs });
+
+        let succeeded = 0;
+        let totalAmount = BigInt(0);
+        for (const attempt of attempts) {
+          if (attempt.args.success) {
+            succeeded += 1;
+            totalAmount += BigInt(notes[Number(attempt.args.index)].amount);
+          }
+        }
+        await finishUnshieldAll(succeeded, notes.length - succeeded, totalAmount, hash);
+      } else {
+        // No BatchWithdrawer configured for this chain — fall back to one
+        // signature per note.
+        let succeeded = 0;
+        let totalAmount = BigInt(0);
+        for (let i = 0; i < notes.length; i++) {
+          try {
+            await withdrawOneNote(notes[i], effectiveDestination as `0x${string}`);
+            succeeded += 1;
+            totalAmount += BigInt(notes[i].amount);
+          } catch {
+            // counted via notes.length - succeeded below
+          }
+          setBulkProgress({ done: i + 1, total: notes.length });
+        }
+        await finishUnshieldAll(succeeded, notes.length - succeeded, totalAmount);
+      }
+    } catch (err) {
+      const message = getErrorMessage(err, 'Unshield All failed.');
+      addNotification('Unshield All Failed', message, 'error');
+    } finally {
+      setBulkWithdrawing(false);
+      setBulkProgress(null);
+      setSelectedNoteId(null);
     }
   };
 

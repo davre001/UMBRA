@@ -31,6 +31,7 @@ npm run deploy:coston2
 | `ComplianceRegistry.sol` | `compliance` | Records sanction-screen results; `ShieldedVault.withdraw` gates on `isScreened(recipient)`. |
 | `OwnerKeyRegistry.sol` | — | Lets a wallet publish the public `ownerKey` its notes are credited to, so `pay`'s sender can look it up before building a note for that recipient — see `circuits/DESIGN.md`. Standalone; `ShieldedVault` doesn't read it. |
 | `StealthAnnouncer.sol` | `stealth` | On-chain announcement log (same event shape EIP-5564 uses). The frontend's `pay` flow calls it to deliver a paid note's private data (assetId, amount, blinding) to its recipient — not full EIP-5564 stealth addressing, see `announcer.ts`'s own doc comment for the distinction. |
+| `BatchWithdrawer.sol` | — | Permissionless call-forwarder for `withdraw()` — one wallet signature covers N independent withdrawals instead of N. Holds no funds, needs no constructor wiring (`vault` is a call-time parameter); each call is `try`/`catch`'d individually so one failing item doesn't block the rest. Built for the frontend's "Unshield All". |
 | `mocks/MockERC20.sol` | — | Test-only mintable ERC20, never deployed to Coston2. |
 | `UmbraForwarder.sol` | — | **Currently unused.** No forwarder is needed for withdraw/pay/order actions — the ZK proof itself is the authorization, so anyone can already submit those calls directly. Kept in case a real meta-tx use case (e.g. gasless `shield` via `ERC20Permit`) shows up later. |
 
