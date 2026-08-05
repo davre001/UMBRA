@@ -498,7 +498,7 @@ export default function DarkPoolPage() {
     setResubmittingId(order.id);
     try {
       const spendingKey = await noteWallet.getSpendingKey();
-      await submitOrderToMatcher({
+      const result = await submitOrderToMatcher({
         commitment: order.commitment,
         leafIndex: order.leafIndex!,
         spendingKey: spendingKey.toString(),
@@ -510,8 +510,18 @@ export default function DarkPoolPage() {
         ownerKey: computeOwnerKey(spendingKey).toString(),
         walletAddress,
       });
-      queryClient.invalidateQueries({ queryKey: ['matcherOrders'] });
-      addNotification('Order Resubmitted', "Your order is back on the matcher's book.", 'success');
+      if (result.status === 'already_settled') {
+        // This order's nullifier is already spent on-chain — it matched and
+        // settled in a matcher process that no longer remembers it (e.g. a
+        // backend restart), so there's nothing left to resubmit. Sync local
+        // state instead of leaving a stale "open" order in the list.
+        await noteWallet.refreshSpentStatus();
+        queryClient.invalidateQueries({ queryKey: ['unspentNotes', walletAddress] });
+        addNotification('Already Settled', 'This order already matched and settled — check your notes for the proceeds.', 'success');
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['matcherOrders'] });
+        addNotification('Order Resubmitted', "Your order is back on the matcher's book.", 'success');
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Resubmitting the order failed.';
       addNotification('Resubmit Failed', message, 'error');

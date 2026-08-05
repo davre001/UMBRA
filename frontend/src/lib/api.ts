@@ -19,9 +19,9 @@ export interface OrderIntentBody {
 }
 
 export interface SubmitOrderResult {
-  status: "resting" | "matched";
+  status: "resting" | "matched" | "already_settled";
   matchId?: string;
-  matchStatus?: "awaiting_proof" | "settled";
+  matchStatus?: "awaiting_proof" | "settled" | "failed";
 }
 
 /**

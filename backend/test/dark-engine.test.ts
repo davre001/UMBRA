@@ -113,7 +113,11 @@ describe("dark-engine routes", () => {
       expect(match.status).toBe(200);
       expect(match.body.status).toBe("awaiting_proof");
     },
-    20_000
+    // Was 20s; submitOrder now makes one extra live isSpentNullifier
+    // readContract call per submission (see matcher.ts) on top of the two
+    // real order submissions and real Merkle-path assembly this test already
+    // does, pushing total real-network time past the old budget.
+    40_000
   );
 
   it("404s for an unknown match id", async () => {

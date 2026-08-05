@@ -3,7 +3,10 @@ import { OrderBook } from "./engine";
 import { assembleMatchProofInputs, NoProverConfiguredError, UnavailableMatchProver, type MatchProver } from "./prover";
 import { submitMatch, announceMatchedNote, announceResidualOrder, type MatchLeafIndices } from "./submitter";
 import { computeFill } from "./fillSizing";
+import { isNullifierSpentOnChain } from "../shared/scan";
+import { nullifierHash } from "../shared/poseidon2";
 import { logger } from "../shared/logger";
+import * as store from "./store";
 import type { OrderIntent, MatchRecord, MatchOrderSide } from "./types";
 
 const CONTRACTS_ASSET_COUNT = 3; // C2FLR / FXRP / USDT0 — see shared/chain.ts's ASSETS
@@ -23,6 +26,32 @@ const commitmentToMatchId = new Map<string, string>();
 let prover: MatchProver = new UnavailableMatchProver();
 export function setMatchProver(next: MatchProver): void {
   prover = next;
+}
+
+/**
+ * Repopulates the in-memory book, match records, and commitment→matchId
+ * index from the durable store — must run to completion before this
+ * process accepts any /orders or /matches requests, or a request arriving
+ * mid-hydration would see a partially-empty book. `commitmentToMatchId`
+ * isn't stored separately; it's fully derivable from each match's own
+ * orderA/orderB, so it's rebuilt here rather than persisted redundantly.
+ */
+export async function hydrateFromStore(): Promise<void> {
+  if (!process.env.TURSO_DATABASE_URL) {
+    logger.warn(
+      "[dark-engine] TURSO_DATABASE_URL not set — order book and match records are in-memory only and will be lost on the next restart"
+    );
+    return;
+  }
+  await store.initStore();
+  const { orders, matches: persistedMatches } = await store.loadAll();
+  for (const order of orders) book.rest(order);
+  for (const record of persistedMatches) {
+    matches.set(record.id, record);
+    commitmentToMatchId.set(record.orderA.commitment, record.id);
+    commitmentToMatchId.set(record.orderB.commitment, record.id);
+  }
+  logger.info(`[dark-engine] hydrated from store: ${orders.length} resting order(s), ${persistedMatches.length} match record(s)`);
 }
 
 function validateOrder(body: unknown): OrderIntent {
@@ -59,7 +88,7 @@ function validateOrder(body: unknown): OrderIntent {
 }
 
 export interface SubmitOrderResult {
-  status: "resting" | "matched";
+  status: "resting" | "matched" | "already_settled";
   matchId?: string;
   matchStatus?: MatchRecord["status"];
 }
@@ -94,6 +123,20 @@ export async function submitOrder(vaultAddress: `0x${string}`, body: unknown): P
     `[dark-engine] order submitted: ${order.commitment} (asset ${order.assetIn} -> ${order.assetOut}, amountIn=${order.amountIn}, minOut=${order.minAmountOut})`
   );
 
+  // Book/match state below is in-memory only and gets wiped on every
+  // backend restart (a real risk on this deployment's free-tier Render
+  // plan, which spins down on idle). A "resubmit" of an order already
+  // matched and settled in a since-forgotten process would otherwise look
+  // brand new to this process and form a doomed duplicate match — matchOrders
+  // reverts NullifierAlreadySpent, permanently, since the real spend already
+  // happened. Checking the chain directly, once, up front closes that gap no
+  // matter what this process does or doesn't remember.
+  const orderNullifier = nullifierHash(BigInt(order.commitment), BigInt(order.spendingKey));
+  if (await isNullifierSpentOnChain(vaultAddress, orderNullifier)) {
+    logger.warn(`[dark-engine] ${order.commitment}: nullifier already spent on-chain — refusing to (re)match a stale order`);
+    return { status: "already_settled" };
+  }
+
   const existingMatchId = commitmentToMatchId.get(order.commitment);
   if (existingMatchId) {
     const existing = matches.get(existingMatchId)!;
@@ -108,11 +151,13 @@ export async function submitOrder(vaultAddress: `0x${string}`, body: unknown): P
   const found = await findFillableMatch(order);
   if (!found) {
     book.rest(order);
+    await store.saveOrder(order);
     logger.info(`[dark-engine] ${order.commitment}: no fillable counterparty right now — resting on the book`);
     return { status: "resting" };
   }
   const { counterparty, fillA, fillB } = found;
   book.remove(counterparty.commitment);
+  await store.deleteOrder(counterparty.commitment);
 
   const matchId = randomUUID();
   const proofInputs = await assembleMatchProofInputs(vaultAddress, order, counterparty, fillA, fillB);
@@ -131,6 +176,7 @@ export async function submitOrder(vaultAddress: `0x${string}`, body: unknown): P
   matches.set(matchId, record);
   commitmentToMatchId.set(order.commitment, matchId);
   commitmentToMatchId.set(counterparty.commitment, matchId);
+  await store.saveMatch(record);
   logger.info(`[dark-engine] match ${matchId} assembled (${order.commitment} x ${counterparty.commitment}) — attempting immediate completion`);
 
   try {
@@ -171,12 +217,12 @@ function hexOf(value: bigint): string {
  * trader's own wallet can still show "X / original filled" once they claim
  * it via the announcement `deliverAnnouncements` also sends.
  */
-function relistResidual(original: OrderIntent, side: MatchOrderSide, leafIndex: number): void {
+async function relistResidual(original: OrderIntent, side: MatchOrderSide, leafIndex: number): Promise<void> {
   if (!side.residual) return;
   logger.info(
     `[dark-engine] relisting residual for ${original.commitment}: amountIn=${side.residual.amountIn} at leaf ${leafIndex}`
   );
-  book.rest({
+  const residualOrder: OrderIntent = {
     commitment: hexOf(side.residual.commitment),
     leafIndex,
     spendingKey: original.spendingKey,
@@ -189,7 +235,9 @@ function relistResidual(original: OrderIntent, side: MatchOrderSide, leafIndex: 
     walletAddress: original.walletAddress,
     originalAmountIn: original.originalAmountIn,
     submittedAt: Date.now(),
-  });
+  };
+  book.rest(residualOrder);
+  await store.saveOrder(residualOrder);
 }
 
 /**
@@ -215,6 +263,7 @@ async function settleOnChain(record: MatchRecord, proof: `0x${string}`): Promise
   } catch (err) {
     if (err instanceof Error && err.message.includes("NullifierAlreadySpent")) {
       record.status = "failed";
+      await store.saveMatch(record);
       logger.error(`[dark-engine] match ${record.id} permanently failed (nullifier already spent by another match): ${err.message}`);
       return;
     }
@@ -222,13 +271,14 @@ async function settleOnChain(record: MatchRecord, proof: `0x${string}`): Promise
   }
   record.status = "settled";
   record.txHash = txHash;
+  await store.saveMatch(record);
   logger.info(`[dark-engine] match ${record.id} settled on-chain: ${txHash}`);
-  relistResidualsFor(record, leafIndices);
+  await relistResidualsFor(record, leafIndices);
 }
 
-function relistResidualsFor(record: MatchRecord, leafIndices: MatchLeafIndices): void {
-  if (leafIndices.residualA !== undefined) relistResidual(record.orderA, record.proofInputs.a, leafIndices.residualA);
-  if (leafIndices.residualB !== undefined) relistResidual(record.orderB, record.proofInputs.b, leafIndices.residualB);
+async function relistResidualsFor(record: MatchRecord, leafIndices: MatchLeafIndices): Promise<void> {
+  if (leafIndices.residualA !== undefined) await relistResidual(record.orderA, record.proofInputs.a, leafIndices.residualA);
+  if (leafIndices.residualB !== undefined) await relistResidual(record.orderB, record.proofInputs.b, leafIndices.residualB);
 }
 
 /**
@@ -251,10 +301,12 @@ async function deliverAnnouncements(record: MatchRecord): Promise<void> {
       record.proofInputs.outCommitmentA
     );
     record.announcedNoteA = true;
+    await store.saveMatch(record);
   }
   if (record.proofInputs.a.residual && !record.announcedResidualA) {
     await announceResidualOrder(record.orderA, record.proofInputs.a.residual, record.proofInputs.a.residualBlinding);
     record.announcedResidualA = true;
+    await store.saveMatch(record);
   }
   if (!record.announcedNoteB) {
     await announceMatchedNote(
@@ -265,10 +317,12 @@ async function deliverAnnouncements(record: MatchRecord): Promise<void> {
       record.proofInputs.outCommitmentB
     );
     record.announcedNoteB = true;
+    await store.saveMatch(record);
   }
   if (record.proofInputs.b.residual && !record.announcedResidualB) {
     await announceResidualOrder(record.orderB, record.proofInputs.b.residual, record.proofInputs.b.residualBlinding);
     record.announcedResidualB = true;
+    await store.saveMatch(record);
   }
 }
 
