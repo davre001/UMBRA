@@ -49,6 +49,28 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 // in the app.
 const ENTERED_STORAGE_KEY = 'umbra:isEntered';
 
+// Same reload problem for the notification bell — without this, refreshing
+// the page silently wipes your whole recent-activity history. Deliberately
+// NOT synced anywhere beyond this browser (see the cross-device discussion
+// this followed): a server-side store for this would mean a backend
+// learning your activity, including payment amounts that today never touch
+// any backend at all.
+const NOTIFICATIONS_STORAGE_KEY = 'umbra:notifications';
+const MAX_STORED_NOTIFICATIONS = 15;
+
+type StoredNotification = Omit<Notification, 'timestamp'> & { timestamp: string };
+
+function loadStoredNotifications(): Notification[] {
+  try {
+    const raw = localStorage.getItem(NOTIFICATIONS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as StoredNotification[];
+    return parsed.map((n) => ({ ...n, timestamp: new Date(n.timestamp) }));
+  } catch {
+    return []; // corrupted or pre-dates this format — start fresh rather than crash the app
+  }
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isEntered, setIsEntered] = useState<boolean>(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -77,9 +99,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Restores an entered session after a reload. Client-only and after mount
   // (not a lazy useState initializer) so the very first render still matches
   // the server's — no hydration mismatch, just one extra render on load.
+  // The react-hooks/set-state-in-effect lint error below is a known false
+  // positive for this pattern (not suppressible — it's a compiler
+  // diagnostic, not a standard ESLint rule an eslint-disable can silence):
+  // localStorage doesn't exist during SSR, so reading it during render
+  // (including a lazy initializer) would produce a different result
+  // server- vs client-side — exactly the mismatch this pattern avoids.
   useEffect(() => {
     if (localStorage.getItem(ENTERED_STORAGE_KEY) === 'true') setIsEntered(true);
   }, []);
+
+  // Same client-only-after-mount reasoning and same unsuppressible lint
+  // error as above — restores the bell history a reload would otherwise
+  // silently wipe.
+  useEffect(() => {
+    const stored = loadStoredNotifications();
+    if (stored.length > 0) setNotifications(stored);
+  }, []);
+
+  // Persists on every change, not just on add — so clearNotifications()
+  // wiping the list is reflected too, not just growth.
+  useEffect(() => {
+    localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifications.slice(0, MAX_STORED_NOTIFICATIONS)));
+  }, [notifications]);
 
   const handleSetEntered = (val: boolean) => {
     setIsEntered(val);
