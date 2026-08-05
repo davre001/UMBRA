@@ -1,182 +1,160 @@
-# UMBRA
+# Umbra
 
-> A Privacy-Preserving Dark Pool for FAssets on the Flare Network
+**A privacy-preserving dark pool for FAssets on the Flare Network.**
 
-## Overview
+[![Backend CI/CD](https://github.com/davre001/UMBRA/actions/workflows/backend-ci-cd.yml/badge.svg)](https://github.com/davre001/UMBRA/actions/workflows/backend-ci-cd.yml)
+[![Docs](https://img.shields.io/badge/docs-umbra-blueviolet)](https://docs-umbra.vercel.app/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-Umbra is a next-generation decentralized dark pool built for the **Flare
-Network**. It bridges the gap between institutional-grade privacy and
-regulatory compliance by combining Flare's native infrastructure with
-modern cryptographic technologies.
+Public blockchains publish every trade — what you hold, what you traded, and
+who you traded with. That's exactly the information that makes front-running
+and MEV extraction possible. Umbra keeps balances, orders, and counterparties
+private, while proving in zero knowledge — verifiable by anyone — that every
+settlement followed the rules.
 
-Using **FAssets**, **Flare Time Series Oracle (FTSO)**, **Flare Data
-Connector (FDC)**, and **Zero-Knowledge Proofs (ZKPs)**, Umbra enables users
-to:
+📖 **Full documentation:** [docs-umbra.vercel.app](https://docs-umbra.vercel.app/)
 
--   Shield token balances and trading activity
--   Execute private trades without MEV or front-running
--   Maintain AML/KYC compliance through decentralized attestations
--   Settle trades fairly using decentralized market pricing
+---
 
-## Problem
+## Contents
 
-Public blockchains expose trading activity to everyone, making
-institutional traders vulnerable to front-running, MEV attacks,
-information leakage, and lack of privacy.
+- [What stays private](#what-stays-private)
+- [How it works](#how-it-works)
+- [Repository layout](#repository-layout)
+- [Quick start](#quick-start)
+- [Backend](#backend)
+- [Frontend](#frontend)
+- [Status](#status)
+- [License](#license)
 
-Traditional dark pools solve these issues but sacrifice decentralization
-and transparency.
+## What stays private
 
-Umbra delivers the privacy of traditional dark pools while preserving
-the trust assumptions of decentralized finance.
+| | Amount | Asset | Counterparty |
+| --- | --- | --- | --- |
+| **Shield** (deposit) | Public | Public | — |
+| **Dark pool order** | Private | Private | Private |
+| **Private pay** | Private | Public | Private |
+| **Withdraw** | Public | Public | Public |
 
-## Solution
+Depositing into the vault is a public ERC-20 transfer — there's nothing secret
+about putting money in. Everything you do *inside* the vault is private, and
+what you reveal on the way out depends on which exit you take. Dark pool
+orders are the strongest case: amounts **and** assets stay hidden, with only
+an opaque commitment and a nullifier ever going on-chain.
 
-Umbra combines Flare's ecosystem with privacy-preserving technologies: -
-FAssets - Zero-Knowledge Proofs - Flare Time Series Oracle (FTSO) - Flare
-Data Connector (FDC)
+## How it works
 
-## Architecture
+1. **Shield** — deposit tokens into `ShieldedVault`. A commitment to your new
+   note is inserted as a leaf in an on-chain Merkle tree. No proof is needed
+   yet; you're publishing a commitment, not spending one.
+2. **Trade** — place an order by spending a note and inserting an opaque order
+   commitment in its place. Orders rest off-chain in the dark engine's book.
+   A matcher pairs compatible orders and generates a zero-knowledge proof
+   that the match was computed correctly.
+3. **Exit** — settle to a new shielded note, pay someone privately, or
+   withdraw publicly to an address.
 
-### 1. Shielded Vault
+Matching happens off-chain, but correctness isn't a matter of trust: the
+`match_orders` circuit proves the fill respected both traders' limits, and a
+Solidity verifier checks that proof on-chain before the vault moves anything.
+A dishonest matcher cannot produce a valid proof for an invalid match. See
+[`circuits/DESIGN.md`](./contract/circuits/DESIGN.md) for the full
+trust-boundary writeup, or the [Concepts docs](https://docs-umbra.vercel.app/concepts/dark-pool)
+for the guided version.
 
--   FAssets
--   Noir
--   Flare EVM
+**Built on:**
 
-Users deposit public FAssets (such as FXRP or FBTC) into the Umbra smart
-contract. Assets are locked while shielded balances are minted using
-ZK-SNARK proofs.
+| | |
+| --- | --- |
+| Chain | Flare (Coston2 testnet) |
+| ZK circuits | [Noir](https://noir-lang.org/), compiled to WASM, proven client-side with Barretenberg |
+| Pricing | Flare Time Series Oracle (FTSOv2) |
+| Compliance | Flare Data Connector (FDC) — on-chain address screening |
+| Assets | FAssets (FXRP, and more) |
 
-### 2. Dark Engine
-
--   Off-chain order matcher (`backend/src/dark-engine`)
--   ZK proof-authorized settlement
-
-Orders are private on-chain (amount and asset hidden) and matched off-chain
-by a matcher that can see order details to find a counterparty, but cannot
-steal or redirect funds — every settlement is authorized by a ZK proof bound
-to each trader's own key, not by who submits the transaction. See
-`circuits/DESIGN.md` for the full trust-boundary writeup.
-
-### 3. Fair Pricing Engine
-
-Uses the Flare Time Series Oracle (FTSO) for decentralized midpoint
-pricing.
-
-### 4. Compliance Layer
-
-Uses the Flare Data Connector (FDC) to verify compliance attestations
-before allowing deposits.
-
-## Trade Lifecycle
-
-  Phase    Action                                       Technology
-  -------- -------------------------------------------- -----------------
-  Screen   Compliance verification                      FDC
-  Shield   Deposit FAssets and mint shielded balances   FAssets + ZK
-  Order    Submit a private order commitment             Flare EVM + ZK
-  Match    Match using live FTSO pricing                 FTSO + off-chain matcher
-  Settle   Finalize anonymous settlement                Flare EVM + ZK
-
-## Technology Stack
-
--   Node.js / TypeScript (backend)
--   Solidity (smart contracts)
--   Next.js 16 / React 19 / TypeScript (frontend)
--   Flare EVM
--   FAssets
--   FTSO
--   FDC
--   Noir (ZK circuits)
-
-## Repository Layout
+## Repository layout
 
 ```
-UMBRA/
-├── backend/     # Node.js + TypeScript API (active)
-├── contract/    # Solidity contracts + Noir circuits, deployed to Coston2 (active)
-├── frontend/    # Next.js 16 + React 19 app (active)
-└── README.md
+umbra/
+├── backend/     # Express + TypeScript API — dark-engine matcher, pricing, compliance, relayer
+├── contract/    # Solidity contracts + Noir circuits, deployed to Coston2
+├── frontend/    # Next.js 16 + React 19 app
+└── docs/        # Nextra docs site — docs-umbra.vercel.app
 ```
 
-All three — `backend/`, `contract/`, and `frontend/` — contain working code,
-described below.
+## Quick start
+
+You'll need Node.js and a wallet with Coston2 testnet funds (use the app's
+faucet page once it's running, or [Flare's own faucet](https://faucet.flare.network/)).
+
+```bash
+# Backend — the dark-engine matcher, pricing, compliance, and relayer API
+cd backend && npm install && npm run dev   # → http://localhost:4000
+
+# Frontend — the app itself
+cd frontend && npm install && npm run dev  # → http://localhost:3000
+```
+
+Full setup, wallet connection, and your first shielded deposit are walked
+through in [Getting Started](https://docs-umbra.vercel.app/getting-started).
 
 ## Backend
 
-The backend is an Express + TypeScript API that backs the flows the frontend
-exercises. Each domain concern is its own module under `backend/src/`. It
-talks to the real, deployed Coston2 contracts and a real live FTSOv2 feed —
-there's no simulation left in the request paths below. The dark-engine's
-order book and match records persist to a durable store (Turso) so they
-survive a restart; everything else is in-memory and safely rebuildable
-(rate lookups, compliance screening) since it holds no state that can't be
-freshly re-derived.
+An Express + TypeScript API backing every flow the frontend exercises. It
+talks to the real, deployed Coston2 contracts and a live FTSOv2 feed — no
+simulation in the request paths. The dark-engine's order book and match
+records persist to a durable store (Turso) so they survive a restart;
+everything else is in-memory and safely rebuildable, holding no state that
+can't be freshly re-derived.
 
 | Module | Responsibility |
 | --- | --- |
-| `dark-engine` | Dark-pool order book: matches resting orders, assembles proof inputs, submits/settles on-chain |
+| `dark-engine` | Order book: matches resting orders, assembles proof inputs, submits/settles on-chain |
 | `pricing` | Live FTSOv2 midpoint rate lookup |
-| `compliance` | Real on-chain address screening against ComplianceRegistry |
-| `relayer` | Real gasless relaying — proof-authorized ShieldedVault writes submitted on a user's behalf |
-
-### Getting Started
+| `compliance` | Real on-chain address screening against `ComplianceRegistry` |
+| `relayer` | Real gasless relaying — proof-authorized `ShieldedVault` writes submitted on a user's behalf |
 
 ```bash
 cd backend
-npm install
-npm run dev
-```
-
-The API listens on [http://localhost:4000](http://localhost:4000) (override
-with `PORT` in a `.env` file — see `.env.example`). `GET /health` returns
-`{"status":"ok"}` once it's up.
-
-Other scripts (run from `backend/`):
-
-```bash
 npm run build   # type-check and compile to dist/
 npm run start   # run the compiled build
-npm test        # run the vitest suite (supertest against every route)
+npm test        # vitest suite (supertest against every route)
 ```
+
+`GET /health` returns `{"status":"ok"}` once it's up; interactive API docs
+are served at `/docs` (Swagger UI). See `.env.example` for required
+environment variables.
 
 ## Frontend
 
-The frontend is a [Next.js](https://nextjs.org) 16 (App Router) application
-using React 19, TypeScript, and Tailwind CSS v4, with `wagmi` / `viem` for
-wallet connectivity, `@tanstack/react-query` for data fetching, `framer-motion`
-for animation, and a `three.js`-based WebGL background.
+A [Next.js](https://nextjs.org) 16 (App Router) app using React 19,
+TypeScript, and Tailwind CSS v4, with `wagmi` / `viem` for wallet
+connectivity, `@tanstack/react-query` for data fetching, and `framer-motion`
+for animation.
 
-Current pages under `frontend/src/app/`:
-
--   `/` — landing / entry into the protocol vault
--   `/portfolio` — portfolio dashboard
--   `/shield` — shield assets (deposit FAssets into shielded balances)
--   `/pay` — private pay (send, and claim incoming stealth payments)
--   `/swap` — dark swap (private trading; also where residual/partial-fill orders are claimed)
--   `/faucet` — deep-links to Flare's Coston2 faucet for testnet assets
-
-### Getting Started
+| Route | Purpose |
+| --- | --- |
+| `/` | Landing / entry into the protocol |
+| `/portfolio` | Portfolio dashboard |
+| `/shield` | Deposit FAssets into shielded balances |
+| `/pay` | Private pay — send, register your payment key, claim incoming payments |
+| `/swap` | Dark pool trading — place, cancel, and claim orders |
+| `/faucet` | Deep-links to Flare's Coston2 faucet for testnet assets |
 
 ```bash
 cd frontend
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) to view the app. Pages
-auto-update as files under `frontend/src` are edited.
-
-Other scripts (run from `frontend/`):
-
-```bash
 npm run build   # production build
 npm run start   # run the production build
-npm run lint     # lint the codebase
+npm run lint    # lint the codebase
 ```
 
-## Vision
+## Status
 
-Build the institutional liquidity layer for the Flare ecosystem with
-private, compliant, and decentralized trading infrastructure.
+Umbra runs on the **Flare Coston2 testnet** — no real funds are at risk. See
+[Deployed Contracts](https://docs-umbra.vercel.app/reference/contracts) for
+live addresses, and [Getting Started](https://docs-umbra.vercel.app/getting-started)
+to make your first shielded deposit.
+
+## License
+
+MIT — see [LICENSE](./LICENSE). Courtesy of the Hacknest Team (Web3Nova).
