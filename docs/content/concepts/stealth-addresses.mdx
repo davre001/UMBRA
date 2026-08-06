@@ -1,6 +1,6 @@
 ---
 title: Note Delivery
-description: How a recipient discovers a note someone created for them, via OwnerKeyRegistry and StealthAnnouncer.
+description: How a recipient discovers a note someone created for them, via OwnerKeyRegistry, PrivacyKeyRegistry, and StealthAnnouncer.
 ---
 
 # Note Delivery
@@ -61,25 +61,46 @@ Anyone may announce. Umbra uses two scheme IDs of its own:
 
 | Scheme ID | Carries |
 | --- | --- |
-| `2` | A `pay`-created note: `assetId`, `amount`, `blinding`, `commitment` |
-| `3` | A partial fill's residual order: `assetIn`, `assetOut`, `amountIn`, `minAmountOut`, `blinding`, `commitment`, `originalAmountIn` |
+| `2` | A `pay`-created or matched-proceeds note: `assetId`, `amount`, `blinding`, `commitment` |
+| `3` | A placed order or a partial fill's residual order: `assetIn`, `assetOut`, `amountIn`, `minAmountOut`, `blinding`, `commitment`, `originalAmountIn` |
 
 Scheme ID `1` is left alone — it is reserved by the contract's own
 documentation for real EIP-5564 secp256k1 announcements.
 
-<Callout type="warning">
-  **This is not full EIP-5564 stealth addressing.** There is no ephemeral
-  keypair ECDH here, and `stealthAddress` is the recipient's ordinary wallet
-  address, not a fresh one-time destination. Metadata is announced in the
-  clear rather than ECDH-encrypted.
+## PrivacyKeyRegistry — encrypting metadata and tagging `pay()`
 
-  That follows directly from the reused-`ownerKey` note scheme (see
-  [Shielded Notes](/concepts/notes)) rather than per-payment stealth
-  addresses. It adds **no new privacy loss beyond what `pay` already exposes
-  on-chain** — `assetId`, `amount`, and `commitment` are already public inputs
-  on the `pay()` call itself. The `blinding` is the only genuinely new value
-  revealed, and on its own it doesn't let anyone but the `spendingKey` holder
-  spend the note.
+`metadata` is ECIES-encrypted (secp256k1 ECDH + AEAD), not sent in the clear.
+Each wallet publishes a compressed secp256k1 public key once via
+`PrivacyKeyRegistry` (derived from the same wallet signature `spendingKey`
+uses — see [Shielded Notes](/concepts/notes) — so this costs no extra
+signature prompt, only one extra published value, since unlike `ownerKey` a
+real ECDH key has to be a genuine curve point, not a hash):
+
+```solidity
+function register(bytes calldata privacyKey) external;
+function isRegistered(address account) external view returns (bool);
+mapping(address => bytes) public privacyKeyOf;
+```
+
+For `pay()` specifically, the same ephemeral key used to encrypt also derives
+`stealthAddress` as a one-time tag (`recipientPubKey + hash(sharedSecret)·G`,
+address-encoded) instead of publishing the recipient's real address — a
+recipient recognizes it's theirs by recomputing the same derivation from
+their own private key and the event's `ephemeralPubKey`, not by matching a
+literal address. Order/residual delivery on scheme `3` keeps `stealthAddress`
+as the trader's own real address (encryption only, no tag) — that trader's
+identity is already public via their own `placeOrder` transaction, so there's
+no counterparty left to hide there.
+
+<Callout type="info">
+  Two honest limits on this. First, it degrades gracefully: an announcement
+  to a counterparty who hasn't published a privacy key yet (or on a network
+  where `PrivacyKeyRegistry` isn't deployed) falls back to the legacy
+  plaintext-metadata, real-address form instead of failing. Second, for
+  `pay()`, only the *recipient's* address is hidden by the tag — the sender
+  still submits `announce()` from their own wallet (this project's `caller`
+  isn't relayed), so which address sent a private payment stays visible even
+  though who received it doesn't.
 </Callout>
 
 ## Residual orders come back to you automatically
@@ -94,6 +115,14 @@ resubmit it.
 Your wallet reconstructs its notes by scanning the chain's full event history
 from the vault's deploy block, matching announcements and commitments against
 your derived keys. Results are cached in IndexedDB.
+
+Scheme `3` (self-directed — `stealthAddress` is always the real address) can
+still be filtered by address in the `getLogs` call itself. Scheme `2` can't,
+now that `stealthAddress` is a one-time tag rather than a literal address:
+the wallet fetches every scheme-`2` announcement and checks each one locally
+by re-deriving the tag from its own private key — the same "scan everything,
+verify locally" shape the deposit/leaf scan already uses, just extended to
+this scan too.
 
 That means clearing site data is recoverable — the scan rebuilds everything —
 but the first scan on a new device walks a lot of history and takes a moment.

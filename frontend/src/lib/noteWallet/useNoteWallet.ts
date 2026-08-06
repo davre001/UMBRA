@@ -23,6 +23,7 @@ import {
 } from "./store";
 import { fetchAllLeaves, isNullifierSpentOnChain, scanShieldedDeposits } from "./scan";
 import { fetchIncomingAnnouncements, fetchIncomingOrderAnnouncements, type AnnouncedOrder } from "./announcer";
+import { derivePrivacyKeyPair, type PrivacyKeyPair } from "./privacyKeys";
 import { MerkleTree, type MerkleProof } from "./merkleTree";
 
 function toHex(value: bigint): `0x${string}` {
@@ -97,6 +98,11 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
   const getOwnerKey = useCallback(async (): Promise<bigint> => {
     return computeOwnerKey(await getSpendingKey());
   }, [getSpendingKey]);
+
+  /** This wallet's persistent secp256k1 privacy keypair — same signature as spendingKey, different curve/purpose. Its public half is safe to publish (via PrivacyKeyRegistry); its private half never leaves this function's caller. */
+  const getPrivacyKeyPair = useCallback(async (): Promise<PrivacyKeyPair> => {
+    return derivePrivacyKeyPair(await getSignature());
+  }, [getSignature]);
 
   /** Derives a fresh regular note credited to this wallet's own ownerKey, ready to use in a `shield` call. Not yet persisted — call `confirmNote` once the tx succeeds. */
   const prepareNote = useCallback(
@@ -237,8 +243,8 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
   const scanIncomingNotes = useCallback(
     async (announcerAddress: `0x${string}`): Promise<{ assetId: bigint; amount: bigint; blinding: bigint; commitment: bigint }[]> => {
       if (!address || !publicClient) return [];
-      const [announcements, ownOwnerKey, known] = await Promise.all([
-        fetchIncomingAnnouncements(publicClient, announcerAddress, address as `0x${string}`, deployBlock),
+      const [privacyKeyPair, ownOwnerKey, known] = await Promise.all([
+        getPrivacyKeyPair(),
         getOwnerKey(),
         // Every locally-known note, not just unspent ones — the announcement
         // itself never leaves StealthAnnouncer's event log once claimed and
@@ -247,6 +253,13 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
         // it would collide with the store's own commitment uniqueness index.
         getNotesForWallet(address),
       ]);
+      const announcements = await fetchIncomingAnnouncements(
+        publicClient,
+        announcerAddress,
+        address as `0x${string}`,
+        privacyKeyPair.privateKey,
+        deployBlock
+      );
       const knownCommitments = new Set(known.map((n) => n.commitment.toLowerCase()));
 
       const claimable: { assetId: bigint; amount: bigint; blinding: bigint; commitment: bigint }[] = [];
@@ -258,7 +271,7 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       }
       return claimable;
     },
-    [address, publicClient, getOwnerKey, deployBlock]
+    [address, publicClient, getOwnerKey, getPrivacyKeyPair, deployBlock]
   );
 
   /** Saves a note verified by `scanIncomingNotes` into local storage, so it becomes spendable like any other owned note. Looks up its on-chain leafIndex by matching commitments in the full leaf history. */
@@ -299,13 +312,20 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
   const scanIncomingOrders = useCallback(
     async (announcerAddress: `0x${string}`): Promise<AnnouncedOrder[]> => {
       if (!address || !publicClient) return [];
-      const [announcements, ownOwnerKey, known] = await Promise.all([
-        fetchIncomingOrderAnnouncements(publicClient, announcerAddress, address as `0x${string}`, deployBlock),
+      const [privacyKeyPair, ownOwnerKey, known] = await Promise.all([
+        getPrivacyKeyPair(),
         getOwnerKey(),
         // See scanIncomingNotes's own comment — same reasoning applies to
         // residual orders that were claimed and have since matched/settled.
         getNotesForWallet(address),
       ]);
+      const announcements = await fetchIncomingOrderAnnouncements(
+        publicClient,
+        announcerAddress,
+        address as `0x${string}`,
+        privacyKeyPair.privateKey,
+        deployBlock
+      );
       const knownCommitments = new Set(known.map((n) => n.commitment.toLowerCase()));
 
       const claimable: AnnouncedOrder[] = [];
@@ -317,7 +337,7 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       }
       return claimable;
     },
-    [address, publicClient, getOwnerKey, deployBlock]
+    [address, publicClient, getOwnerKey, getPrivacyKeyPair, deployBlock]
   );
 
   /** Saves a residual order verified by `scanIncomingOrders` into local storage, so it shows up in "My Orders" like any other owned order. Looks up its on-chain leafIndex the same way `claimIncomingNote` does. */
@@ -438,6 +458,7 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       getSignature,
       getSpendingKey,
       getOwnerKey,
+      getPrivacyKeyPair,
       prepareNote,
       prepareDepositNote,
       prepareOrderNote,
@@ -457,6 +478,7 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       getSignature,
       getSpendingKey,
       getOwnerKey,
+      getPrivacyKeyPair,
       prepareNote,
       prepareDepositNote,
       prepareOrderNote,

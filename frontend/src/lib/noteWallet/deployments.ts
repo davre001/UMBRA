@@ -18,6 +18,8 @@ export interface ChainDeployment {
   stealthAnnouncer?: `0x${string}`;
   /** Optional — "Unshield All" batches N withdraw() calls into one signature through this when set, falling back to one signature per note otherwise. */
   batchWithdrawer?: `0x${string}`;
+  /** Optional — lets Pay/Swap encrypt announce() metadata and (Pay only) derive a one-time stealthAddress when set; falls back to the legacy plaintext/real-address behavior otherwise. See PrivacyKeyRegistry.sol. */
+  privacyKeyRegistry?: `0x${string}`;
   /** Block the vault was deployed at — bounds event scans (scan.ts, announcer.ts) so they don't needlessly scan pre-deployment history. */
   deployBlock?: number;
   assets: Record<string, AssetConfig>;

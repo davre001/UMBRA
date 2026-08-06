@@ -1,22 +1,16 @@
-import { decodeAbiParameters, encodeAbiParameters, type PublicClient } from "viem";
+import { bytesToHex, decodeAbiParameters, encodeAbiParameters, hexToBytes, type Hex, type PublicClient } from "viem";
 import { getLogsChunked } from "./getLogsChunked";
+import { decryptAnnouncement, matchStealthTag } from "./privacyKeys";
 
 /**
  * Delivers a `pay`-created note's private data (assetId, amount, blinding,
  * commitment) to its recipient via StealthAnnouncer's generic event log.
  *
- * This is NOT full EIP-5564 stealth addressing (schemeId 1, reserved by the
- * contract's own doc comment) — there's no ephemeral-keypair ECDH here, and
- * `stealthAddress` is just the recipient's ordinary wallet address, not a
- * fresh one-time destination. That tradeoff follows directly from this
- * project's reused-ownerKey note scheme (circuits/DESIGN.md) instead of full
- * per-payment stealth addresses: metadata is announced in the clear rather
- * than ECDH-encrypted. This adds no new privacy loss beyond what `pay`
- * already exposes on-chain — assetId/amount/commitment are already public
- * inputs on the `pay()` call itself (see DESIGN.md's "known simplification,
- * v1"); `blinding` is the only genuinely new value this reveals, and on its
- * own it doesn't let anyone but the ownerKey's spendingKey holder spend the
- * note.
+ * `metadata` is ECIES-encrypted to the recipient's `PrivacyKeyRegistry` key
+ * (see privacyKeys.ts) rather than sent in the clear — a wallet whose
+ * `ephemeralPubKey` is empty is a *legacy* announcement made before this
+ * scheme existed, and is decoded as plain ABI-encoded bytes instead, so
+ * every note announced before this change stays recoverable.
  */
 export const OWNER_KEY_NOTE_SCHEME_ID = BigInt(2);
 
@@ -44,13 +38,24 @@ export interface AnnouncedNote {
   blockNumber: bigint;
 }
 
-function decodeNoteMetadata(metadata: `0x${string}`, blockNumber: bigint): AnnouncedNote | null {
+function isLegacyPlaintext(ephemeralPubKey: Hex): boolean {
+  return hexToBytes(ephemeralPubKey).length === 0;
+}
+
+function decodeNoteMetadata(privacyPrivateKey: Uint8Array, ephemeralPubKey: Hex, metadata: Hex, blockNumber: bigint): AnnouncedNote | null {
   try {
-    const [assetId, amount, blinding, commitment] = decodeAbiParameters(METADATA_PARAMS, metadata);
+    const plaintext = isLegacyPlaintext(ephemeralPubKey) ? metadata : decryptToHex(privacyPrivateKey, ephemeralPubKey, metadata);
+    if (!plaintext) return null;
+    const [assetId, amount, blinding, commitment] = decodeAbiParameters(METADATA_PARAMS, plaintext);
     return { assetId, amount, blinding, commitment, blockNumber };
   } catch {
     return null; // not one of our announcements (e.g. a real EIP-5564 schemeId 1 announcement)
   }
+}
+
+function decryptToHex(privacyPrivateKey: Uint8Array, ephemeralPubKey: Hex, metadata: Hex): Hex | null {
+  const decrypted = decryptAnnouncement(privacyPrivateKey, ephemeralPubKey, metadata);
+  return decrypted ? bytesToHex(decrypted) : null;
 }
 
 /**
@@ -58,6 +63,9 @@ function decodeNoteMetadata(metadata: `0x${string}`, blockNumber: bigint): Annou
  * match_orders — see circuits/DESIGN.md) to the trader who still owns it —
  * same mechanism as `OWNER_KEY_NOTE_SCHEME_ID` above, a different scheme id
  * only because the metadata shape (order fields, not a note's) differs.
+ * `stealthAddress` for this scheme stays the trader's own real address (see
+ * privacyKeys.ts's `encryptAnnouncement`) — only `metadata` is encrypted,
+ * since the trader's address is already public via their own placeOrder tx.
  */
 export const ORDER_SCHEME_ID = BigInt(3);
 
@@ -112,11 +120,18 @@ export function encodeOrderMetadata(params: {
   ]);
 }
 
-function decodeOrderMetadata(metadata: `0x${string}`, blockNumber: bigint): AnnouncedOrder | null {
+function decodeOrderMetadata(
+  privacyPrivateKey: Uint8Array,
+  ephemeralPubKey: Hex,
+  metadata: Hex,
+  blockNumber: bigint
+): AnnouncedOrder | null {
   try {
+    const plaintext = isLegacyPlaintext(ephemeralPubKey) ? metadata : decryptToHex(privacyPrivateKey, ephemeralPubKey, metadata);
+    if (!plaintext) return null;
     const [assetIn, assetOut, amountIn, minAmountOut, blinding, commitment, originalAmountIn] = decodeAbiParameters(
       ORDER_METADATA_PARAMS,
-      metadata
+      plaintext
     );
     return { assetIn, assetOut, amountIn, minAmountOut, blinding, commitment, originalAmountIn, blockNumber };
   } catch {
@@ -138,11 +153,23 @@ const ANNOUNCEMENT_EVENT = {
   ],
 } as const;
 
-/** Every owner_key-scheme note ever announced to `recipient` on this announcer. */
+type RawAnnouncement = { args: { stealthAddress: `0x${string}`; ephemeralPubKey: Hex; metadata: Hex }; blockNumber: bigint };
+
+/**
+ * Every owner_key-scheme note ever announced to `recipient` on this
+ * announcer. `stealthAddress` is a one-time tag for anything announced after
+ * this scheme shipped (see privacyKeys.ts's `deriveStealthTag`), not
+ * `recipient` itself, so this can no longer filter by address on-chain —
+ * it fetches every scheme-2 log and checks each one locally, falling back to
+ * a direct address match for legacy (pre-tagging) announcements. Same
+ * "scan everything, verify locally" shape `scan.ts`'s deposit/leaf scanning
+ * already uses.
+ */
 export async function fetchIncomingAnnouncements(
   client: AnnouncerClient,
   announcerAddress: `0x${string}`,
   recipient: `0x${string}`,
+  privacyPrivateKey: Uint8Array,
   fromBlock: bigint = BigInt(0)
 ): Promise<AnnouncedNote[]> {
   const toBlock = await client.getBlockNumber();
@@ -152,22 +179,34 @@ export async function fetchIncomingAnnouncements(
     ANNOUNCEMENT_EVENT,
     fromBlock,
     toBlock,
-    { schemeId: OWNER_KEY_NOTE_SCHEME_ID, stealthAddress: recipient }
-  )) as { args: { metadata: `0x${string}` }; blockNumber: bigint }[];
+    { schemeId: OWNER_KEY_NOTE_SCHEME_ID }
+  )) as RawAnnouncement[];
 
   const notes: AnnouncedNote[] = [];
   for (const log of logs) {
-    const decoded = decodeNoteMetadata(log.args.metadata, log.blockNumber);
+    const { stealthAddress, ephemeralPubKey, metadata } = log.args;
+    const mine = isLegacyPlaintext(ephemeralPubKey)
+      ? stealthAddress.toLowerCase() === recipient.toLowerCase()
+      : matchStealthTag(privacyPrivateKey, ephemeralPubKey, stealthAddress);
+    if (!mine) continue;
+    const decoded = decodeNoteMetadata(privacyPrivateKey, ephemeralPubKey, metadata, log.blockNumber);
     if (decoded) notes.push(decoded);
   }
   return notes;
 }
 
-/** Every residual order ever announced to `recipient` on this announcer — a partial fill's leftover, delivered the same way a matched note is. */
+/**
+ * Every residual order ever announced to `recipient` on this announcer — a
+ * partial fill's leftover, delivered the same way a matched note is.
+ * `stealthAddress` for this scheme is always the trader's own real address
+ * (see `ORDER_SCHEME_ID`'s own doc comment), so this keeps the cheap
+ * address-filtered query — only `metadata` needs decrypting.
+ */
 export async function fetchIncomingOrderAnnouncements(
   client: AnnouncerClient,
   announcerAddress: `0x${string}`,
   recipient: `0x${string}`,
+  privacyPrivateKey: Uint8Array,
   fromBlock: bigint = BigInt(0)
 ): Promise<AnnouncedOrder[]> {
   const toBlock = await client.getBlockNumber();
@@ -178,11 +217,11 @@ export async function fetchIncomingOrderAnnouncements(
     fromBlock,
     toBlock,
     { schemeId: ORDER_SCHEME_ID, stealthAddress: recipient }
-  )) as { args: { metadata: `0x${string}` }; blockNumber: bigint }[];
+  )) as RawAnnouncement[];
 
   const orders: AnnouncedOrder[] = [];
   for (const log of logs) {
-    const decoded = decodeOrderMetadata(log.args.metadata, log.blockNumber);
+    const decoded = decodeOrderMetadata(privacyPrivateKey, log.args.ephemeralPubKey, log.args.metadata, log.blockNumber);
     if (decoded) orders.push(decoded);
   }
   return orders;

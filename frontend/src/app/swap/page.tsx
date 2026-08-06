@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from 'react';
-import { formatUnits, parseEventLogs, parseUnits } from 'viem';
+import { formatUnits, hexToBytes, parseEventLogs, parseUnits } from 'viem';
 import { useChainId, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '@/providers/app-provider';
@@ -14,6 +14,7 @@ import { submitOrderToMatcher, fetchMatcherOrders, fetchRate, fetchRecentMatches
 import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
 import { getErrorMessage } from '@/lib/utils';
 import { encodeNoteMetadata, encodeOrderMetadata, OWNER_KEY_NOTE_SCHEME_ID, ORDER_SCHEME_ID, type AnnouncedOrder } from '@/lib/noteWallet/announcer';
+import { encryptAnnouncement } from '@/lib/noteWallet/privacyKeys';
 import { STEALTH_ANNOUNCER_ABI } from '@/lib/noteWallet/stealthAnnouncerAbi';
 import type { StoredNote, StoredOrderNote } from '@/lib/noteWallet/store';
 import { Navbar } from '@/components/shared/navbar';
@@ -407,6 +408,11 @@ export default function DarkPoolPage() {
       // recoverable by scanning the chain: incoming payments, matched
       // proceeds, residual orders). Best-effort: the order is already
       // fully placed and valid on-chain regardless of whether this succeeds.
+      // Encrypted to this wallet's own privacy key (always known locally, no
+      // registry lookup needed since sender and recipient are the same
+      // wallet) — see privacyKeys.ts. stealthAddress stays the real address:
+      // this trader's identity is already public via the placeOrder tx
+      // above, so there's no counterparty to hide.
       if (announcerAddress) {
         try {
           const selfOrderMetadata = encodeOrderMetadata({
@@ -418,11 +424,13 @@ export default function DarkPoolPage() {
             commitment: orderPrepared.commitment,
             originalAmountIn: amountIn,
           });
+          const { publicKey: ownPrivacyPubKey } = await noteWallet.getPrivacyKeyPair();
+          const encrypted = encryptAnnouncement(ownPrivacyPubKey, hexToBytes(selfOrderMetadata));
           const selfAnnounceHash = await writeContractAsync({
             address: announcerAddress,
             abi: STEALTH_ANNOUNCER_ABI,
             functionName: 'announce',
-            args: [ORDER_SCHEME_ID, walletAddress as `0x${string}`, '0x', selfOrderMetadata],
+            args: [ORDER_SCHEME_ID, walletAddress as `0x${string}`, encrypted.ephemeralPubKey, encrypted.metadata],
           });
           await publicClient.waitForTransactionReceipt({ hash: selfAnnounceHash });
         } catch {
@@ -514,9 +522,10 @@ export default function DarkPoolPage() {
       await noteWallet.confirmNote(refundPrepared, cancelledLog.args.leafIndex);
       await noteWallet.refreshSpentStatus();
 
-      // Self-announce the refund note — same reasoning as the order
-      // self-announce in handlePlaceOrder. Best-effort: the refund is
-      // already valid on-chain regardless of whether this succeeds.
+      // Self-announce the refund note — same reasoning and same encryption
+      // (to this wallet's own key) as the order self-announce above.
+      // Best-effort: the refund is already valid on-chain regardless of
+      // whether this succeeds.
       if (announcerAddress) {
         try {
           const refundMetadata = encodeNoteMetadata({
@@ -525,11 +534,13 @@ export default function DarkPoolPage() {
             blinding: refundPrepared.blinding,
             commitment: refundPrepared.commitment,
           });
+          const { publicKey: ownPrivacyPubKey } = await noteWallet.getPrivacyKeyPair();
+          const encrypted = encryptAnnouncement(ownPrivacyPubKey, hexToBytes(refundMetadata));
           const selfAnnounceHash = await writeContractAsync({
             address: announcerAddress,
             abi: STEALTH_ANNOUNCER_ABI,
             functionName: 'announce',
-            args: [OWNER_KEY_NOTE_SCHEME_ID, walletAddress as `0x${string}`, '0x', refundMetadata],
+            args: [OWNER_KEY_NOTE_SCHEME_ID, walletAddress as `0x${string}`, encrypted.ephemeralPubKey, encrypted.metadata],
           });
           await publicClient.waitForTransactionReceipt({ hash: selfAnnounceHash });
         } catch {

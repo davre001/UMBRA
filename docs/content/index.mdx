@@ -33,6 +33,18 @@ what you reveal on the way out depends on which exit you take.
 Dark pool orders are the strongest case: amounts **and** assets stay hidden.
 The only public values are an opaque commitment and a nullifier.
 
+Every note/order commitment is spendable the moment it lands on-chain — but
+*discovering* one someone else created for you (a payment, matched dark-pool
+proceeds, a partial fill's residual) needs a delivery channel, and that
+channel is what actually enforces the table above. See
+[Stealth Addresses](/concepts/stealth-addresses) for the exact mechanism —
+`StealthAnnouncer` metadata is encrypted to a key each wallet publishes once,
+and a `pay()` announcement's address tag is a one-time derivation rather than
+the recipient's real address. It degrades to the legacy plaintext/real-address
+form for a counterparty who hasn't published a key yet, and for Private Pay
+specifically, only the recipient's address is hidden — the sender still
+submits the announcement from their own wallet.
+
 ## How it works
 
 1. **Shield** — deposit tokens into `ShieldedVault`. A commitment to your new

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from 'react';
-import { formatUnits, isAddress, parseEventLogs } from 'viem';
+import { bytesToHex, formatUnits, hexToBytes, isAddress, parseEventLogs } from 'viem';
 import { useChainId, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '@/providers/app-provider';
@@ -9,8 +9,10 @@ import { useNoteWallet } from '@/lib/noteWallet/useNoteWallet';
 import { getDeployment } from '@/lib/noteWallet/deployments';
 import { SHIELDED_VAULT_ABI } from '@/lib/noteWallet/vaultAbi';
 import { OWNER_KEY_REGISTRY_ABI } from '@/lib/noteWallet/ownerKeyRegistryAbi';
+import { PRIVACY_KEY_REGISTRY_ABI } from '@/lib/noteWallet/privacyKeyRegistryAbi';
 import { STEALTH_ANNOUNCER_ABI } from '@/lib/noteWallet/stealthAnnouncerAbi';
 import { encodeNoteMetadata, OWNER_KEY_NOTE_SCHEME_ID } from '@/lib/noteWallet/announcer';
+import { encryptAndTagAnnouncement } from '@/lib/noteWallet/privacyKeys';
 import { nullifierHash as computeNullifierHash } from '@/lib/noteWallet/poseidon2';
 import { provePay } from '@/lib/proving/prove';
 import { assertTxSuccess, getErrorMessage } from '@/lib/utils';
@@ -123,6 +125,7 @@ export default function PrivatePayPage() {
   const deployment = useMemo(() => getDeployment(chainId), [chainId]);
   const vaultAddress = deployment?.vault;
   const registryAddress = deployment?.ownerKeyRegistry;
+  const privacyRegistryAddress = deployment?.privacyKeyRegistry;
   const announcerAddress = deployment?.stealthAnnouncer;
   const noteWallet = useNoteWallet(vaultAddress, deployment?.deployBlock !== undefined ? BigInt(deployment.deployBlock) : undefined);
   const onCoston2 = chainId === COSTON2_CHAIN_ID;
@@ -160,7 +163,22 @@ export default function PrivatePayPage() {
       }),
     enabled: !!publicClient && !!registryAddress && recipientIsAddress,
   });
-  const recipientRegistered = (recipientOwnerKeyQuery.data ?? BigInt(0)) !== BigInt(0);
+  const recipientPrivacyKeyQuery = useQuery({
+    queryKey: ['privacyKeyOf', chainId, recipient],
+    queryFn: () =>
+      publicClient!.readContract({
+        address: privacyRegistryAddress!,
+        abi: PRIVACY_KEY_REGISTRY_ABI,
+        functionName: 'privacyKeyOf',
+        args: [recipient as `0x${string}`],
+      }),
+    enabled: !!publicClient && !!privacyRegistryAddress && recipientIsAddress,
+  });
+  // Not deployed on this network yet falls back to the legacy plaintext/real-address
+  // announce() the same way announcerAddress being absent disables the feature entirely
+  // elsewhere on this page — deployed-and-unregistered is what actually blocks sending.
+  const recipientPrivacyKeyRegistered = !privacyRegistryAddress || (recipientPrivacyKeyQuery.data ?? '0x') !== '0x';
+  const recipientRegistered = (recipientOwnerKeyQuery.data ?? BigInt(0)) !== BigInt(0) && recipientPrivacyKeyRegistered;
 
   const ownRegistrationQuery = useQuery({
     queryKey: ['ownerKeyOf', chainId, walletAddress],
@@ -173,7 +191,20 @@ export default function PrivatePayPage() {
       }),
     enabled: !!publicClient && !!registryAddress && !!walletAddress,
   });
-  const ownRegistered = (ownRegistrationQuery.data ?? BigInt(0)) !== BigInt(0);
+  const ownPrivacyKeyRegistrationQuery = useQuery({
+    queryKey: ['privacyKeyOf', chainId, walletAddress],
+    queryFn: () =>
+      publicClient!.readContract({
+        address: privacyRegistryAddress!,
+        abi: PRIVACY_KEY_REGISTRY_ABI,
+        functionName: 'privacyKeyOf',
+        args: [walletAddress as `0x${string}`],
+      }),
+    enabled: !!publicClient && !!privacyRegistryAddress && !!walletAddress,
+  });
+  const ownRegistered =
+    (ownRegistrationQuery.data ?? BigInt(0)) !== BigInt(0) &&
+    (!privacyRegistryAddress || (ownPrivacyKeyRegistrationQuery.data ?? '0x') !== '0x');
 
   const incomingQuery = useQuery({
     queryKey: ['incomingAnnouncements', chainId, walletAddress],
@@ -197,6 +228,23 @@ export default function PrivatePayPage() {
       const receipt = await publicClient!.waitForTransactionReceipt({ hash });
       assertTxSuccess(receipt);
       queryClient.invalidateQueries({ queryKey: ['ownerKeyOf', chainId, walletAddress] });
+
+      // Also publishes the privacy key used to encrypt announce() metadata and
+      // derive a one-time stealthAddress (see privacyKeys.ts) — same button,
+      // second sequential tx, same shape as pay()+announce() below.
+      if (privacyRegistryAddress) {
+        const { publicKey } = await noteWallet.getPrivacyKeyPair();
+        const privacyHash = await writeContractAsync({
+          address: privacyRegistryAddress,
+          abi: PRIVACY_KEY_REGISTRY_ABI,
+          functionName: 'register',
+          args: [bytesToHex(publicKey)],
+        });
+        const privacyReceipt = await publicClient!.waitForTransactionReceipt({ hash: privacyHash });
+        assertTxSuccess(privacyReceipt);
+        queryClient.invalidateQueries({ queryKey: ['privacyKeyOf', chainId, walletAddress] });
+      }
+
       addNotification('Payment Key Registered', 'Others can now pay you privately.', 'success', hash);
     } catch (err) {
       const message = getErrorMessage(err, 'Registration failed.');
@@ -275,17 +323,30 @@ export default function PrivatePayPage() {
       if (!paidLog) throw new Error('Paid event not found in transaction receipt.');
 
       setStep('announcing');
-      const metadata = encodeNoteMetadata({
+      const plaintext = encodeNoteMetadata({
         assetId: assetIdValue,
         amount: amountValue,
         blinding: outNote.blinding,
         commitment: outNote.commitment,
       });
+      // Encrypted + one-time-tagged whenever the recipient has published a
+      // privacy key — falls back to the legacy plaintext/real-address
+      // announcement otherwise (network doesn't have PrivacyKeyRegistry
+      // deployed, or — unreachable here since recipientRegistered already
+      // gates on it above — the recipient hasn't registered one).
+      const recipientPrivacyKey = recipientPrivacyKeyQuery.data;
+      const announceArgs: readonly [bigint, `0x${string}`, `0x${string}`, `0x${string}`] =
+        recipientPrivacyKey && recipientPrivacyKey !== '0x'
+          ? (() => {
+              const encrypted = encryptAndTagAnnouncement(hexToBytes(recipientPrivacyKey), hexToBytes(plaintext));
+              return [OWNER_KEY_NOTE_SCHEME_ID, encrypted.stealthAddress, encrypted.ephemeralPubKey, encrypted.metadata] as const;
+            })()
+          : [OWNER_KEY_NOTE_SCHEME_ID, recipient as `0x${string}`, '0x', plaintext] as const;
       const announceHash = await writeContractAsync({
         address: announcerAddress,
         abi: STEALTH_ANNOUNCER_ABI,
         functionName: 'announce',
-        args: [OWNER_KEY_NOTE_SCHEME_ID, recipient as `0x${string}`, '0x', metadata],
+        args: announceArgs,
       });
       const announceReceipt = await publicClient.waitForTransactionReceipt({ hash: announceHash });
       assertTxSuccess(announceReceipt);

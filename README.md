@@ -51,6 +51,24 @@ what you reveal on the way out depends on which exit you take. Dark pool
 orders are the strongest case: amounts **and** assets stay hidden, with only
 an opaque commitment and a nullifier ever going on-chain.
 
+Every note/order commitment is spendable the moment it's inserted — the
+Merkle proof itself never reveals which leaf is yours. But *discovering* one
+someone else created for you (a payment, matched dark-pool proceeds, a
+partial fill's residual) needs a delivery channel, and that channel is what
+actually enforces the table above: `StealthAnnouncer`'s `announce()`
+metadata is ECIES-encrypted (secp256k1 ECDH + AEAD) to a key each wallet
+publishes once via `PrivacyKeyRegistry`, and a `pay()` announcement's
+`stealthAddress` is a one-time tag derived from that same key rather than
+the recipient's real address — see
+[`privacyKeys.ts`](./frontend/src/lib/noteWallet/privacyKeys.ts) and the
+[Stealth Addresses docs](https://docs-umbra.vercel.app/concepts/stealth-addresses)
+for the exact scheme. Two honest caveats: it degrades to the legacy
+plaintext/real-address form when a counterparty hasn't published a privacy
+key yet (or on a network where `PrivacyKeyRegistry` isn't deployed), and for
+Private Pay specifically, only the *recipient's* address is hidden — the
+sender still submits `announce()` from their own wallet, so which address
+sent a private payment stays visible even though who received it doesn't.
+
 ## How it works
 
 1. **Shield** — deposit tokens into `ShieldedVault`. A commitment to your new

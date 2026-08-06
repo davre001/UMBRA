@@ -30,11 +30,19 @@ scan outright.
 | `OwnerKeyRegistry` | `0x48C77021624f7b4baC092570CDD56EB163eC3e71` |
 | `StealthAnnouncer` | `0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1` |
 | `BatchWithdrawer` | `0x4E90ECc46d47FF8B8a13F5396931838b256A3fC1` |
+| `PrivacyKeyRegistry` | `0xCE49ab341F1E578Cc86264E83e9dbb6ACD3d6d5A` |
 
 `ShieldedVault` holds the funds, the Merkle tree, and the nullifier set, and
-calls the per-circuit verifiers. `OwnerKeyRegistry` and `StealthAnnouncer`
-are standalone helpers read and written entirely off-chain by clients, and
-`ComplianceRegistry` is only consulted by the vault on `withdraw`.
+calls the per-circuit verifiers. `OwnerKeyRegistry`, `PrivacyKeyRegistry`,
+and `StealthAnnouncer` are standalone helpers read and written entirely
+off-chain by clients, and `ComplianceRegistry` is only consulted by the
+vault on `withdraw`.
+
+`PrivacyKeyRegistry` publishes the secp256k1 key `StealthAnnouncer`
+announcements are encrypted to (see [Stealth Addresses](/concepts/stealth-addresses)).
+A wallet that hasn't registered here yet falls back to the legacy
+plaintext/real-address announcement form automatically — nothing else on
+this page depends on it.
 
 `BatchWithdrawer` is a permissionless call-forwarder: "Unshield All" proves
 every selected note locally (no signature needed for that), then submits

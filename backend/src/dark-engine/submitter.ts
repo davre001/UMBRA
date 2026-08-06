@@ -1,9 +1,11 @@
-import { encodeAbiParameters } from "viem";
+import { encodeAbiParameters, hexToBytes, type Hex } from "viem";
 import { SHIELDED_VAULT_ABI } from "../shared/vaultAbi";
 import { STEALTH_ANNOUNCER_ABI } from "../shared/stealthAnnouncerAbi";
+import { PRIVACY_KEY_REGISTRY_ABI } from "../shared/privacyKeyRegistryAbi";
 import { CONTRACTS, assertTxSuccess, getWalletClient, publicClient } from "../shared/chain";
 import { ZERO_VALUE } from "../shared/merkleTree";
 import { logger } from "../shared/logger";
+import { encryptAnnouncement, encryptAndTagAnnouncement } from "../shared/privacyKeys";
 import type { MatchProofInputs, OrderIntent } from "./types";
 
 /** Same schemeId/metadata encoding as frontend/src/lib/noteWallet/announcer.ts — a matched note delivered this way is discoverable the same way a `pay()` note is. */
@@ -92,7 +94,25 @@ export async function submitMatch(
   return { txHash, leafIndices };
 }
 
-/** Delivers a matched output note's private data to its trader — same mechanism `pay()` uses, so the same Pay/Receive-page "Incoming" scan discovers it. */
+/**
+ * Looks up `walletAddress`'s published privacy key (see PrivacyKeyRegistry.sol
+ * and shared/privacyKeys.ts). Returns null if the registry isn't deployed on
+ * this network yet, or if this wallet never registered one — either way the
+ * caller falls back to the legacy plaintext/real-address announcement rather
+ * than failing the delivery outright.
+ */
+async function lookupPrivacyKey(walletAddress: string): Promise<Uint8Array | null> {
+  if (!CONTRACTS.PrivacyKeyRegistry) return null;
+  const key = (await publicClient.readContract({
+    address: CONTRACTS.PrivacyKeyRegistry as `0x${string}`,
+    abi: PRIVACY_KEY_REGISTRY_ABI,
+    functionName: "privacyKeyOf",
+    args: [walletAddress as `0x${string}`],
+  })) as Hex;
+  return key && key !== "0x" ? hexToBytes(key) : null;
+}
+
+/** Delivers a matched output note's private data to its trader — same mechanism `pay()` uses, so the same Pay/Receive-page "Incoming" scan discovers it. Encrypted and stealth-tagged when the trader has a registered privacy key (see privacyKeys.ts); falls back to the legacy plaintext/real-address form otherwise. */
 export async function announceMatchedNote(
   order: OrderIntent,
   assetId: bigint,
@@ -101,13 +121,22 @@ export async function announceMatchedNote(
   commitment: bigint
 ): Promise<`0x${string}`> {
   const wallet = getWalletClient();
-  const metadata = encodeAbiParameters(NOTE_METADATA_PARAMS, [assetId, amount, blinding, commitment]);
-  logger.info(`[submitter] announcing matched note to ${order.walletAddress} (asset ${assetId}, amount ${amount})`);
+  const plaintext = encodeAbiParameters(NOTE_METADATA_PARAMS, [assetId, amount, blinding, commitment]);
+  const traderPrivacyKey = await lookupPrivacyKey(order.walletAddress);
+
+  const [stealthAddress, ephemeralPubKey, metadata] = traderPrivacyKey
+    ? (() => {
+        const encrypted = encryptAndTagAnnouncement(traderPrivacyKey, hexToBytes(plaintext));
+        return [encrypted.stealthAddress, encrypted.ephemeralPubKey, encrypted.metadata] as const;
+      })()
+    : ([order.walletAddress as `0x${string}`, "0x", plaintext] as const);
+
+  logger.info(`[submitter] announcing matched note to ${order.walletAddress} (asset ${assetId}, amount ${amount}, encrypted ${!!traderPrivacyKey})`);
   const txHash = await wallet.writeContract({
     address: CONTRACTS.StealthAnnouncer as `0x${string}`,
     abi: STEALTH_ANNOUNCER_ABI,
     functionName: "announce",
-    args: [OWNER_KEY_NOTE_SCHEME_ID, order.walletAddress as `0x${string}`, "0x", metadata],
+    args: [OWNER_KEY_NOTE_SCHEME_ID, stealthAddress, ephemeralPubKey, metadata],
     chain: wallet.chain,
     account: wallet.account!,
   });
@@ -117,14 +146,14 @@ export async function announceMatchedNote(
   return txHash;
 }
 
-/** Delivers a partial fill's residual order to the trader who still owns it — same delivery mechanism as `announceMatchedNote`, discoverable via the Receive page's incoming scan (extended for order-kind announcements). */
+/** Delivers a partial fill's residual order to the trader who still owns it — same delivery mechanism as `announceMatchedNote`, discoverable via the Receive page's incoming scan (extended for order-kind announcements). Metadata is encrypted when the trader has a registered privacy key; `stealthAddress` always stays the trader's own real address (already public via their own placeOrder tx — no counterparty to hide here). */
 export async function announceResidualOrder(
   order: OrderIntent,
   residual: { amountIn: bigint; minAmountOut: bigint; commitment: bigint },
   blinding: bigint
 ): Promise<`0x${string}`> {
   const wallet = getWalletClient();
-  const metadata = encodeAbiParameters(ORDER_METADATA_PARAMS, [
+  const plaintext = encodeAbiParameters(ORDER_METADATA_PARAMS, [
     BigInt(order.assetIn),
     BigInt(order.assetOut),
     residual.amountIn,
@@ -133,12 +162,17 @@ export async function announceResidualOrder(
     residual.commitment,
     BigInt(order.originalAmountIn),
   ]);
-  logger.info(`[submitter] announcing residual order to ${order.walletAddress} (amountIn ${residual.amountIn})`);
+  const traderPrivacyKey = await lookupPrivacyKey(order.walletAddress);
+  const { ephemeralPubKey, metadata } = traderPrivacyKey
+    ? encryptAnnouncement(traderPrivacyKey, hexToBytes(plaintext))
+    : { ephemeralPubKey: "0x" as Hex, metadata: plaintext };
+
+  logger.info(`[submitter] announcing residual order to ${order.walletAddress} (amountIn ${residual.amountIn}, encrypted ${!!traderPrivacyKey})`);
   const txHash = await wallet.writeContract({
     address: CONTRACTS.StealthAnnouncer as `0x${string}`,
     abi: STEALTH_ANNOUNCER_ABI,
     functionName: "announce",
-    args: [ORDER_SCHEME_ID, order.walletAddress as `0x${string}`, "0x", metadata],
+    args: [ORDER_SCHEME_ID, order.walletAddress as `0x${string}`, ephemeralPubKey, metadata],
     chain: wallet.chain,
     account: wallet.account!,
   });
