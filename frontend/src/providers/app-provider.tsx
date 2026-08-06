@@ -84,36 +84,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const { disconnect } = useDisconnect();
   const router = useRouter();
 
-  // Notify on connect/disconnect
+  const addNotification = (
+    title: string,
+    message: string,
+    type: Notification['type'] = 'info',
+    txHash?: `0x${string}`,
+    skipToast = false
+  ) => {
+    const newNotif: Notification = {
+      id: Math.random().toString(36).substring(2, 9),
+      title,
+      message,
+      type,
+      timestamp: new Date(),
+      txHash,
+    };
+    setNotifications(prev => [newNotif, ...prev].slice(0, 15));
+    if (!skipToast) setActiveToasts(prev => [...prev, newNotif]);
+  };
+
+  // Notify on connect/disconnect — reacting to wagmi's own external
+  // connection state, the canonical case react-hooks/set-state-in-effect's
+  // own guidance calls out as fine to suppress ("subscribe for updates from
+  // some external system").
   useEffect(() => {
     if (isConnected && address) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       addNotification(
         'Wallet Connected',
         `Linked ${address.slice(0, 6)}...${address.slice(-4)}`,
         'success'
       );
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isConnected, address]);
 
   // Restores an entered session after a reload. Client-only and after mount
   // (not a lazy useState initializer) so the very first render still matches
   // the server's — no hydration mismatch, just one extra render on load.
-  // The react-hooks/set-state-in-effect lint error below is a known false
-  // positive for this pattern (not suppressible — it's a compiler
-  // diagnostic, not a standard ESLint rule an eslint-disable can silence):
   // localStorage doesn't exist during SSR, so reading it during render
   // (including a lazy initializer) would produce a different result
-  // server- vs client-side — exactly the mismatch this pattern avoids.
+  // server- vs client-side — exactly the mismatch this pattern avoids, at
+  // the cost of one extra render on load that react-hooks/set-state-in-effect
+  // flags by default.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (localStorage.getItem(ENTERED_STORAGE_KEY) === 'true') setIsEntered(true);
   }, []);
 
-  // Same client-only-after-mount reasoning and same unsuppressible lint
-  // error as above — restores the bell history a reload would otherwise
-  // silently wipe.
+  // Same client-only-after-mount reasoning as above — restores the bell
+  // history a reload would otherwise silently wipe.
   useEffect(() => {
     const stored = loadStoredNotifications();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (stored.length > 0) setNotifications(stored);
   }, []);
 
@@ -164,25 +186,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // End the vault session and return to the gateway so the next connect starts clean
     handleSetEntered(false);
     router.push('/');
-  };
-
-  const addNotification = (
-    title: string,
-    message: string,
-    type: Notification['type'] = 'info',
-    txHash?: `0x${string}`,
-    skipToast = false
-  ) => {
-    const newNotif: Notification = {
-      id: Math.random().toString(36).substring(2, 9),
-      title,
-      message,
-      type,
-      timestamp: new Date(),
-      txHash,
-    };
-    setNotifications(prev => [newNotif, ...prev].slice(0, 15));
-    if (!skipToast) setActiveToasts(prev => [...prev, newNotif]);
   };
 
   const clearNotifications = () => setNotifications([]);

@@ -8,7 +8,7 @@ import { useChainId, useSwitchChain } from 'wagmi';
 import { flare, flareTestnet } from 'wagmi/chains';
 import { useApp } from '@/providers/app-provider';
 import { ADD_CHAIN_PARAMS } from '@/lib/networkParams';
-import { Bell, Wallet, ShieldAlert, ShieldCheck, ChevronDown, Menu, X, Check, ArrowRight, CheckCircle2, XCircle, AlertTriangle, Info, ExternalLink } from 'lucide-react';
+import { Bell, Wallet, ShieldCheck, ChevronDown, Menu, X, Check, CheckCircle2, XCircle, AlertTriangle, Info, ExternalLink } from 'lucide-react';
 import { formatAddress } from '@/lib/utils';
 import { AnimatedButton } from '@/components/ui/animated-button';
 import { UmbraLogo } from '@/components/shared/logo';
@@ -32,7 +32,6 @@ export const Navbar: React.FC = () => {
   const pathname = usePathname();
   const {
     isEntered,
-    setIsEntered,
     isWalletConnected,
     walletAddress,
     connectWallet,
@@ -115,16 +114,9 @@ export const Navbar: React.FC = () => {
               whileHover={{ scale: 1.05, rotate: -2 }}
               transition={{ type: "spring", stiffness: 300, damping: 20 }}
             >
-              <a
-                href="/"
-                className="flex items-center gap-2"
-                onClick={(e) => {
-                  e.preventDefault();
-                  window.location.replace('/');
-                }}
-              >
+              <Link href="/" className="flex items-center gap-2">
                 <UmbraLogo size={32} />
-              </a>
+              </Link>
             </motion.div>
 
             {/* Desktop Navigation Links */}

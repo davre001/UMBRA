@@ -34,7 +34,13 @@ function orderBody(overrides: Record<string, unknown>) {
  */
 let existingLeafIndex = 0;
 
+// Needs a funded PRIVATE_KEY — no-ops in CI (GitHub Actions sets
+// process.env.CI automatically), same call this repo already makes
+// elsewhere. The two tests that depend on existingLeafIndex/live chain
+// state are skipped below; the two that don't (pure request-validation,
+// 404 handling) still run.
 beforeAll(async () => {
+  if (process.env.CI) return;
   const nextLeafIndex = await publicClient.readContract({
     address: CONTRACTS.ShieldedVault as `0x${string}`,
     abi: SHIELDED_VAULT_ABI,
@@ -74,7 +80,7 @@ describe("dark-engine routes", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rests an order with no compatible counterparty", async () => {
+  it.skipIf(!!process.env.CI)("rests an order with no compatible counterparty", async () => {
     const res = await request(app).post("/api/dark-engine/orders").send(orderBody({ commitment: "0xaa", leafIndex: existingLeafIndex }));
     expect(res.status).toBe(201);
     expect(res.body.status).toBe("resting");
@@ -83,7 +89,7 @@ describe("dark-engine routes", () => {
     expect(list.body.orders.some((o: { commitment: string }) => o.commitment === "0xaa")).toBe(true);
   });
 
-  it(
+  it.skipIf(!!process.env.CI)(
     "matches a compatible, realistically-priced order against a real resting one and assembles real proof inputs",
     async () => {
       // "0xaa" (submitted earlier, still resting) is compatible by asset/

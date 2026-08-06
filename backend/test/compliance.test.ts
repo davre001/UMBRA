@@ -13,7 +13,10 @@ describe("compliance routes", () => {
     expect(res.status).toBe(400);
   });
 
-  it(
+  // Needs a funded PRIVATE_KEY — skipped in CI (GitHub Actions sets process.env.CI
+  // automatically), same "no funded key reachable by every push/PR" call this
+  // repo already makes elsewhere. Still runs locally with `npm test`.
+  it.skipIf(!!process.env.CI)(
     "screens a real address on-chain and reflects it back on read",
     async () => {
       const address = "0xc25565154630860aE48B9C94c9704Bf04ee6808b";

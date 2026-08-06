@@ -1,19 +1,27 @@
 import type { Metadata } from "next";
-import { Inter, Space_Grotesk } from "next/font/google";
+import localFont from "next/font/local";
 import { Providers } from "@/providers/providers";
 import { WebGLBackground } from "@/components/shared/web-gl-background";
 import "./globals.css";
 
-const inter = Inter({
+// Vendored locally rather than fetched from Google at build time (see
+// fonts/ in this directory) — a build-time network fetch is a fragility a
+// CI/Vercel build shouldn't depend on. Same latin-subset glyph coverage and
+// weights (300/400/500/600) the previous next/font/google config used;
+// Inter's own latin subset ships as one variable-weight file rather than
+// four separate static ones, which is what Google itself now serves.
+const inter = localFont({
+  src: "./fonts/Inter-Variable.woff2",
   variable: "--font-inter",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600"],
+  weight: "300 400 500 600",
+  display: "swap",
 });
 
-const spaceGrotesk = Space_Grotesk({
+const spaceGrotesk = localFont({
+  src: "./fonts/SpaceGrotesk-Bold.woff2",
   variable: "--font-space-grotesk",
-  subsets: ["latin"],
-  weight: ["700"],
+  weight: "700",
+  display: "swap",
 });
 
 export const metadata: Metadata = {

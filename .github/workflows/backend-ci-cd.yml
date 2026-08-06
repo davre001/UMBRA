@@ -11,12 +11,16 @@ name: Backend CI/CD
 # gets reconnected in Render's dashboard, both it and this workflow would
 # trigger a deploy per push — redundant but harmless, just a wasted build.
 #
-# `npm test` is deliberately NOT run here: the backend's test suite submits
-# real transactions against live Coston2 (shield deposits, compliance
-# screening, etc.) using a funded operator key, so it needs that key as
-# PRIVATE_KEY to run at all. Wiring a funded key into CI — reachable by
-# every push/PR — was a deliberate call not to make; run `npm test` locally
-# instead, same as before this workflow existed.
+# `npm test` DOES run here, but not the whole suite: a handful of tests
+# submit real transactions against live Coston2 (shield deposits, compliance
+# screening, a real relayed withdraw) using a funded operator key. Wiring a
+# funded key into CI — reachable by every push/PR — is still a deliberate
+# call not to make, so those specific tests self-skip via `it.skipIf(process.env.CI)`
+# (GitHub Actions sets that automatically) rather than needing a separate
+# script or file-level exclusion — see compliance.test.ts, dark-engine.test.ts,
+# and relayer.test.ts for exactly which ones and why. Everything else
+# (including read-only live FTSOv2 lookups, which need no secret) runs for
+# real, same as `npm test` locally.
 
 on:
   push:
@@ -48,6 +52,7 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+      - run: npm test
 
   deploy:
     name: Deploy to Render

@@ -4,6 +4,17 @@ import { useEffect, useRef } from "react"
 import * as THREE from "three"
 import { useApp } from "@/providers/app-provider"
 
+interface ShaderUniforms {
+  [key: string]: THREE.IUniform
+  resolution: { value: [number, number] }
+  time: { value: number }
+  xScale: { value: number }
+  yScale: { value: number }
+  distortion: { value: number }
+  brightness: { value: number }
+  targetBrightness: { value: number }
+}
+
 export function WebGLShader() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const { isEntered } = useApp()
@@ -12,7 +23,7 @@ export function WebGLShader() {
     camera: THREE.OrthographicCamera | null
     renderer: THREE.WebGLRenderer | null
     mesh: THREE.Mesh | null
-    uniforms: any
+    uniforms: ShaderUniforms | null
     animationId: number | null
   }>({
     scene: null,
@@ -155,6 +166,11 @@ export function WebGLShader() {
       }
       refs.renderer?.dispose()
     }
+  // isEntered is only read here for the *initial* brightness/targetBrightness
+  // values at scene creation — the effect above keeps them in sync on every
+  // later change without needing this one to re-run. Adding it here would
+  // tear down and rebuild the whole WebGL scene/canvas on every toggle.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (

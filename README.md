@@ -24,6 +24,28 @@ settlement followed the rules.
 
 ---
 
+## Submission
+
+Built for [Flare Summer Signal](https://dorahacks.io/hackathon/flaresummersignal/detail) —
+submitted under **Bounty 2 (Confidential Compute Apps)** and **Bounty 1
+(Interoperable Asset Products)**. Umbra's privacy comes from client-side ZK
+proofs and on-chain encryption rather than a TEE, so it's a better literal
+fit for Bounty 1 (an FXRP/FAssets DeFi integration); it's submitted under
+Bounty 2 as well because its actual product shape — a confidential
+orderbook with a secure, verifiably-correct matching engine — is exactly
+what that track's own eligible-directions list describes.
+
+| | |
+| --- | --- |
+| Target user | Privacy-conscious DeFi traders on Flare who want to swap or pay FAssets without broadcasting balances, orders, and counterparties on a public chain |
+| Demo | *(video link — TBD)* |
+| Live app | [umbra-flare.vercel.app](https://umbra-flare.vercel.app/) · [Testing guide](./TESTING.md) |
+| Deployed on | Flare **Coston2** testnet — see [Deployed Contracts](https://docs-umbra.vercel.app/reference/contracts) |
+| How it uses Flare | FAssets (FXRP) as the traded/paid asset, FTSOv2 for live matching-rate pricing, Coston2 for every write (proof-gated `ShieldedVault`, `StealthAnnouncer`, `PrivacyKeyRegistry`, `OwnerKeyRegistry`, `ComplianceRegistry`) — see [Architecture](#architecture) and [Built on](#how-it-works) |
+| What's newly built | Everything — first commit `2026-07-28`, within this hackathon's development window. No pre-existing codebase. |
+
+See [Roadmap](#roadmap) for what's next.
+
 ## Contents
 
 - [What stays private](#what-stays-private)
@@ -34,6 +56,7 @@ settlement followed the rules.
 - [Backend](#backend)
 - [Frontend](#frontend)
 - [Status](#status)
+- [Roadmap](#roadmap)
 - [License](#license)
 
 ## What stays private
@@ -96,7 +119,7 @@ for the guided version.
 | Chain | Flare (Coston2 testnet) |
 | ZK circuits | [Noir](https://noir-lang.org/), compiled to WASM, proven client-side with Barretenberg |
 | Pricing | Flare Time Series Oracle (FTSOv2) |
-| Compliance | Flare Data Connector (FDC) — on-chain address screening |
+| Compliance | `ComplianceRegistry` gates `withdraw()` today via a disclosed `ATTESTER_ROLE` placeholder, not FDC yet — see [Roadmap](#roadmap) |
 | Assets | FAssets (FXRP, and more) |
 
 ## Architecture
@@ -229,6 +252,24 @@ Umbra runs on the **Flare Coston2 testnet** — no real funds are at risk. See
 [Deployed Contracts](https://docs-umbra.vercel.app/reference/contracts) for
 live addresses, and [Getting Started](https://docs-umbra.vercel.app/getting-started)
 to make your first shielded deposit.
+
+## Roadmap
+
+- **Real FDC compliance verification.** `ComplianceRegistry.screen()` is
+  currently gated by `ATTESTER_ROLE` — a disclosed placeholder, not a real
+  attestation. Shipping this for real means swapping that access check for
+  on-chain verification of a Flare Data Connector `JsonApi`/`Web2Json`
+  attestation proof (sanctions status isn't a native FDC fact type, so it
+  needs a real, independently-fetchable data source behind that attestation
+  too), which turns `screen()` from a synchronous call into a submit → wait
+  for the FDC voting round → fetch proof → verify flow. `isScreened()` and
+  everything downstream in `ShieldedVault` needs no change when this lands.
+- **Hide the Pay sender, not just the recipient.** `pay()`'s `announce()`
+  call is submitted directly by the sender's own wallet, so `caller` on that
+  event is still visible even though `stealthAddress` is now a one-time tag
+  (see [What stays private](#what-stays-private)). Routing that call through
+  the existing relayer would close this, at the cost of making that one step
+  depend on backend uptime instead of being fully client-side.
 
 ## License
 

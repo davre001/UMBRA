@@ -9,9 +9,19 @@ import { pricingRouter } from "./pricing/pricing.routes";
 import { complianceRouter } from "./compliance/compliance.routes";
 import { relayerRouter } from "./relayer/relayer.routes";
 
+// Same defaults documented in .env.example — the deployed frontend plus
+// local dev, not `cors()`'s wide-open default (which reflected any Origin
+// header back, letting any site's browser JS call the relayer/compliance
+// endpoints on a visitor's behalf).
+const DEFAULT_FRONTEND_ORIGINS = ["https://umbra-flare.vercel.app", "http://localhost:3000"];
+const allowedOrigins = (process.env.FRONTEND_ORIGINS ?? DEFAULT_FRONTEND_ORIGINS.join(","))
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 export function createApp() {
   const app = express();
-  app.use(cors());
+  app.use(cors({ origin: allowedOrigins }));
   app.use(express.json());
 
   // One line per request (method, path, status, response time), plus a

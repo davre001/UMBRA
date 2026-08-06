@@ -15,7 +15,7 @@
     "ComplianceRegistry": "0xC9192Ecaf662c977B28c614e49F558AAAB832577",
     "StealthAnnouncer": "0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1",
     "OwnerKeyRegistry": "0x48C77021624f7b4baC092570CDD56EB163eC3e71",
-    "PrivacyKeyRegistry": "0xCE49ab341F1E578Cc86264E83e9dbb6ACD3d6d5A"
+    "PrivacyKeyRegistry": "0x8107172F8078c965bC9F334fD0bFefB2cFFAe275"
   },
   "assets": {
     "C2FLR": { "assetId": 0, "native": true, "decimals": 18 },

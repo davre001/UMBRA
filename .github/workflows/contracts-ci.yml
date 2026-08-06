@@ -1,0 +1,39 @@
+name: Contracts CI
+
+# Compiles and tests the Solidity contracts + generated verifiers against a
+# local, ephemeral Hardhat network — not live Coston2. No secrets needed:
+# hardhat.test.ts's real Noir/UltraHonk proof tests use committed fixtures
+# (contract/circuits/noir/*/fixtures/) rather than proving anything fresh,
+# so this needs no proving toolchain either, just the compiled contracts.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "contract/**"
+      - ".github/workflows/contracts-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "contract/**"
+      - ".github/workflows/contracts-ci.yml"
+
+jobs:
+  test:
+    name: Compile & Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contract
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: contract/package-lock.json
+
+      - run: npm ci
+      - run: npx hardhat compile
+      - run: npx hardhat test

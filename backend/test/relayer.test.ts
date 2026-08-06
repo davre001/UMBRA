@@ -46,7 +46,11 @@ describe("relayer routes", () => {
   describe(
     "real end-to-end: shield, screen, relay withdraw",
     () => {
+      // Needs a funded PRIVATE_KEY — no-ops in CI (GitHub Actions sets
+      // process.env.CI automatically) so this describe block's one real test
+      // (skipped below) doesn't fail on a beforeAll that never got to run.
       beforeAll(async () => {
+        if (process.env.CI) return;
         const wallet = getWalletClient();
         const account = wallet.account!;
 
@@ -66,7 +70,7 @@ describe("relayer routes", () => {
         await request(app).post("/api/compliance/screen").send({ address: WITHDRAW_RECIPIENT });
       }, 60_000);
 
-      it(
+      it.skipIf(!!process.env.CI)(
         "relays a real withdraw using the committed fixture proof",
         async (ctx) => {
           const { proof, publicInputs } = loadWithdrawFixture();

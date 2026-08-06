@@ -41,4 +41,24 @@ describe("PrivacyKeyRegistry", () => {
     await registry.connect(alice).register(secondKey);
     expect(await registry.privacyKeyOf(alice.address)).to.equal(secondKey);
   });
+
+  it("rejects a key shorter than 33 bytes", async () => {
+    const tooShort = "0x02" + "11".repeat(31); // 32 bytes
+    await expect(registry.connect(alice).register(tooShort))
+      .to.be.revertedWithCustomError(registry, "InvalidKeyLength")
+      .withArgs(32);
+  });
+
+  it("rejects a key longer than 33 bytes", async () => {
+    const tooLong = "0x02" + "11".repeat(33); // 34 bytes
+    await expect(registry.connect(alice).register(tooLong))
+      .to.be.revertedWithCustomError(registry, "InvalidKeyLength")
+      .withArgs(34);
+  });
+
+  it("rejects an empty key", async () => {
+    await expect(registry.connect(alice).register("0x"))
+      .to.be.revertedWithCustomError(registry, "InvalidKeyLength")
+      .withArgs(0);
+  });
 });
