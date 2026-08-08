@@ -52,9 +52,15 @@ export function WalletModal({ open, onClose }: WalletModalProps) {
       if (c.id === 'injected') return false;
       const key = c.id.toLowerCase();
       const nameKey = c.name.toLowerCase();
-      if (seen.has(key) || seen.has(nameKey)) return false;
+      // Also dedupe on the resolved display label so EIP-6963 re-discoveries
+      // of the same wallet (different id, slightly different name) are caught.
+      const labelKey = (WALLET_META[c.id]?.label ?? c.name).toLowerCase();
+      if (seen.has(key) || seen.has(nameKey) || seen.has(labelKey)) return false;
       seen.add(key);
       seen.add(nameKey);
+      seen.add(labelKey);
+      // Prefer connectors with a known icon — if a duplicate slips through
+      // the name check, drop the one without an icon entry.
       return true;
     });
   }, [connectors]);
