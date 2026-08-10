@@ -3,7 +3,7 @@
   "chainId": 114,
   "rpcUrl": "https://flare-testnet.drpc.org",
   "deployer": "0x2d671A0D877B206fcd7A103335ee8173f50A1d06",
-  "deployBlock": 33478628,
+  "deployBlock": 33886500,
   "contracts": {
     "Poseidon2_BN254": "0x94d22070FfDB39a9dAEc0a9B5b367111e74dF071",
     "WithdrawHonkVerifier": "0xa3410943004c2b537C48e76F8A9eeE8aA71df40c",
@@ -11,7 +11,8 @@
     "PlaceOrderHonkVerifier": "0xbdB988FBc849499bcdF42951FD67792357B34d2D",
     "CancelOrderHonkVerifier": "0xcBa1edd6b9D9f799BF172C14803CB14b89715Dd7",
     "MatchOrdersHonkVerifier": "0x22A3B97BA38013BA44B91a9baE72094A751a318A",
-    "ShieldedVault": "0xf3eEc625ef0AB89c2396a6e62Cc84E3d15f0Cdc7",
+    "BtcDepositHonkVerifier": "0xE9C7Ff4c7BaB9C5A7902465864d27b3c46CCE7c8",
+    "ShieldedVault": "0x8167C01A2F30BA047d258E73bab81d18bacc16ED",
     "ComplianceRegistry": "0xC9192Ecaf662c977B28c614e49F558AAAB832577",
     "StealthAnnouncer": "0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1",
     "OwnerKeyRegistry": "0x48C77021624f7b4baC092570CDD56EB163eC3e71"
@@ -21,5 +22,5 @@
     "FXRP": { "assetId": 1, "token": "0x0b6A3645c240605887a5532109323A3E12273dc7", "decimals": 6 },
     "USDT0": { "assetId": 2, "token": "0xC1A5B41512496B80903D1f32d6dEa3a73212E71F", "decimals": 6 }
   },
-  "note": "Redeployed so shield()/withdraw() hold/pay native C2FLR directly for assetId 0 instead of requiring a separate wrapped-token contract (the app never exposed a wrap button, so shielded balances for that wrapped token silently never reflected faucet-collected C2FLR). No circuit changed — assetId/amount are opaque Field values regardless of what backs them on-chain — so this reuses all 5 existing verifiers plus Poseidon2/ComplianceRegistry/StealthAnnouncer/OwnerKeyRegistry (targeted redeploy — see contract/scripts/redeploy-vault-only.ts), only ShieldedVault itself is new. No wrapped-token contract is used anywhere in this stack. Earlier addresses in this file's history are stale."
+  "note": "Redeployed for BTC deposit support: ShieldedVault gained ExternalDeposit/depositExternal/checkpoints/isExternalSourceAsset and withdraw()'s external-source branch (see contracts/ShieldedVault.sol), and BtcDepositHonkVerifier was deployed for the first time (contract/circuits/noir/btc_deposit). No other circuit changed, so this reuses all 5 existing verifiers plus Poseidon2/ComplianceRegistry/StealthAnnouncer/OwnerKeyRegistry (targeted redeploy — see contract/scripts/redeploy-vault-btc.ts). checkpoints[BTC_SIGNET_SOURCE_CHAIN_ID] is still unset — run scripts/refresh-btc-checkpoint.ts before any BTC deposit can be proven. deployBlock updated to this vault's actual deployment (Coston2 block ~33886579, using a small safety margin before it). Earlier addresses in this file's history are stale."
 }

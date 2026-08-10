@@ -21,7 +21,9 @@ relayerRouter.post("/relay", relayRateLimit, async (req, res, next) => {
   try {
     const { action, args } = req.body ?? {};
     if (!isRelayableAction(action) || !Array.isArray(args)) {
-      res.status(400).json({ error: "Expected { action: 'withdraw'|'pay'|'placeOrder'|'cancelOrder', args: [...] }" });
+      res
+        .status(400)
+        .json({ error: "Expected { action: 'withdraw'|'pay'|'placeOrder'|'cancelOrder'|'depositExternal', args: [...] }" });
       return;
     }
     const relayTxHash = await relay(action, args);

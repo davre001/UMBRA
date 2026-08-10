@@ -132,3 +132,50 @@ export async function screenAddress(address: string): Promise<ScreenAddressResul
   }
   return res.json();
 }
+
+export interface BtcDepositSubmitResult {
+  id: string;
+  status: "awaiting_proof" | "proven" | "failed";
+  ownerKey: string;
+  amountSats: string;
+}
+
+/**
+ * Submits a confirmed BTC signet deposit (see contract/circuits/
+ * BTC_DEPOSIT_DESIGN.md's fixed OP_RETURN+P2WPKH template) for proving.
+ * `blinding` should come from `noteWallet.prepareDepositNote` — same
+ * deterministic, recoverable derivation shield() deposits already use —
+ * not a throwaway random value, so this note can be recovered later the
+ * same way a shielded ERC20 deposit can.
+ */
+export async function submitBtcDeposit(txid: string, blinding: string): Promise<BtcDepositSubmitResult> {
+  const res = await fetch(`${API_URL}/api/btc-deposit/submit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ txid, blinding }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Submitting BTC deposit failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export interface BtcDepositStatus {
+  id: string;
+  status: "awaiting_proof" | "proven" | "failed";
+  txid: string;
+  ownerKey: string;
+  amountSats: string;
+  /** [checkpointCommitment, noteCommitment, nullifier] — set once status is "proven". */
+  publicInputs?: [string, string, string];
+  proof?: `0x${string}`;
+  failureReason?: string;
+}
+
+/** Polls a submitted BTC deposit's proving status — see `frontend/src/app/deposit-btc/page.tsx`'s TanStack Query usage. */
+export async function fetchBtcDepositStatus(id: string): Promise<BtcDepositStatus> {
+  const res = await fetch(`${API_URL}/api/btc-deposit/${id}`);
+  if (!res.ok) throw new Error(`Fetching BTC deposit status failed: ${res.status}`);
+  return res.json();
+}

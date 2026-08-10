@@ -144,12 +144,44 @@ export const SHIELDED_VAULT_ABI = [
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "provided",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "expected",
+        "type": "bytes32"
+      }
+    ],
+    "name": "StaleCheckpoint",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "root",
         "type": "uint256"
       }
     ],
     "name": "UnknownRoot",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "verifier",
+        "type": "address"
+      }
+    ],
+    "name": "UnknownVerifier",
     "type": "error"
   },
   {
@@ -182,12 +214,118 @@ export const SHIELDED_VAULT_ABI = [
     "inputs": [
       {
         "indexed": true,
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "checkpointRoot",
+        "type": "bytes32"
+      }
+    ],
+    "name": "CheckpointUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "address",
         "name": "registry",
         "type": "address"
       }
     ],
     "name": "ComplianceRegistryUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "nullifier",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "noteCommitment",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint32",
+        "name": "leafIndex",
+        "type": "uint32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "newRoot",
+        "type": "uint256"
+      }
+    ],
+    "name": "ExternalDeposited",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "assetId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "isExternal",
+        "type": "bool"
+      }
+    ],
+    "name": "ExternalSourceAssetUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "assetId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "nullifierHash",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "destination",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "ExternalWithdrawalRequested",
     "type": "event"
   },
   {
@@ -449,6 +587,25 @@ export const SHIELDED_VAULT_ABI = [
     "inputs": [
       {
         "indexed": true,
+        "internalType": "address",
+        "name": "verifier",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bool",
+        "name": "trusted",
+        "type": "bool"
+      }
+    ],
+    "name": "VerifierTrustUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "uint256",
         "name": "assetId",
         "type": "uint256"
@@ -588,6 +745,25 @@ export const SHIELDED_VAULT_ABI = [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "checkpoints",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
     "inputs": [],
     "name": "complianceRegistry",
     "outputs": [
@@ -611,6 +787,51 @@ export const SHIELDED_VAULT_ABI = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "contract IUltraHonkVerifier",
+        "name": "verifier",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes",
+        "name": "proof",
+        "type": "bytes"
+      },
+      {
+        "components": [
+          {
+            "internalType": "bytes32",
+            "name": "sourceChainId",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "checkpointRoot",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "noteCommitment",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "nullifier",
+            "type": "bytes32"
+          }
+        ],
+        "internalType": "struct ExternalDeposit",
+        "name": "deposit",
+        "type": "tuple"
+      }
+    ],
+    "name": "depositExternal",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -715,6 +936,25 @@ export const SHIELDED_VAULT_ABI = [
       }
     ],
     "name": "isAllowedAsset",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "name": "isExternalSourceAsset",
     "outputs": [
       {
         "internalType": "bool",
@@ -999,12 +1239,66 @@ export const SHIELDED_VAULT_ABI = [
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "checkpointRoot",
+        "type": "bytes32"
+      }
+    ],
+    "name": "setCheckpoint",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "address",
         "name": "registry",
         "type": "address"
       }
     ],
     "name": "setComplianceRegistry",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "assetId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "isExternal",
+        "type": "bool"
+      }
+    ],
+    "name": "setExternalSourceAsset",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "verifier",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "trusted",
+        "type": "bool"
+      }
+    ],
+    "name": "setTrustedVerifier",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1041,6 +1335,25 @@ export const SHIELDED_VAULT_ABI = [
       }
     ],
     "name": "supportsInterface",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "name": "trustedVerifiers",
     "outputs": [
       {
         "internalType": "bool",

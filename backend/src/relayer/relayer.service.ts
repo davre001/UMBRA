@@ -16,6 +16,15 @@ const RELAYABLE_ACTIONS = {
   pay: { functionName: "pay" as const, argCount: 5 },
   placeOrder: { functionName: "placeOrder" as const, argCount: 4 },
   cancelOrder: { functionName: "cancelOrder" as const, argCount: 4 },
+  // (verifier, proof, deposit) — deposit is a single ExternalDeposit
+  // struct/tuple argument, same reasoning as every other action here: the
+  // ZK proof itself is the authorization, not a signature, so this wallet
+  // can submit on the depositor's behalf without ever needing theirs. See
+  // circuits/BTC_DEPOSIT_DESIGN.md's "proof construction is permissionless"
+  // note — unlike the other relayed actions, ANYONE could construct this
+  // proof, not just the depositor, but the resulting note is still only
+  // ever owned by the owner_key embedded in the real Bitcoin transaction.
+  depositExternal: { functionName: "depositExternal" as const, argCount: 3 },
 };
 
 export type RelayableAction = keyof typeof RELAYABLE_ACTIONS;

@@ -1,0 +1,13 @@
+[package]
+name = "btc_deposit"
+type = "bin"
+authors = [""]
+
+[dependencies]
+umbra_lib = { path = "../lib" }
+poseidon = { tag = "v0.3.0", git = "https://github.com/noir-lang/poseidon" }
+# The plan's originally-cited v0.1.0 tag doesn't compile against this repo's
+# nargo (1.0.0-beta.22) — confirmed empirically by trying it, same class of
+# mismatch this repo already hit with poseidon's v0.1.1 tag (see
+# circuits/README.md). v0.3.0 compiles and passes the smoke test below.
+sha256 = { tag = "v0.3.0", git = "https://github.com/noir-lang/sha256" }

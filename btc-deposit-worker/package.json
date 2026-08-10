@@ -1,0 +1,24 @@
+{
+  "name": "umbra-btc-deposit-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone btc_deposit proving worker — deliberately NOT part of the backend/ deployment (same reasoning as matcher-worker/, see its own README) and NOT matcher-worker's own EventBridge-scheduled Lambda (wrong cadence — BTC deposits have no matching/batching reason to wait for a scheduled tick the way match_orders does). Run this wherever you have real compute for Noir/Barretenberg proving; it talks to a running backend over HTTP.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc",
+    "sync-circuit": "node scripts/sync-circuit.js",
+    "package-lambda": "npm run build && npm run sync-circuit && node scripts/package-lambda.js",
+    "deploy-lambda": "bash scripts/deploy-lambda.sh"
+  },
+  "dependencies": {
+    "@aztec/bb.js": "5.0.0-nightly.20260522",
+    "@noir-lang/noir_js": "1.0.0-beta.22",
+    "@zkpassport/poseidon2": "^0.6.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}
