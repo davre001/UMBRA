@@ -6,6 +6,8 @@
 [![Docs](https://img.shields.io/badge/docs-umbra-blueviolet)](https://docs-umbra.vercel.app/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
+**PROBLEM WE SOLVE**
+
 Public blockchains publish every trade — what you hold, what you traded, and
 who you traded with. That's exactly the information that makes front-running
 and MEV extraction possible. Umbra keeps balances, orders, and counterparties
