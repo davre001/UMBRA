@@ -41,7 +41,7 @@ import { tokenIcon, networkIcon, SUPPORTED_CHAINS } from '@/lib/icons';
 import { formatAddress } from '@/lib/utils';
 
 const FLARE_FAUCET_URL = 'https://faucet.flare.network/';
-const SIGNET_FAUCET_URL = 'https://signetfaucet.com/';
+const SIGNET_FAUCET_URL = 'https://faucet.coinbin.org/';
 const COSTON2_CHAIN_ID = 114;
 
 // These are real assets minted by Flare's own Coston2 faucet — we deep-link
