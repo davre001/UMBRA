@@ -64,6 +64,7 @@ async function main() {
   const placeOrderVerifier = await deployHonkVerifier("PlaceOrderHonkVerifier", "PlaceOrderRelationsLib", "PlaceOrderZKTranscriptLib");
   const cancelOrderVerifier = await deployHonkVerifier("CancelOrderHonkVerifier", "CancelOrderRelationsLib", "CancelOrderZKTranscriptLib");
   const matchOrdersVerifier = await deployHonkVerifier("MatchOrdersHonkVerifier", "MatchOrdersRelationsLib", "MatchOrdersZKTranscriptLib");
+  const btcDepositVerifier = await deployHonkVerifier("BtcDepositHonkVerifier", "BtcDepositRelationsLib", "BtcDepositZKTranscriptLib");
 
   const Vault = await ethers.getContractFactory("ShieldedVault");
   const vault = await Vault.deploy(
@@ -102,6 +103,30 @@ async function main() {
   await (await vault.setComplianceRegistry(await compliance.getAddress())).wait();
   await (await compliance.grantRole(await compliance.ATTESTER_ROLE(), attesterAddress)).wait();
 
+  // depositExternal (BTC) — trust the verifier now; the checkpoint itself
+  // (checkpoints[BTC_SIGNET_SOURCE_CHAIN_ID]) is deliberately NOT set here.
+  // It needs a real, currently-recent signet header's checkpoint_commitment
+  // (bitcoin::checkpoint_commitment — see circuits/BTC_DEPOSIT_DESIGN.md),
+  // which only makes sense to fetch/compute at the time BTC deposits go
+  // live, not baked into this deploy script as a stale value. Register it
+  // separately via vault.setCheckpoint(sourceChainId, checkpointRoot) once
+  // Phase 6's data-sourcing tooling exists.
+  const BTC_SIGNET_SOURCE_CHAIN_ID = ethers.keccak256(ethers.toUtf8Bytes("BTC_SIGNET"));
+  const BTC_ASSET_ID = 999; // must match contract/circuits/noir/btc_deposit/src/bitcoin.nr's BTC_ASSET_ID exactly
+  await (await vault.setTrustedVerifier(await btcDepositVerifier.getAddress(), true)).wait();
+  console.log(`Trusted BtcDepositHonkVerifier for depositExternal (sourceChainId ${BTC_SIGNET_SOURCE_CHAIN_ID}).`);
+  console.log("NOTE: checkpoints[BTC_SIGNET_SOURCE_CHAIN_ID] is still unset — BTC deposits will revert with");
+  console.log("StaleCheckpoint until vault.setCheckpoint(...) is called with a real signet checkpoint commitment.");
+
+  // Enforced, not just a documentation convention: withdraw() reverts
+  // unconditionally for this assetId from here on — no real EVM-side
+  // collateral is ever locked for a BTC-sourced note (see
+  // isExternalSourceAsset's own NatSpec on ShieldedVault.sol). This must
+  // run before BTC_ASSET_ID could ever also be passed to setAsset(...,
+  // true) below — it isn't here, but the guard holds regardless of order.
+  await (await vault.setExternalSourceAsset(BTC_ASSET_ID, true)).wait();
+  console.log(`Marked assetId ${BTC_ASSET_ID} (BTC) as external-source — withdraw() will always revert for it.`);
+
   await (await vault.setAsset(NATIVE_ASSET_ID, ethers.ZeroAddress, true)).wait();
   console.log(`Allowlisted assetId ${NATIVE_ASSET_ID}: native C2FLR`);
 
@@ -122,6 +147,7 @@ async function main() {
     PlaceOrderHonkVerifier: await placeOrderVerifier.getAddress(),
     CancelOrderHonkVerifier: await cancelOrderVerifier.getAddress(),
     MatchOrdersHonkVerifier: await matchOrdersVerifier.getAddress(),
+    BtcDepositHonkVerifier: await btcDepositVerifier.getAddress(),
     ShieldedVault: await vault.getAddress(),
     ComplianceRegistry: await compliance.getAddress(),
     StealthAnnouncer: await announcer.getAddress(),

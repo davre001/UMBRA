@@ -1,13 +1,14 @@
 {
   "chainId": 114,
   "rpcUrl": "https://flare-testnet.drpc.org",
-  "deployBlock": 33478628,
-  "vault": "0xf3eEc625ef0AB89c2396a6e62Cc84E3d15f0Cdc7",
+  "deployBlock": 33886500,
+  "vault": "0x8167C01A2F30BA047d258E73bab81d18bacc16ED",
   "compliance": "0xC9192Ecaf662c977B28c614e49F558AAAB832577",
   "ownerKeyRegistry": "0x48C77021624f7b4baC092570CDD56EB163eC3e71",
   "stealthAnnouncer": "0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1",
   "batchWithdrawer": "0x4E90ECc46d47FF8B8a13F5396931838b256A3fC1",
   "privacyKeyRegistry": "0x8107172F8078c965bC9F334fD0bFefB2cFFAe275",
+  "btcDepositVerifier": "0xE9C7Ff4c7BaB9C5A7902465864d27b3c46CCE7c8",
   "assets": {
     "C2FLR": { "assetId": 0, "native": true, "decimals": 18 },
     "FXRP": { "assetId": 1, "token": "0x0b6A3645c240605887a5532109323A3E12273dc7", "decimals": 6 },

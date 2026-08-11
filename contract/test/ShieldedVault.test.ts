@@ -15,7 +15,7 @@ import { ShieldedVault, ComplianceRegistry, MockERC20 } from "../typechain-types
 // same commitment, so the resulting on-chain root lines up.
 const NOIR_DIR = path.join(__dirname, "../circuits/noir");
 function loadFixture(
-  circuit: "withdraw" | "pay" | "place_order" | "cancel_order" | "match_orders",
+  circuit: "withdraw" | "pay" | "place_order" | "cancel_order" | "match_orders" | "btc_deposit",
   pubCount: number
 ) {
   const fixtures = path.join(NOIR_DIR, circuit, "fixtures");
@@ -44,6 +44,13 @@ const PAY_ASSET_ID = 1n;
 const PLACE_ORDER_COMMITMENT = "0x129c6250bd178cae0c407b4120f70582f3a12166d20f40f3182b62aca8a0348e";
 const PLACE_ORDER_AMOUNT = 450n;
 const PLACE_ORDER_ASSET_ID = 1n;
+
+// Opaque namespace tag for depositExternal's sourceChainId — this is a
+// ShieldedVault-side bookkeeping key only, not read by the circuit itself
+// (see circuits/BTC_DEPOSIT_DESIGN.md's "Public-input interface" section
+// and ShieldedVault.sol's setTrustedVerifier doc for why the checkpoint
+// commitment equality check, not this tag, is what does the real work).
+const BTC_SIGNET_SOURCE_CHAIN_ID = ethers.keccak256(ethers.toUtf8Bytes("BTC_SIGNET"));
 
 async function deployHasher() {
   const Poseidon2 = await ethers.getContractFactory("Poseidon2_BN254");
@@ -75,6 +82,7 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
   let compliance: ComplianceRegistry;
   let admin: HardhatEthersSigner;
   let alice: HardhatEthersSigner;
+  let btcDepositVerifierAddress: string;
 
   beforeEach(async () => {
     [admin, alice] = await ethers.getSigners();
@@ -85,6 +93,8 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     const placeOrderVerifier = await deployHonkVerifier("PlaceOrderHonkVerifier", "PlaceOrderRelationsLib", "PlaceOrderZKTranscriptLib");
     const cancelOrderVerifier = await deployHonkVerifier("CancelOrderHonkVerifier", "CancelOrderRelationsLib", "CancelOrderZKTranscriptLib");
     const matchOrdersVerifier = await deployHonkVerifier("MatchOrdersHonkVerifier", "MatchOrdersRelationsLib", "MatchOrdersZKTranscriptLib");
+    const btcDepositVerifier = await deployHonkVerifier("BtcDepositHonkVerifier", "BtcDepositRelationsLib", "BtcDepositZKTranscriptLib");
+    btcDepositVerifierAddress = await btcDepositVerifier.getAddress();
 
     const Vault = await ethers.getContractFactory("ShieldedVault");
     vault = await Vault.deploy(
@@ -105,6 +115,7 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     await vault.connect(admin).setAsset(WITHDRAW_ASSET_ID, ethers.ZeroAddress, true);
     await vault.connect(admin).setAsset(PAY_ASSET_ID, await token.getAddress(), true);
     await token.mint(alice.address, ethers.parseEther("1000000"));
+    await vault.connect(admin).setTrustedVerifier(btcDepositVerifierAddress, true);
 
     const Compliance = await ethers.getContractFactory("ComplianceRegistry");
     compliance = await Compliance.deploy(admin.address);
@@ -220,6 +231,103 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     expect(event!.args.leafIndex).to.equal(1n);
     expect(event!.args.newRoot).to.not.equal(rootBefore, "root must change after inserting the order commitment");
     expect(await vault.currentRoot()).to.equal(event!.args.newRoot);
+    expect(await vault.isSpentNullifier(publicInputs[1])).to.equal(true);
+  });
+
+  it("mints a note from a real BTC deposit proof via depositExternal", async () => {
+    // btc_deposit fixture public inputs, in circuit-declared order:
+    // (checkpoint_commitment_pub, note_commitment, nullifier) — see
+    // circuits/BTC_DEPOSIT_DESIGN.md.
+    const { proof, publicInputs } = loadFixture("btc_deposit", 3);
+    const [checkpointRoot, noteCommitment, nullifier] = publicInputs;
+    await vault.connect(admin).setCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot);
+
+    const rootBefore = await vault.currentRoot();
+    const tx = await vault.depositExternal(btcDepositVerifierAddress, proof, {
+      sourceChainId: BTC_SIGNET_SOURCE_CHAIN_ID,
+      checkpointRoot,
+      noteCommitment,
+      nullifier,
+    });
+    const receipt = await tx.wait();
+    const event = receipt!.logs
+      .map((log) => { try { return vault.interface.parseLog(log); } catch { return null; } })
+      .find((parsed) => parsed?.name === "ExternalDeposited");
+
+    expect(event, "ExternalDeposited event must be emitted").to.not.be.undefined;
+    expect(event!.args.sourceChainId).to.equal(BTC_SIGNET_SOURCE_CHAIN_ID);
+    expect(event!.args.nullifier).to.equal(nullifier);
+    expect(event!.args.noteCommitment).to.equal(BigInt(noteCommitment));
+    expect(event!.args.newRoot).to.not.equal(rootBefore, "root must change after inserting the note commitment");
+    expect(await vault.currentRoot()).to.equal(event!.args.newRoot);
+    expect(await vault.isSpentNullifier(BigInt(nullifier))).to.equal(true);
+  });
+
+  it("depositExternal rejects a verifier that was never trusted", async () => {
+    const { proof, publicInputs } = loadFixture("btc_deposit", 3);
+    const [checkpointRoot, noteCommitment, nullifier] = publicInputs;
+    await vault.connect(admin).setCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot);
+
+    await expect(
+      vault.depositExternal(alice.address /* not a registered verifier */, proof, {
+        sourceChainId: BTC_SIGNET_SOURCE_CHAIN_ID,
+        checkpointRoot,
+        noteCommitment,
+        nullifier,
+      })
+    ).to.be.revertedWithCustomError(vault, "UnknownVerifier");
+  });
+
+  it("depositExternal rejects a checkpointRoot that doesn't match the registered checkpoint", async () => {
+    const { proof, publicInputs } = loadFixture("btc_deposit", 3);
+    const [checkpointRoot, noteCommitment, nullifier] = publicInputs;
+    // Deliberately not registering the real checkpoint — checkpoints[sourceChainId] stays its zero default.
+
+    await expect(
+      vault.depositExternal(btcDepositVerifierAddress, proof, {
+        sourceChainId: BTC_SIGNET_SOURCE_CHAIN_ID,
+        checkpointRoot,
+        noteCommitment,
+        nullifier,
+      })
+    ).to.be.revertedWithCustomError(vault, "StaleCheckpoint");
+  });
+
+  it("depositExternal rejects replaying the same nullifier", async () => {
+    const { proof, publicInputs } = loadFixture("btc_deposit", 3);
+    const [checkpointRoot, noteCommitment, nullifier] = publicInputs;
+    await vault.connect(admin).setCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot);
+    const deposit = { sourceChainId: BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot, noteCommitment, nullifier };
+
+    await vault.depositExternal(btcDepositVerifierAddress, proof, deposit);
+    await expect(vault.depositExternal(btcDepositVerifierAddress, proof, deposit)).to.be.revertedWithCustomError(
+      vault,
+      "NullifierAlreadySpent"
+    );
+  });
+
+  it("routes withdraw() to ExternalWithdrawalRequested for an assetId marked external-source, instead of transferring", async () => {
+    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
+    const { proof, publicInputs } = loadFixture("withdraw", 5);
+
+    // Artificially marks the *native* asset external-source purely to
+    // exercise the branch with a real proof (WITHDRAW_ASSET_ID isn't
+    // really BTC) — the contract's branch logic only checks
+    // isExternalSourceAsset[assetId], and the circuit itself doesn't know
+    // or care which branch withdraw() takes with its own opaque
+    // `recipient` public input (see withdraw()'s own NatSpec).
+    await vault.connect(admin).setExternalSourceAsset(WITHDRAW_ASSET_ID, true);
+
+    const before = await ethers.provider.getBalance(WITHDRAW_RECIPIENT);
+    const tx = vault.withdraw(proof, publicInputs[0], publicInputs[1], WITHDRAW_AMOUNT, WITHDRAW_ASSET_ID, WITHDRAW_RECIPIENT);
+
+    await expect(tx)
+      .to.emit(vault, "ExternalWithdrawalRequested")
+      .withArgs(WITHDRAW_ASSET_ID, publicInputs[1], WITHDRAW_RECIPIENT, WITHDRAW_AMOUNT);
+    await expect(tx).to.not.emit(vault, "Withdrawn");
+
+    // No native value moved — the entire point of this branch.
+    expect(await ethers.provider.getBalance(WITHDRAW_RECIPIENT)).to.equal(before);
     expect(await vault.isSpentNullifier(publicInputs[1])).to.equal(true);
   });
 

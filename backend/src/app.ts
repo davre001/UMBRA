@@ -8,6 +8,8 @@ import { darkEngineRouter } from "./dark-engine/dark-engine.routes";
 import { pricingRouter } from "./pricing/pricing.routes";
 import { complianceRouter } from "./compliance/compliance.routes";
 import { relayerRouter } from "./relayer/relayer.routes";
+import { btcDepositRouter } from "./btc-deposit/btc-deposit.routes";
+import { btcWithdrawalRouter } from "./btc-withdrawal/btc-withdrawal.routes";
 
 // Same defaults documented in .env.example — the deployed frontend plus
 // local dev, not `cors()`'s wide-open default (which reflected any Origin
@@ -52,6 +54,8 @@ export function createApp() {
   app.use("/api/pricing", pricingRouter);
   app.use("/api/compliance", complianceRouter);
   app.use("/api/relayer", relayerRouter);
+  app.use("/api/btc-deposit", btcDepositRouter);
+  app.use("/api/btc-withdrawal", btcWithdrawalRouter);
 
   app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     req.log.error({ err }, `Unhandled error on ${req.method} ${req.url}: ${err.message}`);

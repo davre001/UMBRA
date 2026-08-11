@@ -12,6 +12,8 @@ export const openapiSpec = {
     { name: "Pricing" },
     { name: "Compliance" },
     { name: "Relayer" },
+    { name: "BTC Deposit" },
+    { name: "BTC Withdrawal" },
   ],
   paths: {
     "/health": {
@@ -179,7 +181,7 @@ export const openapiSpec = {
                 type: "object",
                 required: ["action", "args"],
                 properties: {
-                  action: { type: "string", enum: ["withdraw", "pay", "placeOrder", "cancelOrder"] },
+                  action: { type: "string", enum: ["withdraw", "pay", "placeOrder", "cancelOrder", "depositExternal"] },
                   args: { type: "array", items: {}, description: "Positional args matching the vault function's signature" },
                 },
               },
@@ -190,6 +192,47 @@ export const openapiSpec = {
           "200": { description: "Relay transaction hash" },
           "400": { description: "Unknown action or wrong argument count" },
         },
+      },
+    },
+    "/api/btc-deposit/submit": {
+      post: {
+        tags: ["BTC Deposit"],
+        summary: "Submit a confirmed BTC signet deposit tx (fixed OP_RETURN+P2WPKH template) for proving",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", required: ["txid", "blinding"], properties: { txid: { type: "string" }, blinding: { type: "string" } } },
+            },
+          },
+        },
+        responses: {
+          "201": { description: "Deposit accepted, queued awaiting_proof" },
+          "400": { description: "Invalid txid/blinding or template mismatch" },
+        },
+      },
+    },
+    "/api/btc-deposit/{id}": {
+      get: {
+        tags: ["BTC Deposit"],
+        summary: "Get a submitted BTC deposit's proving status",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Deposit status" }, "404": { description: "Not found" } },
+      },
+    },
+    "/api/btc-withdrawal/{nullifierHash}": {
+      get: {
+        tags: ["BTC Withdrawal"],
+        summary: "Get an observed BTC withdrawal request's fulfillment status",
+        parameters: [{ name: "nullifierHash", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Withdrawal status" }, "404": { description: "No request observed for this nullifierHash" } },
+      },
+    },
+    "/api/btc-withdrawal/solvency": {
+      get: {
+        tags: ["BTC Withdrawal"],
+        summary: "Publicly checkable: custodian's real BTC balance vs. currently outstanding withdrawal obligations",
+        responses: { "200": { description: "Solvency report" } },
       },
     },
   },

@@ -14,13 +14,16 @@
     "@noble/curves": "^2.3.0",
     "@noble/hashes": "^2.3.0",
     "@zkpassport/poseidon2": "^0.6.2",
+    "bitcoinjs-lib": "^7.0.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "ecpair": "^3.0.1",
     "express": "^4.19.2",
     "express-rate-limit": "^8.6.2",
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "swagger-ui-express": "^5.0.1",
+    "tiny-secp256k1": "^2.2.4",
     "viem": "^2.55.10"
   },
   "devDependencies": {

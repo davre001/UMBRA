@@ -20,6 +20,8 @@ export interface ChainDeployment {
   batchWithdrawer?: `0x${string}`;
   /** Optional — lets Pay/Swap encrypt announce() metadata and (Pay only) derive a one-time stealthAddress when set; falls back to the legacy plaintext/real-address behavior otherwise. See PrivacyKeyRegistry.sol. */
   privacyKeyRegistry?: `0x${string}`;
+  /** Optional — the deployed BtcDepositHonkVerifier, passed as depositExternal's `verifier` argument (see ShieldedVault.sol — it's a per-call parameter, not a fixed immutable, so a future chain's verifier doesn't need a new entrypoint). Unset until BTC deposits are actually live on this chain — see contract/circuits/BTC_DEPOSIT_DESIGN.md. */
+  btcDepositVerifier?: `0x${string}`;
   /** Block the vault was deployed at — bounds event scans (scan.ts, announcer.ts) so they don't needlessly scan pre-deployment history. */
   deployBlock?: number;
   assets: Record<string, AssetConfig>;
