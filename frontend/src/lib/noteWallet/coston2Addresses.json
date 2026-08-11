@@ -9,6 +9,7 @@
   "batchWithdrawer": "0x4E90ECc46d47FF8B8a13F5396931838b256A3fC1",
   "privacyKeyRegistry": "0x8107172F8078c965bC9F334fD0bFefB2cFFAe275",
   "btcDepositVerifier": "0xE9C7Ff4c7BaB9C5A7902465864d27b3c46CCE7c8",
+  "btcVaultPubkeyHash": "1ec150307106f13a434437f03f10efc0c8fa45f3",
   "assets": {
     "C2FLR": { "assetId": 0, "native": true, "decimals": 18 },
     "FXRP": { "assetId": 1, "token": "0x0b6A3645c240605887a5532109323A3E12273dc7", "decimals": 6 },

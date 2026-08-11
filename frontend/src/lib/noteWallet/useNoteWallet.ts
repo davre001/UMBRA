@@ -24,6 +24,8 @@ import {
 import { fetchAllLeaves, isNullifierSpentOnChain, scanShieldedDeposits } from "./scan";
 import { fetchIncomingAnnouncements, fetchIncomingOrderAnnouncements, type AnnouncedOrder } from "./announcer";
 import { derivePrivacyKeyPair, type PrivacyKeyPair } from "./privacyKeys";
+import { deriveSignetKeyPair } from "@/lib/btcWallet";
+import type { ECPairInterface } from "ecpair";
 import { MerkleTree, type MerkleProof } from "./merkleTree";
 
 function toHex(value: bigint): `0x${string}` {
@@ -102,6 +104,11 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
   /** This wallet's persistent secp256k1 privacy keypair — same signature as spendingKey, different curve/purpose. Its public half is safe to publish (via PrivacyKeyRegistry); its private half never leaves this function's caller. */
   const getPrivacyKeyPair = useCallback(async (): Promise<PrivacyKeyPair> => {
     return derivePrivacyKeyPair(await getSignature());
+  }, [getSignature]);
+
+  /** This wallet's persistent signet Bitcoin deposit keypair — same base signature, own domain-separated label (see btcWallet.ts). Its address is what a depositor funds from a signet faucet; its private key signs the deposit transaction client-side and never leaves this function's caller. */
+  const getSignetKeyPair = useCallback(async (): Promise<ECPairInterface> => {
+    return deriveSignetKeyPair(await getSignature());
   }, [getSignature]);
 
   /** Derives a fresh regular note credited to this wallet's own ownerKey, ready to use in a `shield` call. Not yet persisted — call `confirmNote` once the tx succeeds. */
@@ -459,6 +466,7 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       getSpendingKey,
       getOwnerKey,
       getPrivacyKeyPair,
+      getSignetKeyPair,
       prepareNote,
       prepareDepositNote,
       prepareOrderNote,
@@ -479,6 +487,7 @@ export function useNoteWallet(vaultAddress: `0x${string}` | undefined, deployBlo
       getSpendingKey,
       getOwnerKey,
       getPrivacyKeyPair,
+      getSignetKeyPair,
       prepareNote,
       prepareDepositNote,
       prepareOrderNote,

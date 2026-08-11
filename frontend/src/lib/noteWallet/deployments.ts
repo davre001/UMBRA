@@ -22,6 +22,8 @@ export interface ChainDeployment {
   privacyKeyRegistry?: `0x${string}`;
   /** Optional — the deployed BtcDepositHonkVerifier, passed as depositExternal's `verifier` argument (see ShieldedVault.sol — it's a per-call parameter, not a fixed immutable, so a future chain's verifier doesn't need a new entrypoint). Unset until BTC deposits are actually live on this chain — see contract/circuits/BTC_DEPOSIT_DESIGN.md. */
   btcDepositVerifier?: `0x${string}`;
+  /** The real signet P2WPKH pubkey hash (hash160, 20 bytes hex, no 0x prefix) deposit transactions must pay — must match bitcoin.nr's VAULT_PUBKEY_HASH and backend's BTC_VAULT_PUBKEY_HASH exactly, or every deposit tx a depositor builds gets silently rejected by parseDepositTx. */
+  btcVaultPubkeyHash?: string;
   /** Block the vault was deployed at — bounds event scans (scan.ts, announcer.ts) so they don't needlessly scan pre-deployment history. */
   deployBlock?: number;
   assets: Record<string, AssetConfig>;
