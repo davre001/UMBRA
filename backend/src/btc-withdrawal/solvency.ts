@@ -6,18 +6,16 @@ import * as store from "./store";
  * The real, independently-checkable solvency question: does the custodian
  * currently hold enough real BTC to cover every withdrawal that's already
  * been nullified on-chain but not yet paid out? This is deliberately NOT a
- * running "total ever minted minus total ever withdrawn" ledger — that
- * figure can't actually be computed on-chain for the deposit side: a BTC
- * deposit's amount is hidden inside its Poseidon2 note_commitment by
- * design (the whole point of the shielded pool), so `ExternalDeposited`
- * never emits a plaintext amount to sum. (`ExternalWithdrawalRequested`'s
- * `amount` IS plaintext — same reason `withdraw`'s amount is public for
- * every other asset too, see circuits/DESIGN.md's "Known simplification,
- * v1".) Comparing real balance against *outstanding obligations* — not a
- * historical total — is both the achievable computation and the more
- * directly useful one: it answers "can pending withdrawals actually be
- * paid right now," which is what anyone deciding whether to trust a
- * pending request actually wants to know.
+ * running "total ever minted minus total ever withdrawn" ledger — even
+ * though `ExternalDeposited` now emits a plaintext `amount` (deposits mint
+ * real public WrappedBTC, not a hidden note — see ShieldedVault.sol), that
+ * total says nothing about whether the custodian's real signet balance can
+ * cover it right now, since WrappedBTC can move through `shield`/`pay`/the
+ * dark pool long after minting with no on-chain link back to any specific
+ * deposit. Comparing real balance against *outstanding withdrawal
+ * obligations* — not a historical mint total — is what actually answers
+ * "can pending withdrawals be paid right now," which is what anyone
+ * deciding whether to trust a pending request actually wants to know.
  *
  * Anyone can independently verify this themselves without trusting this
  * backend's own arithmetic: the custodian address is public

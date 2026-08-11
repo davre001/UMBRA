@@ -1,27 +1,27 @@
 /**
  * A pending BTC deposit — submitted once the depositor's real signet
  * payment (see circuits/BTC_DEPOSIT_DESIGN.md's fixed OP_RETURN+P2WPKH
- * template) has confirmed. `ownerKey`/`amountSats` are NOT secrets — both
- * are already public, readable directly from the confirmed Bitcoin
- * transaction itself — they're carried here only for display/bookkeeping.
- * `blinding` IS the one thing keeping this deposit's UMBRA-side
- * note_commitment unlinkable to the public BTC payment it came from; see
- * this module's own top-level privacy note for why the proving service
- * (this backend + its worker) necessarily learns it anyway, unlike every
- * other UMBRA circuit's client-side-only proving.
+ * template) has confirmed. `recipient`/`amountSats` are read straight off
+ * the confirmed Bitcoin transaction itself — both already public the
+ * moment it confirms, carried here only for display/bookkeeping. Unlike
+ * the old private-note design, there is no secret blinding value: the
+ * circuit now binds `recipient` (the depositor's own EVM address) directly
+ * into the proof, and the mint lands as an ordinary public ERC20 balance —
+ * nothing here is ever unlinkable, so there's nothing left to protect.
  */
 export interface BtcDepositRecord {
   id: string;
   txid: string;
   checkpointHeight: number;
-  ownerKey: string;
+  recipient: `0x${string}`;
   amountSats: string;
-  blinding: string;
-  status: "awaiting_proof" | "proven" | "failed";
+  status: "awaiting_proof" | "proven" | "minted" | "failed";
   /** Set once a worker completes proving. */
   proof?: `0x${string}`;
-  /** [checkpointCommitment, noteCommitment, nullifier] — circuit's public-input order (see BTC_DEPOSIT_DESIGN.md). */
-  publicInputs?: [string, string, string];
+  /** [checkpointCommitment, recipient, amount, nullifier] — circuit's public-input order (see bitcoin::parse_deposit_tx / main.nr). */
+  publicInputs?: [string, string, string, string];
+  /** Set once the auto-minter's depositExternal call confirms — see minter.ts. */
+  mintTxHash?: `0x${string}`;
   failureReason?: string;
   submittedAt: number;
 }
@@ -34,6 +34,6 @@ export interface BtcDepositCircuitInputs {
   merklePathElements: string[]; // 20 × 32 bytes, hex, native order (zero-padded past actualDepth)
   merklePathIndices: boolean[]; // 20
   merkleActualDepth: number;
-  ownerKey: string; // decimal, extracted from the tx's OP_RETURN — not private, informational
+  recipient: `0x${string}`; // extracted from the tx's OP_RETURN — the depositor's own EVM address, already public
   amountSats: string; // decimal, extracted from the tx's P2WPKH output — not private, informational
 }

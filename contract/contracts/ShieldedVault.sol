@@ -18,23 +18,36 @@ interface IUltraHonkVerifier {
     function verify(bytes calldata proof, bytes32[] calldata publicInputs) external view returns (bool);
 }
 
+/// @notice Minimal surface `depositExternal` needs from a source chain's
+///         wrapped collateral token (see tokens/WrappedBTC.sol) — the vault
+///         mints real, public collateral directly to the proven recipient
+///         rather than inserting a private note commitment.
+interface IMintableERC20 {
+    function mint(address to, uint256 amount) external;
+}
+
 /// @notice Public inputs a `depositExternal` proof commits to. Field types
 ///         and order must match the source circuit's `main()` exactly —
-///         `checkpointRoot`/`noteCommitment`/`nullifier` map 1:1 onto
-///         btc_deposit's `(checkpoint_commitment_pub, note_commitment,
+///         `checkpointRoot`/`recipient`/`amount`/`nullifier` map 1:1 onto
+///         btc_deposit's `(checkpoint_commitment_pub, recipient, amount,
 ///         nullifier)` public inputs, in that order (see
 ///         circuits/BTC_DEPOSIT_DESIGN.md). `checkpointRoot` is that
 ///         circuit's Poseidon2 checkpoint COMMITMENT, not a raw hash — a
 ///         raw `pub [u8; 32]` would expand into 32 separate public-input
 ///         slots, not one `bytes32` (see that doc's "Public-input
-///         interface" section for why this matters). Bitcoin only ever
-///         represents one asset, so there's no asset-selection field —
-///         that's the one piece a future Ethereum deposit circuit's
-///         version of this struct would need that this one doesn't.
+///         interface" section for why this matters). `recipient` is a real
+///         EVM address (the circuit binds it from a Bitcoin OP_RETURN
+///         output — see bitcoin::parse_deposit_tx), not an opaque
+///         ownerKey — deposits mint real, public collateral, not a hidden
+///         note. Bitcoin only ever represents one asset, so there's no
+///         asset-selection field — that's the one piece a future Ethereum
+///         deposit circuit's version of this struct would need that this
+///         one doesn't.
 struct ExternalDeposit {
     bytes32 sourceChainId;
     bytes32 checkpointRoot;
-    bytes32 noteCommitment;
+    address recipient;
+    uint256 amount;
     bytes32 nullifier;
 }
 
@@ -96,19 +109,26 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     ///         and expensive to retrofit as a storage migration later.
     mapping(bytes32 => bytes32) public checkpoints;
 
-    /// @notice AssetIds sourced only via `depositExternal` (currently: BTC —
-    ///         see `bitcoin::BTC_ASSET_ID`) — no real EVM-side collateral is
-    ///         ever locked in this contract for them (unlike `shield`, which
-    ///         does a real ERC20/native transfer), so `withdraw` never
-    ///         attempts an ERC20/native transfer for one. Instead it emits
-    ///         `ExternalWithdrawalRequested` for an off-chain relayer to
-    ///         fulfill on the real external chain (see
-    ///         `backend/src/btc-withdrawal/`) — the proof and nullifier
-    ///         tracking are exactly as real as any other withdrawal;
-    ///         fulfillment on the far side is what's off-chain. Independent
-    ///         of `isAllowedAsset` by design, so a future admin mistake on
-    ///         one doesn't silently defeat the other's guarantee. See
-    ///         circuits/BTC_DEPOSIT_DESIGN.md's "Withdrawal" section.
+    /// @notice The wrapped-collateral token `depositExternal` mints into for
+    ///         each `sourceChainId` (e.g. `keccak256("BTC_SIGNET")` =>
+    ///         WrappedBTC — see tokens/WrappedBTC.sol). That token must also
+    ///         be registered via `setAsset` against the circuit's own
+    ///         assetId (e.g. `bitcoin::BTC_ASSET_ID`) so `shield`/`withdraw`/
+    ///         `pay` treat it as ordinary allowlisted collateral once
+    ///         minted — `depositExternal` itself never touches
+    ///         `isAllowedAsset`.
+    mapping(bytes32 => address) public externalDepositToken;
+
+    /// @notice AssetIds sourced only via `depositExternal` with no real
+    ///         EVM-side collateral backing them (kept for a future chain
+    ///         whose bridge can't mint real collateral — BTC itself no
+    ///         longer uses this path now that `depositExternal` mints real
+    ///         WrappedBTC, see `externalDepositToken`). For an asset marked
+    ///         here, `withdraw` never attempts an ERC20/native transfer;
+    ///         instead it emits `ExternalWithdrawalRequested` for an
+    ///         off-chain relayer to fulfill on the real external chain.
+    ///         Independent of `isAllowedAsset` by design, so a future admin
+    ///         mistake on one doesn't silently defeat the other's guarantee.
     mapping(uint256 => bool) public isExternalSourceAsset;
 
     IComplianceRegistry public complianceRegistry;
@@ -132,8 +152,9 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     );
     event VerifierTrustUpdated(address indexed verifier, bool trusted);
     event CheckpointUpdated(bytes32 indexed sourceChainId, bytes32 checkpointRoot);
+    event ExternalDepositTokenUpdated(bytes32 indexed sourceChainId, address indexed token);
     event ExternalDeposited(
-        bytes32 indexed sourceChainId, bytes32 indexed nullifier, uint256 noteCommitment, uint32 leafIndex, uint256 newRoot
+        bytes32 indexed sourceChainId, bytes32 indexed nullifier, address indexed recipient, uint256 amount
     );
     /// @notice `destination` is NOT an Ethereum address — for BTC it's a
     ///         20-byte P2WPKH pubkey hash (hash160), reusing `withdraw`'s
@@ -153,6 +174,7 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     error NativeTransferFailed();
     error UnknownVerifier(address verifier);
     error StaleCheckpoint(bytes32 sourceChainId, bytes32 provided, bytes32 expected);
+    error NoDepositToken(bytes32 sourceChainId);
 
     constructor(
         address hasherAddress,
@@ -227,6 +249,17 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     function setCheckpoint(bytes32 sourceChainId, bytes32 checkpointRoot) external onlyRole(DEFAULT_ADMIN_ROLE) {
         checkpoints[sourceChainId] = checkpointRoot;
         emit CheckpointUpdated(sourceChainId, checkpointRoot);
+    }
+
+    /// @notice Registers the wrapped-collateral token `depositExternal`
+    ///         mints into for `sourceChainId`. The vault must separately
+    ///         hold MINTER_ROLE on that token (e.g. WrappedBTC), and the
+    ///         token must separately be allowlisted via `setAsset` against
+    ///         the matching circuit assetId for `shield`/`withdraw`/`pay`
+    ///         to treat it as spendable collateral.
+    function setExternalDepositToken(bytes32 sourceChainId, address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        externalDepositToken[sourceChainId] = token;
+        emit ExternalDepositTokenUpdated(sourceChainId, token);
     }
 
     // ---------------------------------------------------------------------
@@ -452,27 +485,19 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     // circuits/BTC_DEPOSIT_DESIGN.md)
     // ---------------------------------------------------------------------
 
-    /// @notice Mints a private UMBRA note from a proven external-chain
-    ///         deposit — currently, a real Bitcoin signet payment (see
-    ///         circuits/BTC_DEPOSIT_DESIGN.md). One generic entrypoint,
-    ///         chain-tagged via `deposit.sourceChainId`, rather than a
-    ///         bespoke `depositBTC` — so a future chain's deposit circuit
-    ///         only needs its own verifier + checkpoint registration, not
-    ///         a new entrypoint or a storage migration.
-    /// @dev DEPOSIT-ONLY, matching this build's scope lock: there is no
-    ///      withdrawal/redemption path for external-chain-sourced notes,
-    ///      and no real EVM-side collateral is ever locked for them here
-    ///      (unlike `shield`, which does a real ERC20/native transfer).
-    ///      `pay` between them stays safe (no real transfer, only
-    ///      re-commits within the tree) — but their assetId (a circuit
-    ///      constant, e.g. `bitcoin::BTC_ASSET_ID`) must NEVER be
-    ///      allowlisted via `setAsset(id, token, allowed=true)`: doing so
-    ///      would let `withdraw` attempt a real transfer this contract
-    ///      never received the backing for, draining other users' real,
-    ///      properly-backed shielded funds. This is an operational
-    ///      deployment constraint, not something this function itself
-    ///      enforces — `withdraw` already reverts `AssetNotAllowed` for
-    ///      any assetId the admin never explicitly allowlists.
+    /// @notice Mints real, public wrapped collateral from a proven
+    ///         external-chain deposit — currently, a real Bitcoin signet
+    ///         payment (see circuits/BTC_DEPOSIT_DESIGN.md) — directly to
+    ///         `deposit.recipient`, the EVM address the circuit itself
+    ///         extracted and bound from the Bitcoin OP_RETURN output. One
+    ///         generic entrypoint, chain-tagged via `deposit.sourceChainId`,
+    ///         rather than a bespoke `depositBTC` — so a future chain's
+    ///         deposit circuit only needs its own verifier + checkpoint +
+    ///         `externalDepositToken` registration, not a new entrypoint or
+    ///         a storage migration. The mint lands as an ordinary public
+    ///         ERC20 balance — from there the recipient uses `shield` like
+    ///         any other asset to bring it into the private pool; there is
+    ///         no bespoke private-note path here anymore.
     function depositExternal(IUltraHonkVerifier verifier, bytes calldata proof, ExternalDeposit calldata deposit)
         external
         nonReentrant
@@ -483,18 +508,21 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
             revert StaleCheckpoint(deposit.sourceChainId, deposit.checkpointRoot, expectedCheckpoint);
         }
         if (isSpentNullifier[uint256(deposit.nullifier)]) revert NullifierAlreadySpent(uint256(deposit.nullifier));
+        address token = externalDepositToken[deposit.sourceChainId];
+        if (token == address(0)) revert NoDepositToken(deposit.sourceChainId);
 
         // Order must match the source circuit's public inputs exactly —
         // btc_deposit's `main()` declares (checkpoint_commitment_pub,
-        // note_commitment, nullifier), in that order.
-        bytes32[] memory publicInputs = new bytes32[](3);
+        // recipient, amount, nullifier), in that order.
+        bytes32[] memory publicInputs = new bytes32[](4);
         publicInputs[0] = deposit.checkpointRoot;
-        publicInputs[1] = deposit.noteCommitment;
-        publicInputs[2] = deposit.nullifier;
+        publicInputs[1] = bytes32(uint256(uint160(deposit.recipient)));
+        publicInputs[2] = bytes32(deposit.amount);
+        publicInputs[3] = deposit.nullifier;
         if (!verifier.verify(proof, publicInputs)) revert InvalidProof();
 
         isSpentNullifier[uint256(deposit.nullifier)] = true;
-        uint32 leafIndex = _insert(uint256(deposit.noteCommitment));
-        emit ExternalDeposited(deposit.sourceChainId, deposit.nullifier, uint256(deposit.noteCommitment), leafIndex, currentRoot);
+        IMintableERC20(token).mint(deposit.recipient, deposit.amount);
+        emit ExternalDeposited(deposit.sourceChainId, deposit.nullifier, deposit.recipient, deposit.amount);
     }
 }

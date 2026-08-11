@@ -5,6 +5,7 @@ import { logger } from "./shared/logger";
 import { hydrateFromStore } from "./dark-engine/matcher";
 import { pollOnce as pollBtcWithdrawals } from "./btc-withdrawal/watcher";
 import { hydrate as hydrateBtcWithdrawals } from "./btc-withdrawal/store";
+import { pollOnce as pollBtcDepositMints } from "./btc-deposit/minter";
 
 const app = createApp();
 const port = Number(process.env.PORT) || DEFAULT_PORT;
@@ -62,6 +63,40 @@ async function startBtcWithdrawalWatcher(): Promise<void> {
   setInterval(tick, intervalMs);
 }
 
+/**
+ * Starts the BTC deposit auto-minting loop — replaces the old private-note
+ * design's manual "claim" step (see btc-deposit/minter.ts's own doc).
+ * Gated on PRIVATE_KEY the same defensive way the withdrawal loop is gated
+ * on BTC_CUSTODIAN_WIF, even though every other route in this backend
+ * already assumes PRIVATE_KEY is set — a deployment that genuinely lacks
+ * it shouldn't crash-loop on this poller instead of just skipping it.
+ */
+function startBtcDepositMinter(): void {
+  if (!process.env.PRIVATE_KEY) {
+    logger.info("[btc-deposit-minter] PRIVATE_KEY not set — auto-minting loop not started");
+    return;
+  }
+  const intervalMs = Number(process.env.BTC_DEPOSIT_MINT_POLL_INTERVAL_MS ?? 30_000);
+  logger.info(`[btc-deposit-minter] starting auto-mint loop, polling every ${intervalMs}ms`);
+  let running = false;
+  const tick = async () => {
+    if (running) {
+      logger.warn("[btc-deposit-minter] previous poll cycle still running — skipping this tick");
+      return;
+    }
+    running = true;
+    try {
+      await pollBtcDepositMints();
+    } catch (err) {
+      logger.error(`[btc-deposit-minter] poll cycle failed: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      running = false;
+    }
+  };
+  tick();
+  setInterval(tick, intervalMs);
+}
+
 // Must finish before the server accepts traffic — a request landing
 // mid-hydration would see a partially-empty order book and could rest a
 // duplicate of an order still being loaded. See matcher.ts/store.ts for why
@@ -73,6 +108,7 @@ hydrateFromStore()
       startBtcWithdrawalWatcher().catch((err) => {
         logger.error(`[btc-withdrawal] failed to start fulfillment loop: ${err instanceof Error ? err.message : err}`);
       });
+      startBtcDepositMinter();
     });
   })
   .catch((err) => {

@@ -135,24 +135,26 @@ export async function screenAddress(address: string): Promise<ScreenAddressResul
 
 export interface BtcDepositSubmitResult {
   id: string;
-  status: "awaiting_proof" | "proven" | "failed";
-  ownerKey: string;
+  status: "awaiting_proof" | "proven" | "minted" | "failed";
+  recipient: `0x${string}`;
   amountSats: string;
 }
 
 /**
  * Submits a confirmed BTC signet deposit (see contract/circuits/
  * BTC_DEPOSIT_DESIGN.md's fixed OP_RETURN+P2WPKH template) for proving.
- * `blinding` should come from `noteWallet.prepareDepositNote` — same
- * deterministic, recoverable derivation shield() deposits already use —
- * not a throwaway random value, so this note can be recovered later the
- * same way a shielded ERC20 deposit can.
+ * The recipient EVM address is read straight off the tx's OP_RETURN
+ * output server-side — nothing else to pass. Once proven, the backend's
+ * own auto-minter (btc-deposit/minter.ts) mints WrappedBTC directly to
+ * that address with no further action from this client — poll
+ * `fetchBtcDepositStatus` (or just the recipient's WrappedBTC balance) to
+ * see it land.
  */
-export async function submitBtcDeposit(txid: string, blinding: string): Promise<BtcDepositSubmitResult> {
+export async function submitBtcDeposit(txid: string): Promise<BtcDepositSubmitResult> {
   const res = await fetch(`${API_URL}/api/btc-deposit/submit`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ txid, blinding }),
+    body: JSON.stringify({ txid }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -163,17 +165,18 @@ export async function submitBtcDeposit(txid: string, blinding: string): Promise<
 
 export interface BtcDepositStatus {
   id: string;
-  status: "awaiting_proof" | "proven" | "failed";
+  status: "awaiting_proof" | "proven" | "minted" | "failed";
   txid: string;
-  ownerKey: string;
+  recipient: `0x${string}`;
   amountSats: string;
-  /** [checkpointCommitment, noteCommitment, nullifier] — set once status is "proven". */
-  publicInputs?: [string, string, string];
+  /** [checkpointCommitment, recipient, amount, nullifier] — set once status is "proven"/"minted". */
+  publicInputs?: [string, string, string, string];
   proof?: `0x${string}`;
+  mintTxHash?: `0x${string}`;
   failureReason?: string;
 }
 
-/** Polls a submitted BTC deposit's proving status — see `frontend/src/app/deposit-btc/page.tsx`'s TanStack Query usage. */
+/** Polls a submitted BTC deposit's proving/minting status — see the faucet page's BTC card. */
 export async function fetchBtcDepositStatus(id: string): Promise<BtcDepositStatus> {
   const res = await fetch(`${API_URL}/api/btc-deposit/${id}`);
   if (!res.ok) throw new Error(`Fetching BTC deposit status failed: ${res.status}`);

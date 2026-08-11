@@ -39,7 +39,7 @@ describe("btc-deposit / stripWitness", () => {
 });
 
 describe("btc-deposit / parseDepositTx", () => {
-  function buildSyntheticDepositTx(ownerKey: bigint, amountSats: bigint, vaultPubkeyHash: Buffer): Buffer {
+  function buildSyntheticDepositTx(recipient: `0x${string}`, amountSats: bigint, vaultPubkeyHash: Buffer): Buffer {
     const version = Buffer.from([0x02, 0x00, 0x00, 0x00]);
     const inputCount = Buffer.from([0x01]);
     const prevTxid = Buffer.alloc(32, 0x11);
@@ -48,14 +48,12 @@ describe("btc-deposit / parseDepositTx", () => {
     const sequence = Buffer.from([0xff, 0xff, 0xff, 0xff]);
     const outputCount = Buffer.from([0x02]);
 
-    const ownerKeyBE = Buffer.alloc(32);
-    let v = ownerKey;
-    for (let i = 31; i >= 0; i--) {
-      ownerKeyBE[i] = Number(v & 0xffn);
-      v >>= 8n;
-    }
+    const recipientBytes = Buffer.from(recipient.slice(2), "hex");
+    if (recipientBytes.length !== 20) throw new Error("recipient must be a 20-byte address");
+    const push32 = Buffer.concat([Buffer.alloc(12, 0), recipientBytes]);
+
     const out0Value = Buffer.alloc(8, 0);
-    const out0Script = Buffer.concat([Buffer.from([0x6a, 0x20]), ownerKeyBE]);
+    const out0Script = Buffer.concat([Buffer.from([0x6a, 0x20]), push32]);
     const out0ScriptLen = Buffer.from([out0Script.length]);
 
     const out1Value = Buffer.alloc(8);
@@ -88,29 +86,36 @@ describe("btc-deposit / parseDepositTx", () => {
   // is real, not the zero placeholder, as of this deployment's real
   // custodian address (tb1qrmq4qvr3qmcn5s6yxlcr7y80cry0530n99g2mm).
   const VAULT_HASH = Buffer.from("1ec150307106f13a434437f03f10efc0c8fa45f3", "hex");
+  const RECIPIENT = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC" as const;
 
-  it("extracts ownerKey and amountSats from a template-matching tx", () => {
-    const tx = buildSyntheticDepositTx(7n, 250000n, VAULT_HASH);
+  it("extracts recipient and amountSats from a template-matching tx", () => {
+    const tx = buildSyntheticDepositTx(RECIPIENT, 250000n, VAULT_HASH);
     expect(tx.length).toBe(TX_SIZE);
-    const { ownerKey, amountSats } = parseDepositTx(tx);
-    expect(ownerKey).toBe(7n);
+    const { recipient, amountSats } = parseDepositTx(tx);
+    expect(recipient.toLowerCase()).toBe(RECIPIENT.toLowerCase());
     expect(amountSats).toBe(250000n);
+  });
+
+  it("rejects a tx whose push32 isn't zero-padded before the recipient address", () => {
+    const tx = buildSyntheticDepositTx(RECIPIENT, 250000n, VAULT_HASH);
+    tx[58] = 0xff; // corrupt the first padding byte
+    expect(() => parseDepositTx(tx)).toThrow(/zero-padded/);
   });
 
   it("rejects a tx paying a different destination than the configured vault", () => {
     const wrongVault = Buffer.alloc(20, 0xaa);
-    const tx = buildSyntheticDepositTx(7n, 250000n, wrongVault);
+    const tx = buildSyntheticDepositTx(RECIPIENT, 250000n, wrongVault);
     expect(() => parseDepositTx(tx)).toThrow(/vault address/);
   });
 
   it("rejects a tx with the wrong output count", () => {
-    const tx = buildSyntheticDepositTx(7n, 250000n, VAULT_HASH);
+    const tx = buildSyntheticDepositTx(RECIPIENT, 250000n, VAULT_HASH);
     tx[46] = 1; // claim 1 output instead of 2
     expect(() => parseDepositTx(tx)).toThrow(/2 outputs/);
   });
 
   it("rejects a tx with a non-empty scriptSig", () => {
-    const tx = buildSyntheticDepositTx(7n, 250000n, VAULT_HASH);
+    const tx = buildSyntheticDepositTx(RECIPIENT, 250000n, VAULT_HASH);
     tx[41] = 1; // claim a 1-byte scriptSig
     expect(() => parseDepositTx(tx)).toThrow(/scriptSig/);
   });

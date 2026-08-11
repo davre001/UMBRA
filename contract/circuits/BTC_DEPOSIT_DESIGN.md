@@ -1,5 +1,21 @@
 # BTC deposit circuit design
 
+> **Superseded, 2026-08-11**: this document describes the original
+> private-note design (`depositExternal` minting a hidden Poseidon2 note,
+> `owner_key`/`blinding`, a manual on-chain "claim" via
+> `frontend/src/app/deposit-btc/page.tsx`). That page and the note-minting
+> path are gone. `btc_deposit`'s circuit now binds a real EVM `recipient`
+> address + `amount` directly (see `contracts/tokens/WrappedBTC.sol` and
+> `ShieldedVault.sol`'s `depositExternal`) — a proven deposit mints real,
+> public WrappedBTC straight to the depositor's wallet, auto-submitted by
+> `backend/src/btc-deposit/minter.ts`, with no note, no blinding, and no
+> claim step. Kept below as a historical record of the phased build, not a
+> description of current behavior — the phase-by-phase narrative and the
+> "hidden note"/"custodial withdrawal" framing throughout no longer apply
+> to deposits (`withdraw()`'s real-BTC-payout path for BTC specifically is
+> also now dormant — see `contract/scripts/redeploy-vault-wrapped-btc.ts`'s
+> own comment on why `setExternalSourceAsset` is no longer called for it).
+
 This is a **new** design-doc convention, specific to `btc_deposit` — it is
 not a continuation of `DESIGN.md`'s existing structure (that file has one
 shared "Known simplification, v1" section covering `withdraw`/`pay`/

@@ -10,10 +10,6 @@ export function hashLeftRight(left: bigint, right: bigint): bigint {
   return poseidon2Hash([left, right]);
 }
 
-export function commitment(assetId: bigint, amount: bigint, ownerKey: bigint, blinding: bigint): bigint {
-  return poseidon2Hash([assetId, amount, ownerKey, blinding]);
-}
-
 /** Splits a 32-byte Buffer (native/little-endian order, matching bitcoin.nr's own byte order throughout) into (lo, hi) 128-bit limbs — same split contract/circuits/noir/btc_deposit/src/bitcoin.nr's `bytes32_to_u128_limbs` performs, needed for the exact same reason: BN254's field can't safely hold an arbitrary 256-bit value. */
 export function bytes32ToLimbs(bytes: Buffer): { lo: bigint; hi: bigint } {
   if (bytes.length !== 32) throw new Error(`expected 32 bytes, got ${bytes.length}`);
@@ -43,11 +39,6 @@ export function checkpointCommitment(checkpointHash: Buffer): bigint {
 // global, computed the same way (see that file's own comment for the raw
 // keccak256 value before reduction).
 export const BTC_SIGNET_CHAIN_TAG = 0x2ac72b3cb8eec47a6203b2844aeb349dab822dfe065090e5398a833c8fd323d8n;
-
-// Placeholder — must match contract/circuits/noir/btc_deposit/src/
-// bitcoin.nr's BTC_ASSET_ID exactly, whatever real value it's set to at
-// deployment.
-export const BTC_ASSET_ID = 999n;
 
 /** bitcoin.nr's `deposit_nullifier`: Poseidon2 over a txid's (lo, hi) limbs plus the chain tag (3-arity, domain-separating it from every other nullifier this project computes). */
 export function depositNullifier(txid: Buffer): bigint {

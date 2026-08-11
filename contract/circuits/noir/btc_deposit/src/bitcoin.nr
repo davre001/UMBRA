@@ -183,21 +183,26 @@ pub fn verify_header_chain(checkpoint_hash: [u8; 32], headers: [[u8; HEADER_SIZE
 // *non-witness* serialization, which is identically shaped for P2WPKH,
 // P2WSH, or P2TR inputs as long as scriptSig is empty, true for all of
 // them) and exactly two outputs:
-//   output 0: OP_RETURN carrying the depositor's 32-byte owner_key
+//   output 0: OP_RETURN carrying the depositor's EVM recipient address —
+//             a 32-byte push, left-zero-padded (same "address as bytes32"
+//             convention Ethereum ABI encoding already uses), only the
+//             last 20 bytes are the actual address
 //   output 1: P2WPKH payment to UMBRA's fixed vault address
 //
 // Why the OP_RETURN is load-bearing, not decorative: proof construction
 // happens on-chain (Flare), separately from and after the real Bitcoin
-// payment. If the note's owner_key were only a private witness supplied at
+// payment. If the mint recipient were only a private witness supplied at
 // proving time, ANYONE who observed the confirmed Bitcoin payment could
-// submit the depositExternal proof first with their OWN owner_key,
-// stealing the mint. Binding owner_key directly into the Bitcoin
+// submit the deposit proof first with their OWN recipient address,
+// stealing the mint. Binding the recipient directly into the Bitcoin
 // transaction itself — which only the real depositor could have signed —
-// closes that gap: the resulting note's ownership is fixed by the on-chain
+// closes that gap: who gets minted WrappedBTC is fixed by the on-chain
 // payment, not by whoever happens to submit the proof. Whoever submits it
-// is otherwise irrelevant, same as anyone being able to relay a signed
-// Ethereum meta-transaction. See BTC_DEPOSIT_DESIGN.md for the full
-// reasoning and the "proof construction is permissionless" note.
+// is otherwise irrelevant (the backend does, automatically, once proven —
+// see backend/src/btc-deposit/minter.ts), same as anyone being able to
+// relay a signed Ethereum meta-transaction. See BTC_DEPOSIT_DESIGN.md for
+// the fuller "proof construction is permissionless" reasoning (written for
+// the original private-note design, still applies to who-can-submit here).
 pub global TX_SIZE: u32 = 125;
 pub global MAX_MERKLE_DEPTH: u32 = 20;
 
@@ -213,10 +218,8 @@ pub global VAULT_PUBKEY_HASH: [u8; 20] = [
 ];
 
 // Interprets `bytes` as a big-endian unsigned integer and returns it as a
-// Field. Used for `owner_key` (already a valid Poseidon2/Field output on
-// the depositor's side — this only round-trips it back out of raw bytes,
-// it doesn't need its own range check the way a fresh untrusted 256-bit
-// value would). Big-endian by UMBRA's own choice (not a Bitcoin protocol
+// Field. Used for the 20-byte EVM recipient address extracted from the
+// OP_RETURN. Big-endian by UMBRA's own choice (not a Bitcoin protocol
 // requirement, since the OP_RETURN payload is UMBRA's own data) to match
 // this stack's existing bytes32/uint256 convention, deliberately distinct
 // from Bitcoin's own little-endian header fields — see main.nr's fixture
@@ -247,27 +250,35 @@ fn bytes_le_to_field<let N: u32>(bytes: [u8; N]) -> Field {
 
 // Validates `tx` matches the fixed deposit template exactly (1 input, empty
 // scriptSig, exactly 2 outputs shaped as described above, output 1 paying
-// UMBRA's vault address) and extracts (owner_key, amount, txid). A `tx`
+// UMBRA's vault address) and extracts (recipient, amount, txid). A `tx`
 // that doesn't match the template — wrong input/output count, wrong
-// OP_RETURN push length, wrong payment destination — fails one of these
-// asserts rather than silently misparsing.
+// OP_RETURN push length/padding, wrong payment destination — fails one of
+// these asserts rather than silently misparsing.
 pub fn parse_deposit_tx(tx: [u8; TX_SIZE]) -> (Field, Field, [u8; 32]) {
     assert(tx[4] == 1); // exactly one input
     assert(tx[41] == 0); // empty scriptSig (every SegWit spend has this)
     assert(tx[46] == 2); // exactly two outputs
 
-    // output 0: OP_RETURN, value must be 0, 34-byte script (OP_RETURN + push32 + 32-byte owner_key)
+    // output 0: OP_RETURN, value must be 0, 34-byte script (OP_RETURN + push32 + left-zero-padded 20-byte recipient)
     for i in 0..8 {
         assert(tx[47 + i] == 0);
     }
     assert(tx[55] == 0x22);
     assert(tx[56] == 0x6a);
     assert(tx[57] == 0x20);
-    let mut owner_key_bytes: [u8; 32] = [0; 32];
-    for i in 0..32 {
-        owner_key_bytes[i] = tx[58 + i];
+    // Bytes 58..70 (12 bytes) must be zero — the left-padding half of the
+    // "address as bytes32" encoding. Enforced, not just assumed: a
+    // depositor who left this non-zero couldn't be minting to a real
+    // 20-byte address anyway, so rejecting here is strictly more correct
+    // than silently truncating to the low 20 bytes.
+    for i in 0..12 {
+        assert(tx[58 + i] == 0);
     }
-    let owner_key = bytes_be_to_field(owner_key_bytes);
+    let mut recipient_bytes: [u8; 20] = [0; 20];
+    for i in 0..20 {
+        recipient_bytes[i] = tx[70 + i];
+    }
+    let recipient = bytes_be_to_field(recipient_bytes);
 
     // output 1: P2WPKH payment to the vault address
     let mut amount_bytes: [u8; 8] = [0; 8];
@@ -283,7 +294,7 @@ pub fn parse_deposit_tx(tx: [u8; TX_SIZE]) -> (Field, Field, [u8; 32]) {
     }
 
     let txid = digest(digest(tx));
-    (owner_key, amount, txid)
+    (recipient, amount, txid)
 }
 
 fn sha256d_concat(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
@@ -332,23 +343,23 @@ pub fn verify_tx_inclusion(
 
 // --- Phase 5: note binding -------------------------------------------
 
-// Asset identifier for BTC-sourced notes in ShieldedVault's assetId
-// numbering scheme. PLACEHOLDER — the real value depends on which assetId
-// slot BTC is allocated at deployment (this project's existing assets use
-// 0/1/2 for C2FLR/WFLR/FXRP; BTC needs a new, non-colliding slot chosen
-// when `depositExternal` is deployed). Left as an obviously-not-final
-// value, matching VAULT_PUBKEY_HASH's placeholder treatment above.
+// Asset identifier for BTC in ShieldedVault's assetId numbering scheme
+// (this project's existing assets use 0/1/2 for C2FLR/FXRP/USDT0). Not
+// used by this circuit's own math anymore (see main.nr — the deposit
+// proof now mints a real, publicly-held WrappedBTC ERC20 directly, not a
+// private note commitment keyed by assetId), but kept here as the shared
+// source of truth other files reference (backend, contract deploy
+// scripts, frontend) so they can't silently drift out of agreement with
+// each other about which numeric id means BTC.
 //
-// CRITICAL DEPLOYMENT CONSTRAINT, not just a placeholder-value note: this
-// assetId must NEVER be registered via ShieldedVault.setAsset(id, token,
-// allowed=true) — doing so would let withdraw() attempt a real ERC20/
-// native transfer for a BTC-sourced note, but no real EVM-side collateral
-// is ever locked for it (this build is deposit-only, no redemption
-// mechanism — see BTC_DEPOSIT_DESIGN.md's scope lock). That would let a
-// BTC-sourced note drain OTHER users' real, properly-backed shielded
-// funds — a real insolvency bug, not a scoping choice. pay() between
-// BTC-labeled notes stays safe regardless (no real transfer ever occurs),
-// since it only re-commits within the tree.
+// Deployment note: unlike the earlier private-note design, this assetId
+// SHOULD now be registered via ShieldedVault.setAsset(id, wrappedBtcToken,
+// allowed=true) — WrappedBTC is real, redeemable ERC20 collateral (see
+// WrappedBTC.sol), minted 1:1 against the custodian's real signet BTC
+// holdings by the automatic minter (backend/src/btc-deposit/minter.ts)
+// once a deposit proof verifies, and burned on withdrawal/redemption. The
+// old "never allowlist this" constraint applied only to the prior
+// no-real-collateral design and no longer holds.
 pub global BTC_ASSET_ID: Field = 999;
 
 // Domain-separation tag so BTC-sourced nullifiers can never collide with a

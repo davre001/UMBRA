@@ -1,24 +1,29 @@
 mod bitcoin;
 
-use bitcoin::{checkpoint_commitment, deposit_nullifier, parse_deposit_tx, parse_merkle_root, verify_header_chain, verify_pow, verify_tx_inclusion, BTC_ASSET_ID, K};
+use bitcoin::{checkpoint_commitment, deposit_nullifier, parse_deposit_tx, parse_merkle_root, verify_header_chain, verify_pow, verify_tx_inclusion, K};
 
 // Proves: (1) a chain of K validly-mined signet headers correctly links
 // forward from a disclosed trusted checkpoint; (2) `tx` — a fixed-shape
 // deposit transaction (see bitcoin.nr's "Phase 4" section) — is included
-// under the chain tip's merkle_root; (3) `note_commitment`/`nullifier` are
-// exactly what that transaction's extracted (owner_key, amount, txid)
-// commit to. This is the full statement `depositExternal` (ShieldedVault,
-// Phase 5) verifies — see BTC_DEPOSIT_DESIGN.md.
+// under the chain tip's merkle_root; (3) `recipient`/`amount`/`nullifier`
+// are exactly what that transaction's extracted (recipient, amount, txid)
+// commit to. This is the full statement the backend's automatic minter
+// checks before minting real WrappedBTC — see BTC_DEPOSIT_DESIGN.md.
 //
 // checkpoint_hash is a PRIVATE witness; checkpoint_commitment_pub is its
 // Poseidon2 commitment (see bitcoin::checkpoint_commitment's own comment
 // for why — a raw `pub [u8; 32]` doesn't collapse to one Solidity
-// bytes32). blinding is a private witness the prover picks freely — see
-// BTC_DEPOSIT_DESIGN.md's "proof construction is permissionless" note for
-// why that's safe even though anyone could construct this proof.
+// bytes32). recipient/amount are public so the minter knows who to credit
+// and how much without needing its own independent copy of the Bitcoin
+// data — the proof itself is what has to have seen it. No more
+// blinding/note_commitment here (that was the prior private-note design —
+// see git history): this circuit's only remaining job is proving the real
+// Bitcoin payment happened and extracting who it's for, not shaping a
+// private commitment.
 fn main(
     checkpoint_commitment_pub: pub Field,
-    note_commitment: pub Field,
+    recipient: pub Field,
+    amount: pub Field,
     nullifier: pub Field,
     checkpoint_hash: [u8; 32],
     headers: [[u8; bitcoin::HEADER_SIZE]; K],
@@ -26,16 +31,16 @@ fn main(
     merkle_path_elements: [[u8; 32]; bitcoin::MAX_MERKLE_DEPTH],
     merkle_path_indices: [bool; bitcoin::MAX_MERKLE_DEPTH],
     merkle_actual_depth: u32,
-    blinding: Field,
 ) {
     assert(checkpoint_commitment(checkpoint_hash) == checkpoint_commitment_pub);
     let _tip_hash = verify_header_chain(checkpoint_hash, headers);
 
     let tip_merkle_root = parse_merkle_root(headers[K - 1]);
-    let (owner_key, amount, txid) = parse_deposit_tx(tx);
+    let (parsed_recipient, parsed_amount, txid) = parse_deposit_tx(tx);
     verify_tx_inclusion(txid, tip_merkle_root, merkle_path_elements, merkle_path_indices, merkle_actual_depth);
 
-    assert(umbra_lib::commitment(BTC_ASSET_ID, amount, owner_key, blinding) == note_commitment);
+    assert(parsed_recipient == recipient);
+    assert(parsed_amount == amount);
     assert(deposit_nullifier(txid) == nullifier);
 }
 
@@ -275,14 +280,15 @@ fn synthetic_header_chain() -> [[u8; bitcoin::HEADER_SIZE]; K] {
         [0x00, 0x00, 0x00, 0x00, 0x57, 0xc6, 0xde, 0x5e, 0x8d, 0x0c, 0x9a, 0x5d,
          0x32, 0xe1, 0xb9, 0xcc, 0x82, 0xad, 0x83, 0x63, 0xe2, 0x78, 0x56, 0x83,
          0xd5, 0x33, 0x5a, 0xb6, 0xe2, 0x19, 0xed, 0x57, 0xdc, 0x57, 0x4e, 0xea,
-         0xd6, 0x39, 0xdf, 0xdc, 0x22, 0x1a, 0x2e, 0x3d, 0xfa, 0x83, 0x24, 0x0d,
-         0xec, 0x87, 0x46, 0x8e, 0x71, 0x0d, 0x0b, 0xe1, 0xf3, 0x2e, 0xfa, 0x40,
-         0xe4, 0x4e, 0x8e, 0xca, 0xe2, 0xbf, 0x3c, 0x71, 0x00, 0x00, 0x00, 0x00,
+         0x5b, 0x3a, 0x8b, 0x87, 0x16, 0x81, 0x2e, 0x60, 0x51, 0xd7, 0x69, 0xca,
+         0x30, 0x93, 0x7f, 0x82, 0xb5, 0x3c, 0x35, 0x87, 0x46, 0x4f, 0x4c, 0x04,
+         0x34, 0xa1, 0x9d, 0x4a, 0x11, 0x47, 0xe6, 0xfa, 0x00, 0x00, 0x00, 0x00,
          0xff, 0xff, 0xff, 0x20, 0x00, 0x00, 0x00, 0x00],
     ]
 }
 
-// owner_key = 7, amount = 250,000 sats, vault destination = the real
+// recipient = 0x1234567890123456789012345678901234567890 (obviously-synthetic
+// EVM test address), amount = 250,000 sats, vault destination = the real
 // deployed vault (see bitcoin::VAULT_PUBKEY_HASH).
 fn synthetic_deposit_tx_v2() -> [u8; bitcoin::TX_SIZE] {
     [
@@ -291,9 +297,9 @@ fn synthetic_deposit_tx_v2() -> [u8; bitcoin::TX_SIZE] {
         0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
         0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x02, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22, 0x6a, 0x20, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x90, 0xd0, 0x03, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x12, 0x34,
+        0x56, 0x78, 0x90, 0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56, 0x78,
+        0x90, 0x12, 0x34, 0x56, 0x78, 0x90, 0x90, 0xd0, 0x03, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x16, 0x00, 0x14, 0x1e, 0xc1, 0x50, 0x30, 0x71, 0x06, 0xf1,
         0x3a, 0x43, 0x44, 0x37, 0xf0, 0x3f, 0x10, 0xef, 0xc0, 0xc8, 0xfa, 0x45,
         0xf3, 0x00, 0x00, 0x00, 0x00,
@@ -321,14 +327,13 @@ fn test_main_accepts_fully_synthetic_end_to_end_deposit() {
     let headers = synthetic_header_chain();
     let tx = synthetic_deposit_tx_v2();
 
-    let (owner_key, amount, txid) = parse_deposit_tx(tx);
-    let blinding = 12345;
-    let expected_note_commitment = umbra_lib::commitment(BTC_ASSET_ID, amount, owner_key, blinding);
+    let (recipient, amount, txid) = parse_deposit_tx(tx);
     let expected_nullifier = deposit_nullifier(txid);
 
     main(
         commitment,
-        expected_note_commitment,
+        recipient,
+        amount,
         expected_nullifier,
         checkpoint_hash,
         headers,
@@ -336,7 +341,6 @@ fn test_main_accepts_fully_synthetic_end_to_end_deposit() {
         synthetic_merkle_path(),
         synthetic_merkle_indices(),
         1,
-        blinding,
     );
 }
 
@@ -350,34 +354,53 @@ fn test_main_rejects_checkpoint_hash_not_matching_commitment() {
     let wrong_commitment = checkpoint_commitment(checkpoint_hash) + 1;
     let headers = synthetic_header_chain();
     let tx = synthetic_deposit_tx_v2();
-    let (owner_key, amount, txid) = parse_deposit_tx(tx);
-    let blinding = 12345;
-    let note_commitment = umbra_lib::commitment(BTC_ASSET_ID, amount, owner_key, blinding);
+    let (recipient, amount, txid) = parse_deposit_tx(tx);
     let nullifier = deposit_nullifier(txid);
 
     main(
-        wrong_commitment, note_commitment, nullifier, checkpoint_hash, headers, tx,
-        synthetic_merkle_path(), synthetic_merkle_indices(), 1, blinding,
+        wrong_commitment, recipient, amount, nullifier, checkpoint_hash, headers, tx,
+        synthetic_merkle_path(), synthetic_merkle_indices(), 1,
     );
 }
 
 #[test(should_fail)]
-fn test_main_rejects_note_commitment_with_wrong_blinding() {
-    // The publicly-claimed note_commitment was built with a different
-    // blinding than the one actually supplied as a private witness —
-    // confirms main() recomputes and checks the commitment itself, rather
-    // than trusting whatever the caller labels it.
+fn test_main_rejects_recipient_not_matching_tx() {
+    // The publicly-claimed recipient doesn't match what's actually encoded
+    // in the tx's OP_RETURN — confirms main() recomputes and checks it
+    // against the real parsed value, rather than trusting whatever the
+    // caller labels it (the exact front-running gap this binding exists
+    // to close — see bitcoin.nr's own comment on why the OP_RETURN is
+    // load-bearing).
     let checkpoint_hash = synthetic_checkpoint_hash();
     let commitment = checkpoint_commitment(checkpoint_hash);
     let headers = synthetic_header_chain();
     let tx = synthetic_deposit_tx_v2();
-    let (owner_key, amount, txid) = parse_deposit_tx(tx);
-    let claimed_note_commitment = umbra_lib::commitment(BTC_ASSET_ID, amount, owner_key, 99999);
+    let (recipient, amount, txid) = parse_deposit_tx(tx);
+    let wrong_recipient = recipient + 1;
     let nullifier = deposit_nullifier(txid);
 
     main(
-        commitment, claimed_note_commitment, nullifier, checkpoint_hash, headers, tx,
-        synthetic_merkle_path(), synthetic_merkle_indices(), 1, 12345,
+        commitment, wrong_recipient, amount, nullifier, checkpoint_hash, headers, tx,
+        synthetic_merkle_path(), synthetic_merkle_indices(), 1,
+    );
+}
+
+#[test(should_fail)]
+fn test_main_rejects_amount_not_matching_tx() {
+    // Same idea as the recipient check above, for amount — a minter
+    // trusting an unchecked public `amount` input could be told to mint
+    // more WrappedBTC than the real Bitcoin payment actually carried.
+    let checkpoint_hash = synthetic_checkpoint_hash();
+    let commitment = checkpoint_commitment(checkpoint_hash);
+    let headers = synthetic_header_chain();
+    let tx = synthetic_deposit_tx_v2();
+    let (recipient, amount, txid) = parse_deposit_tx(tx);
+    let wrong_amount = amount + 1;
+    let nullifier = deposit_nullifier(txid);
+
+    main(
+        commitment, recipient, wrong_amount, nullifier, checkpoint_hash, headers, tx,
+        synthetic_merkle_path(), synthetic_merkle_indices(), 1,
     );
 }
 
@@ -499,19 +522,21 @@ fn test_verify_tx_inclusion_rejects_wrong_root() {
 // Hand-built (synthetic — see note above), internally self-consistent
 // deposit transaction: 1 input (empty scriptSig, borrowed from the real tx
 // above so it's at least a real prevout reference), 2 outputs — OP_RETURN
-// carrying owner_key = 42, then a P2WPKH payment of 150,000 sats to the
-// real deployed vault (see bitcoin::VAULT_PUBKEY_HASH). Recomputed and
-// cross-checked with Node's crypto module before trusting this fixture.
+// carrying recipient = 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC (Hardhat's
+// well-known test account #2, left-zero-padded to 32 bytes), then a P2WPKH
+// payment of 150,000 sats to the real deployed vault (see
+// bitcoin::VAULT_PUBKEY_HASH). Generated with Node's crypto module, not
+// hand-typed, before trusting this fixture.
 fn synthetic_deposit_tx() -> [u8; bitcoin::TX_SIZE] {
     [
         0x02, 0x00, 0x00, 0x00, 0x01, 0xdc, 0x2e, 0xc6, 0x28, 0x2f, 0x4d, 0x0b,
         0xc7, 0x95, 0xf6, 0xe2, 0xa3, 0xc8, 0x56, 0xca, 0x80, 0x52, 0x23, 0x2b,
         0x16, 0x0b, 0x28, 0x12, 0xb2, 0xb0, 0x4e, 0x78, 0xca, 0x9a, 0x23, 0xf6,
-        0xf0, 0x06, 0x00, 0x00, 0x00, 0x00, 0x22, 0x01, 0x00, 0x00, 0x02, 0x00,
+        0xf0, 0x06, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0x02, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22, 0x6a, 0x20, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x2a, 0xf0, 0x49, 0x02, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x44,
+        0xcd, 0xdd, 0xb6, 0xa9, 0x00, 0xfa, 0x2b, 0x58, 0x5d, 0xd2, 0x99, 0xe0,
+        0x3d, 0x12, 0xfa, 0x42, 0x93, 0xbc, 0xf0, 0x49, 0x02, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x16, 0x00, 0x14, 0x1e, 0xc1, 0x50, 0x30, 0x71, 0x06, 0xf1,
         0x3a, 0x43, 0x44, 0x37, 0xf0, 0x3f, 0x10, 0xef, 0xc0, 0xc8, 0xfa, 0x45,
         0xf3, 0x00, 0x00, 0x00, 0x00,
@@ -519,16 +544,27 @@ fn synthetic_deposit_tx() -> [u8; bitcoin::TX_SIZE] {
 }
 
 #[test]
-fn test_parse_deposit_tx_extracts_owner_key_and_amount() {
-    let (owner_key, amount, txid) = bitcoin::parse_deposit_tx(synthetic_deposit_tx());
-    assert(owner_key == 42);
+fn test_parse_deposit_tx_extracts_recipient_and_amount() {
+    let (recipient, amount, txid) = bitcoin::parse_deposit_tx(synthetic_deposit_tx());
+    assert(recipient == 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC);
     assert(amount == 150000);
     let expected_txid: [u8; 32] = [
-        0xcf, 0xba, 0x9a, 0xca, 0xb8, 0x09, 0xb3, 0x5f, 0x58, 0x49, 0x40, 0x8b,
-        0xf7, 0xc2, 0xa7, 0x58, 0x9e, 0xe3, 0x57, 0x47, 0x1a, 0xc3, 0x76, 0x88,
-        0x50, 0x16, 0xd3, 0xc8, 0x69, 0x60, 0x2b, 0x70,
+        0x76, 0x3a, 0xb4, 0x1e, 0x81, 0xe7, 0xee, 0xe8, 0x86, 0xfc, 0x80, 0x47,
+        0x3c, 0x4b, 0xb9, 0x2c, 0xfb, 0xab, 0xfc, 0x50, 0x3a, 0xc9, 0xcc, 0x0f,
+        0xca, 0x1c, 0xae, 0x2a, 0xf4, 0xa3, 0xd9, 0x21,
     ];
     assert(txid == expected_txid);
+}
+
+#[test(should_fail)]
+fn test_parse_deposit_tx_rejects_non_zero_padding() {
+    // Same synthetic tx, but with one of the OP_RETURN's left-padding
+    // bytes (58..70) set non-zero — confirms the "address as bytes32"
+    // padding is actually enforced, not silently truncated to the low 20
+    // bytes regardless of what the top 12 hold.
+    let mut tx = synthetic_deposit_tx();
+    tx[58] = 0x01;
+    let _ = bitcoin::parse_deposit_tx(tx);
 }
 
 #[test(should_fail)]

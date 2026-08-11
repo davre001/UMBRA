@@ -1,19 +1,19 @@
 {
   "chainId": 114,
   "rpcUrl": "https://flare-testnet.drpc.org",
-  "deployBlock": 33918800,
-  "vault": "0x46283cc9C4946290c352a064fd6503900F8f027b",
+  "deployBlock": 33927500,
+  "vault": "0x13643D75088cfaB4737E8b6c85813e95bfaB450B",
   "compliance": "0xC9192Ecaf662c977B28c614e49F558AAAB832577",
   "ownerKeyRegistry": "0x48C77021624f7b4baC092570CDD56EB163eC3e71",
   "stealthAnnouncer": "0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1",
   "batchWithdrawer": "0x4E90ECc46d47FF8B8a13F5396931838b256A3fC1",
   "privacyKeyRegistry": "0x8107172F8078c965bC9F334fD0bFefB2cFFAe275",
-  "btcDepositVerifier": "0xE9C7Ff4c7BaB9C5A7902465864d27b3c46CCE7c8",
+  "btcDepositVerifier": "0xfC5561cbec08b9674D3EE4cf5943b83eA62774EA",
   "btcVaultPubkeyHash": "1ec150307106f13a434437f03f10efc0c8fa45f3",
   "assets": {
     "C2FLR": { "assetId": 0, "native": true, "decimals": 18 },
     "FXRP": { "assetId": 1, "token": "0x0b6A3645c240605887a5532109323A3E12273dc7", "decimals": 6 },
     "USDT0": { "assetId": 2, "token": "0xC1A5B41512496B80903D1f32d6dEa3a73212E71F", "decimals": 6 },
-    "BTC": { "assetId": 999, "external": true, "decimals": 8 }
+    "BTC": { "assetId": 999, "token": "0x0E8012D34cCcE7252b680cE96b36f514C5D2Bd04", "decimals": 8 }
   }
 }

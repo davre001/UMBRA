@@ -3,7 +3,7 @@
   "chainId": 114,
   "rpcUrl": "https://flare-testnet.drpc.org",
   "deployer": "0x2d671A0D877B206fcd7A103335ee8173f50A1d06",
-  "deployBlock": 33918800,
+  "deployBlock": 33927500,
   "contracts": {
     "Poseidon2_BN254": "0x94d22070FfDB39a9dAEc0a9B5b367111e74dF071",
     "WithdrawHonkVerifier": "0xa3410943004c2b537C48e76F8A9eeE8aA71df40c",
@@ -11,17 +11,20 @@
     "PlaceOrderHonkVerifier": "0xbdB988FBc849499bcdF42951FD67792357B34d2D",
     "CancelOrderHonkVerifier": "0xcBa1edd6b9D9f799BF172C14803CB14b89715Dd7",
     "MatchOrdersHonkVerifier": "0x22A3B97BA38013BA44B91a9baE72094A751a318A",
-    "BtcDepositHonkVerifier": "0xE9C7Ff4c7BaB9C5A7902465864d27b3c46CCE7c8",
-    "ShieldedVault": "0x46283cc9C4946290c352a064fd6503900F8f027b",
+    "BtcDepositHonkVerifier": "0xfC5561cbec08b9674D3EE4cf5943b83eA62774EA",
+    "WrappedBTC": "0x0E8012D34cCcE7252b680cE96b36f514C5D2Bd04",
+    "ShieldedVault": "0x13643D75088cfaB4737E8b6c85813e95bfaB450B",
     "ComplianceRegistry": "0xC9192Ecaf662c977B28c614e49F558AAAB832577",
     "StealthAnnouncer": "0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1",
     "OwnerKeyRegistry": "0x48C77021624f7b4baC092570CDD56EB163eC3e71",
-    "PrivacyKeyRegistry": "0x8107172F8078c965bC9F334fD0bFefB2cFFAe275"
+    "PrivacyKeyRegistry": "0x8107172F8078c965bC9F334fD0bFefB2cFFAe275",
+    "BatchWithdrawer": "0x4E90ECc46d47FF8B8a13F5396931838b256A3fC1"
   },
   "assets": {
     "C2FLR": { "assetId": 0, "native": true, "decimals": 18 },
     "FXRP": { "assetId": 1, "token": "0x0b6A3645c240605887a5532109323A3E12273dc7", "decimals": 6 },
-    "USDT0": { "assetId": 2, "token": "0xC1A5B41512496B80903D1f32d6dEa3a73212E71F", "decimals": 6 }
+    "USDT0": { "assetId": 2, "token": "0xC1A5B41512496B80903D1f32d6dEa3a73212E71F", "decimals": 6 },
+    "BTC": { "assetId": 999, "token": "0x0E8012D34cCcE7252b680cE96b36f514C5D2Bd04", "decimals": 8 }
   },
-  "note": "Redeployed so pay() exempts isExternalSourceAsset (BTC) from its isAllowedAsset check, mirroring withdraw()'s existing isExternal branch — BTC-backed notes could previously be minted (depositExternal) and withdrawn but never privately paid. No circuit/verifier changed at all, so this reuses all 6 existing verifiers plus Poseidon2/ComplianceRegistry/StealthAnnouncer/OwnerKeyRegistry/PrivacyKeyRegistry — only ShieldedVault itself is new. checkpoints[BTC_SIGNET_SOURCE_CHAIN_ID] is unset again on this fresh vault — run contract/scripts/refresh-btc-checkpoint.ts before any BTC deposit can be proven. Earlier addresses in this file's history are stale."
+  "note": "Redeployed for the public-WrappedBTC rebuild: btc_deposit's circuit now binds a real EVM recipient+amount (not a private note commitment), so depositExternal's ExternalDeposit struct changed — an ABI break, hence a fresh ShieldedVault. BTC (assetId 999) is now ordinary allowlisted collateral backed by real WrappedBTC (deposits mint directly to the recipient's public balance via depositExternal; shield/withdraw/pay/dark-pool all work on it exactly like FXRP/USDT0) — it is no longer registered via setExternalSourceAsset. Reuses all 5 unchanged verifiers plus Poseidon2/ComplianceRegistry/StealthAnnouncer/OwnerKeyRegistry/PrivacyKeyRegistry/BatchWithdrawer; only ShieldedVault, BtcDepositHonkVerifier, and WrappedBTC are new (see contract/scripts/redeploy-vault-wrapped-btc.ts). checkpoints[BTC_SIGNET_SOURCE_CHAIN_ID] registered at signet height 317248 and synced to this backend. Earlier addresses in this file's history (including the prior private-note BTC vault) are stale — any notes held there are no longer reachable."
 }

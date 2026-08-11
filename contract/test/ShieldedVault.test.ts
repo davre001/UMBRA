@@ -273,19 +273,34 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     expect(await vault.isSpentNullifier(publicInputs[1])).to.equal(true);
   });
 
-  it("mints a note from a real BTC deposit proof via depositExternal", async () => {
-    // btc_deposit fixture public inputs, in circuit-declared order:
-    // (checkpoint_commitment_pub, note_commitment, nullifier) — see
-    // circuits/BTC_DEPOSIT_DESIGN.md.
-    const { proof, publicInputs } = loadFixture("btc_deposit", 3);
-    const [checkpointRoot, noteCommitment, nullifier] = publicInputs;
+  // btc_deposit fixture public inputs, in circuit-declared order:
+  // (checkpoint_commitment_pub, recipient, amount, nullifier) — see
+  // circuits/BTC_DEPOSIT_DESIGN.md. The fixture's recipient is a fixed
+  // address baked into Prover.toml, not one of the Hardhat signers.
+  const BTC_DEPOSIT_RECIPIENT = "0x1234567890123456789012345678901234567890";
+  const BTC_DEPOSIT_AMOUNT = 250000n;
+
+  async function deployWrappedBtcAndRegister() {
+    const WrappedBTC = await ethers.getContractFactory("WrappedBTC");
+    const wrappedBtc = await WrappedBTC.deploy(admin.address);
+    await wrappedBtc.waitForDeployment();
+    await wrappedBtc.connect(admin).grantRole(await wrappedBtc.MINTER_ROLE(), await vault.getAddress());
+    await vault.connect(admin).setExternalDepositToken(BTC_SIGNET_SOURCE_CHAIN_ID, await wrappedBtc.getAddress());
+    return wrappedBtc;
+  }
+
+  it("mints real, public WrappedBTC from a real BTC deposit proof via depositExternal", async () => {
+    const wrappedBtc = await deployWrappedBtcAndRegister();
+    const { proof, publicInputs } = loadFixture("btc_deposit", 4);
+    const [checkpointRoot, , , nullifier] = publicInputs;
     await vault.connect(admin).setCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot);
 
-    const rootBefore = await vault.currentRoot();
+    const balanceBefore = await wrappedBtc.balanceOf(BTC_DEPOSIT_RECIPIENT);
     const tx = await vault.depositExternal(btcDepositVerifierAddress, proof, {
       sourceChainId: BTC_SIGNET_SOURCE_CHAIN_ID,
       checkpointRoot,
-      noteCommitment,
+      recipient: BTC_DEPOSIT_RECIPIENT,
+      amount: BTC_DEPOSIT_AMOUNT,
       nullifier,
     });
     const receipt = await tx.wait();
@@ -296,47 +311,74 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     expect(event, "ExternalDeposited event must be emitted").to.not.be.undefined;
     expect(event!.args.sourceChainId).to.equal(BTC_SIGNET_SOURCE_CHAIN_ID);
     expect(event!.args.nullifier).to.equal(nullifier);
-    expect(event!.args.noteCommitment).to.equal(BigInt(noteCommitment));
-    expect(event!.args.newRoot).to.not.equal(rootBefore, "root must change after inserting the note commitment");
-    expect(await vault.currentRoot()).to.equal(event!.args.newRoot);
+    expect(ethers.getAddress(event!.args.recipient)).to.equal(ethers.getAddress(BTC_DEPOSIT_RECIPIENT));
+    expect(event!.args.amount).to.equal(BTC_DEPOSIT_AMOUNT);
+    expect(await wrappedBtc.balanceOf(BTC_DEPOSIT_RECIPIENT)).to.equal(balanceBefore + BTC_DEPOSIT_AMOUNT);
     expect(await vault.isSpentNullifier(BigInt(nullifier))).to.equal(true);
   });
 
   it("depositExternal rejects a verifier that was never trusted", async () => {
-    const { proof, publicInputs } = loadFixture("btc_deposit", 3);
-    const [checkpointRoot, noteCommitment, nullifier] = publicInputs;
+    await deployWrappedBtcAndRegister();
+    const { proof, publicInputs } = loadFixture("btc_deposit", 4);
+    const [checkpointRoot, , , nullifier] = publicInputs;
     await vault.connect(admin).setCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot);
 
     await expect(
       vault.depositExternal(alice.address /* not a registered verifier */, proof, {
         sourceChainId: BTC_SIGNET_SOURCE_CHAIN_ID,
         checkpointRoot,
-        noteCommitment,
+        recipient: BTC_DEPOSIT_RECIPIENT,
+        amount: BTC_DEPOSIT_AMOUNT,
         nullifier,
       })
     ).to.be.revertedWithCustomError(vault, "UnknownVerifier");
   });
 
   it("depositExternal rejects a checkpointRoot that doesn't match the registered checkpoint", async () => {
-    const { proof, publicInputs } = loadFixture("btc_deposit", 3);
-    const [checkpointRoot, noteCommitment, nullifier] = publicInputs;
+    await deployWrappedBtcAndRegister();
+    const { proof, publicInputs } = loadFixture("btc_deposit", 4);
+    const [checkpointRoot, , , nullifier] = publicInputs;
     // Deliberately not registering the real checkpoint — checkpoints[sourceChainId] stays its zero default.
 
     await expect(
       vault.depositExternal(btcDepositVerifierAddress, proof, {
         sourceChainId: BTC_SIGNET_SOURCE_CHAIN_ID,
         checkpointRoot,
-        noteCommitment,
+        recipient: BTC_DEPOSIT_RECIPIENT,
+        amount: BTC_DEPOSIT_AMOUNT,
         nullifier,
       })
     ).to.be.revertedWithCustomError(vault, "StaleCheckpoint");
   });
 
-  it("depositExternal rejects replaying the same nullifier", async () => {
-    const { proof, publicInputs } = loadFixture("btc_deposit", 3);
-    const [checkpointRoot, noteCommitment, nullifier] = publicInputs;
+  it("depositExternal rejects when no token is registered for the source chain", async () => {
+    const { proof, publicInputs } = loadFixture("btc_deposit", 4);
+    const [checkpointRoot, , , nullifier] = publicInputs;
     await vault.connect(admin).setCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot);
-    const deposit = { sourceChainId: BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot, noteCommitment, nullifier };
+
+    await expect(
+      vault.depositExternal(btcDepositVerifierAddress, proof, {
+        sourceChainId: BTC_SIGNET_SOURCE_CHAIN_ID,
+        checkpointRoot,
+        recipient: BTC_DEPOSIT_RECIPIENT,
+        amount: BTC_DEPOSIT_AMOUNT,
+        nullifier,
+      })
+    ).to.be.revertedWithCustomError(vault, "NoDepositToken");
+  });
+
+  it("depositExternal rejects replaying the same nullifier", async () => {
+    await deployWrappedBtcAndRegister();
+    const { proof, publicInputs } = loadFixture("btc_deposit", 4);
+    const [checkpointRoot, , , nullifier] = publicInputs;
+    await vault.connect(admin).setCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot);
+    const deposit = {
+      sourceChainId: BTC_SIGNET_SOURCE_CHAIN_ID,
+      checkpointRoot,
+      recipient: BTC_DEPOSIT_RECIPIENT,
+      amount: BTC_DEPOSIT_AMOUNT,
+      nullifier,
+    };
 
     await vault.depositExternal(btcDepositVerifierAddress, proof, deposit);
     await expect(vault.depositExternal(btcDepositVerifierAddress, proof, deposit)).to.be.revertedWithCustomError(

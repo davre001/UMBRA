@@ -12,10 +12,11 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
  * already use for spendingKey/privacyKey (same signature, a different
  * domain-separated label; no new signature prompt, no separate wallet to
  * create or back up). This is what removes the "go install a Bitcoin
- * wallet, learn to build a raw OP_RETURN transaction" step from
- * `/deposit-btc` — the user's existing EVM wallet becomes the root of
- * their signet deposit address too, same as it already is for their
- * UMBRA spending key. See BTC_DEPOSIT_DESIGN.md and
+ * wallet, learn to build a raw OP_RETURN transaction" step — the user's
+ * existing EVM wallet becomes the root of their signet deposit address
+ * too (see the Faucet page's BTC card, which auto-derives it on connect
+ * and drives this whole build/sign/broadcast flow from one button), same
+ * as it already is for their UMBRA spending key. See BTC_DEPOSIT_DESIGN.md and
  * backend/src/btc-withdrawal/{wallet.ts,bitcoin-tx.ts} for the equivalent
  * server-side pattern this mirrors (custodian key + Psbt signing) — same
  * bitcoinjs-lib/ecpair/tiny-secp256k1 stack, same signet network object,
@@ -134,16 +135,21 @@ export interface BuiltDepositTx {
 
 /**
  * Builds and signs the fixed-template deposit tx spending `utxo` in full:
- * output 0 is a 0-value OP_RETURN carrying `ownerKey`, output 1 pays
+ * output 0 is a 0-value OP_RETURN carrying `recipientAddress` (12
+ * zero-padding bytes + the 20-byte EVM address — bitcoin.nr's
+ * `parse_deposit_tx` reads it as "address as bytes32"), output 1 pays
  * `utxo.value - fee` to the vault (no change output — see
- * ESTIMATED_DEPOSIT_VSIZE's own comment for why). Does not broadcast —
- * call broadcastSignetTx separately so a caller can inspect/log first.
+ * ESTIMATED_DEPOSIT_VSIZE's own comment for why). `recipientAddress` is
+ * the depositor's own connected EVM wallet address — WrappedBTC mints
+ * straight there once proven, with no separate note/claim step (see
+ * ShieldedVault.sol's depositExternal). Does not broadcast — call
+ * broadcastSignetTx separately so a caller can inspect/log first.
  */
 export function buildDepositTx(
   keyPair: ECPairInterface,
   utxo: SignetUtxo,
   vaultPubkeyHashHex: string,
-  ownerKey: bigint,
+  recipientAddress: `0x${string}`,
   feeRateSatsPerVb: number
 ): BuiltDepositTx {
   const feeSats = BigInt(Math.ceil(ESTIMATED_DEPOSIT_VSIZE * feeRateSatsPerVb));
@@ -162,8 +168,10 @@ export function buildDepositTx(
   const psbt = new bitcoin.Psbt({ network: SIGNET_NETWORK });
   psbt.addInput({ hash: utxo.txid, index: utxo.vout, witnessUtxo: { script: ownScript, value: BigInt(utxo.value) } });
 
-  const ownerKeyBytes = Buffer.from(ownerKey.toString(16).padStart(64, "0"), "hex");
-  const opReturnScript = bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, ownerKeyBytes]);
+  const recipientBytes = Buffer.from(recipientAddress.slice(2), "hex");
+  if (recipientBytes.length !== 20) throw new Error(`recipientAddress must be a 20-byte address, got ${recipientBytes.length} bytes`);
+  const push32 = Buffer.concat([Buffer.alloc(12, 0), recipientBytes]);
+  const opReturnScript = bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, push32]);
   psbt.addOutput({ script: opReturnScript, value: BigInt(0) });
   psbt.addOutput({ address: vaultAddress, value: amountSats });
 

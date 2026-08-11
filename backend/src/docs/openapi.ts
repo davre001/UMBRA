@@ -197,25 +197,26 @@ export const openapiSpec = {
     "/api/btc-deposit/submit": {
       post: {
         tags: ["BTC Deposit"],
-        summary: "Submit a confirmed BTC signet deposit tx (fixed OP_RETURN+P2WPKH template) for proving",
+        summary:
+          "Submit a confirmed BTC signet deposit tx (fixed OP_RETURN+P2WPKH template) for proving. The recipient EVM address is read straight off the tx's OP_RETURN output, not supplied by the caller — once proven, WrappedBTC is auto-minted there with no separate claim step (see btc-deposit/minter.ts).",
         requestBody: {
           required: true,
           content: {
             "application/json": {
-              schema: { type: "object", required: ["txid", "blinding"], properties: { txid: { type: "string" }, blinding: { type: "string" } } },
+              schema: { type: "object", required: ["txid"], properties: { txid: { type: "string" } } },
             },
           },
         },
         responses: {
           "201": { description: "Deposit accepted, queued awaiting_proof" },
-          "400": { description: "Invalid txid/blinding or template mismatch" },
+          "400": { description: "Invalid txid or template mismatch" },
         },
       },
     },
     "/api/btc-deposit/{id}": {
       get: {
         tags: ["BTC Deposit"],
-        summary: "Get a submitted BTC deposit's proving status",
+        summary: "Get a submitted BTC deposit's proving/minting status (awaiting_proof -> proven -> minted, or failed)",
         parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
         responses: { "200": { description: "Deposit status" }, "404": { description: "Not found" } },
       },

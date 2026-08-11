@@ -43,16 +43,15 @@ btcDepositRouter.post("/checkpoint", (req, res) => {
  * fixed template) up front — the heavier header-chain + Merkle-proof fetch
  * is deferred to /proof-inputs below, run once by the worker that actually
  * needs it, rather than duplicated here just to validate a submission.
+ * `recipient` is read straight off the transaction itself (the OP_RETURN
+ * output the depositor's own build-tx step encoded) — nothing secret to
+ * submit alongside `txid` anymore, unlike the old private-note design.
  */
 btcDepositRouter.post("/submit", async (req, res, next) => {
   try {
-    const { txid, blinding } = req.body ?? {};
+    const { txid } = req.body ?? {};
     if (typeof txid !== "string" || !/^[0-9a-f]{64}$/i.test(txid)) {
-      res.status(400).json({ error: "Expected { txid: <64-char hex txid>, blinding: <decimal string> }" });
-      return;
-    }
-    if (typeof blinding !== "string" || blinding.length === 0) {
-      res.status(400).json({ error: "Expected { txid: <64-char hex txid>, blinding: <decimal string> }" });
+      res.status(400).json({ error: "Expected { txid: <64-char hex txid> }" });
       return;
     }
     const checkpointHeight = getCurrentCheckpointHeight();
@@ -71,25 +70,15 @@ btcDepositRouter.post("/submit", async (req, res, next) => {
       return;
     }
     const tx = stripWitness(rawTxHex);
-    const { ownerKey, amountSats } = parseDepositTx(tx);
+    const { recipient, amountSats } = parseDepositTx(tx);
 
-    let record;
-    try {
-      record = store.createRecord({
-        txid,
-        checkpointHeight,
-        ownerKey: ownerKey.toString(),
-        amountSats: amountSats.toString(),
-        blinding,
-      });
-    } catch (err) {
-      if (err instanceof store.BlindingMismatchError) {
-        res.status(409).json({ error: err.message });
-        return;
-      }
-      throw err;
-    }
-    res.status(201).json({ id: record.id, status: record.status, ownerKey: record.ownerKey, amountSats: record.amountSats });
+    const record = store.createRecord({
+      txid,
+      checkpointHeight,
+      recipient,
+      amountSats: amountSats.toString(),
+    });
+    res.status(201).json({ id: record.id, status: record.status, recipient: record.recipient, amountSats: record.amountSats });
   } catch (err) {
     next(err);
   }
@@ -115,15 +104,16 @@ btcDepositRouter.get("/:id", (req, res) => {
     id: record.id,
     status: record.status,
     txid: record.txid,
-    ownerKey: record.ownerKey,
+    recipient: record.recipient,
     amountSats: record.amountSats,
     proof: record.proof,
     publicInputs: record.publicInputs,
+    mintTxHash: record.mintTxHash,
     failureReason: record.failureReason,
   });
 });
 
-/** Full circuit-input assembly for a pending deposit — real header chain + real Merkle proof, fetched fresh here (see mempool.ts). Exposes the private `blinding` witness alongside them, unlike the public status route, so it's gated the same way dark-engine's own /proof-inputs route is. */
+/** Full circuit-input assembly for a pending deposit — real header chain + real Merkle proof, fetched fresh here (see mempool.ts). Gated the same way dark-engine's own /proof-inputs route is, purely to keep this off public traffic — nothing it returns is actually secret anymore. */
 btcDepositRouter.get("/:id/proof-inputs", async (req, res, next) => {
   if (!requireBtcDepositSecret(req, res)) return;
   try {
@@ -137,25 +127,25 @@ btcDepositRouter.get("/:id/proof-inputs", async (req, res, next) => {
       return;
     }
     const circuitInputs = await assembleDepositProofInputs(record.txid, record.checkpointHeight);
-    res.json({ id: record.id, blinding: record.blinding, ...circuitInputs });
+    res.json({ id: record.id, ...circuitInputs });
   } catch (err) {
     next(err);
   }
 });
 
-/** Worker submits the completed proof here. Manual/offline completion also works the same way (e.g. a proof produced by hand via nargo/bb) — same shape as dark-engine's own POST /matches/:id/proof. */
+/** Worker submits the completed proof here. Manual/offline completion also works the same way (e.g. a proof produced by hand via nargo/bb) — same shape as dark-engine's own POST /matches/:id/proof. Marking a deposit `proven` is what makes minter.ts's poll loop pick it up and auto-mint WrappedBTC — no separate claim step. */
 btcDepositRouter.post("/:id/proof", (req, res) => {
   if (!requireBtcDepositSecret(req, res)) return;
   const { proof, publicInputs } = req.body ?? {};
   if (typeof proof !== "string" || !proof.startsWith("0x")) {
-    res.status(400).json({ error: "Expected { proof: '0x...', publicInputs: [checkpointCommitment, noteCommitment, nullifier] }" });
+    res.status(400).json({ error: "Expected { proof: '0x...', publicInputs: [checkpointCommitment, recipient, amount, nullifier] }" });
     return;
   }
-  if (!Array.isArray(publicInputs) || publicInputs.length !== 3 || !publicInputs.every((p) => typeof p === "string")) {
-    res.status(400).json({ error: "Expected { proof: '0x...', publicInputs: [checkpointCommitment, noteCommitment, nullifier] }" });
+  if (!Array.isArray(publicInputs) || publicInputs.length !== 4 || !publicInputs.every((p) => typeof p === "string")) {
+    res.status(400).json({ error: "Expected { proof: '0x...', publicInputs: [checkpointCommitment, recipient, amount, nullifier] }" });
     return;
   }
-  const record = store.markProven(req.params.id, proof as `0x${string}`, publicInputs as [string, string, string]);
+  const record = store.markProven(req.params.id, proof as `0x${string}`, publicInputs as [string, string, string, string]);
   if (!record) {
     res.status(404).json({ error: "Deposit not found" });
     return;

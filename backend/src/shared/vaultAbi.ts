@@ -106,6 +106,17 @@ export const SHIELDED_VAULT_ABI = [
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "NoDepositToken",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "nullifierHash",
         "type": "uint256"
@@ -252,26 +263,39 @@ export const SHIELDED_VAULT_ABI = [
       },
       {
         "indexed": true,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "ExternalDepositTokenUpdated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": true,
         "internalType": "bytes32",
         "name": "nullifier",
         "type": "bytes32"
       },
       {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "noteCommitment",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint32",
-        "name": "leafIndex",
-        "type": "uint32"
+        "indexed": true,
+        "internalType": "address",
+        "name": "recipient",
+        "type": "address"
       },
       {
         "indexed": false,
         "internalType": "uint256",
-        "name": "newRoot",
+        "name": "amount",
         "type": "uint256"
       }
     ],
@@ -814,9 +838,14 @@ export const SHIELDED_VAULT_ABI = [
             "type": "bytes32"
           },
           {
-            "internalType": "bytes32",
-            "name": "noteCommitment",
-            "type": "bytes32"
+            "internalType": "address",
+            "name": "recipient",
+            "type": "address"
+          },
+          {
+            "internalType": "uint256",
+            "name": "amount",
+            "type": "uint256"
           },
           {
             "internalType": "bytes32",
@@ -832,6 +861,25 @@ export const SHIELDED_VAULT_ABI = [
     "name": "depositExternal",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "externalDepositToken",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {
@@ -1263,6 +1311,24 @@ export const SHIELDED_VAULT_ABI = [
       }
     ],
     "name": "setComplianceRegistry",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "setExternalDepositToken",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

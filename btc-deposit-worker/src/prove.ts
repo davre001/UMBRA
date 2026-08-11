@@ -4,7 +4,7 @@ import path from "path";
 import { Noir } from "@noir-lang/noir_js";
 import { Barretenberg, UltraHonkBackend } from "@aztec/bb.js";
 import type { CompiledCircuit, InputMap } from "@noir-lang/types";
-import { BTC_ASSET_ID, checkpointCommitment, commitment, depositNullifier } from "./poseidon2";
+import { checkpointCommitment, depositNullifier } from "./poseidon2";
 import type { BtcDepositProofInputs } from "./types";
 
 /**
@@ -72,7 +72,7 @@ function sha256d(buf: Buffer): Buffer {
 
 export async function proveBtcDeposit(
   inputs: BtcDepositProofInputs
-): Promise<{ proof: `0x${string}`; publicInputs: [string, string, string] }> {
+): Promise<{ proof: `0x${string}`; publicInputs: [string, string, string, string] }> {
   const checkpointHashBytes = Buffer.from(inputs.checkpointHash, "hex");
   const checkpointCommitmentValue = checkpointCommitment(checkpointHashBytes);
 
@@ -80,17 +80,19 @@ export async function proveBtcDeposit(
   const txid = sha256d(txBytes);
   const nullifierValue = depositNullifier(txid);
 
-  const ownerKey = BigInt(inputs.ownerKey);
+  // bitcoin.nr's `bytes_be_to_field` — the 20-byte recipient address
+  // interpreted directly as a big-endian Field, same as any other
+  // `[u8; N] -> Field` conversion in that circuit.
+  const recipientValue = BigInt(inputs.recipient);
   const amountSats = BigInt(inputs.amountSats);
-  const blinding = BigInt(inputs.blinding);
-  const noteCommitmentValue = commitment(BTC_ASSET_ID, amountSats, ownerKey, blinding);
 
   const circuit = await loadCircuit();
   const noir = new Noir(circuit);
 
   const witnessInputs: InputMap = {
     checkpoint_commitment_pub: checkpointCommitmentValue.toString(),
-    note_commitment: noteCommitmentValue.toString(),
+    recipient: recipientValue.toString(),
+    amount: amountSats.toString(),
     nullifier: nullifierValue.toString(),
     checkpoint_hash: byteArrayInput(inputs.checkpointHash),
     headers: inputs.headers.map(byteArrayInput),
@@ -98,7 +100,6 @@ export async function proveBtcDeposit(
     merkle_path_elements: inputs.merklePathElements.map(byteArrayInput),
     merkle_path_indices: inputs.merklePathIndices,
     merkle_actual_depth: inputs.merkleActualDepth.toString(),
-    blinding: blinding.toString(),
   };
 
   const { witness } = await noir.execute(witnessInputs);
@@ -111,7 +112,8 @@ export async function proveBtcDeposit(
     proof: toHex(proof),
     publicInputs: [
       "0x" + checkpointCommitmentValue.toString(16).padStart(64, "0"),
-      "0x" + noteCommitmentValue.toString(16).padStart(64, "0"),
+      "0x" + recipientValue.toString(16).padStart(64, "0"),
+      "0x" + amountSats.toString(16).padStart(64, "0"),
       "0x" + nullifierValue.toString(16).padStart(64, "0"),
     ],
   };

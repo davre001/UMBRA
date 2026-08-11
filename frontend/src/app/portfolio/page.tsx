@@ -40,9 +40,12 @@ export default function Portfolio() {
     queryKey: ['portfolioPublicBalances', chainId, walletAddress],
     queryFn: async () => {
       const entries = await Promise.all(
-        // external-source assets (BTC) have no EVM token contract and no
-        // public wallet balance at all — they only ever exist as a
-        // shielded note, so there's nothing to query here.
+        // BTC is now ordinary allowlisted collateral (real WrappedBTC,
+        // minted directly to the depositor's public balance — see
+        // ShieldedVault.sol's depositExternal) with a real `token` entry,
+        // same as FXRP/USDT0 — the `external` flag stays in AssetConfig
+        // for a hypothetical future chain with no real EVM-side
+        // collateral, but nothing currently sets it.
         ASSET_OPTIONS.filter((sym) => !deployment!.assets[sym].external).map(async (sym) => {
           const cfg = deployment!.assets[sym];
           const balance = cfg.native

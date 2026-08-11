@@ -19,11 +19,15 @@ const RELAYABLE_ACTIONS = {
   // (verifier, proof, deposit) — deposit is a single ExternalDeposit
   // struct/tuple argument, same reasoning as every other action here: the
   // ZK proof itself is the authorization, not a signature, so this wallet
-  // can submit on the depositor's behalf without ever needing theirs. See
-  // circuits/BTC_DEPOSIT_DESIGN.md's "proof construction is permissionless"
-  // note — unlike the other relayed actions, ANYONE could construct this
-  // proof, not just the depositor, but the resulting note is still only
-  // ever owned by the owner_key embedded in the real Bitcoin transaction.
+  // can submit on the depositor's behalf without ever needing theirs.
+  // Unlike the other relayed actions, ANYONE could construct this proof,
+  // not just the depositor — but the mint still only ever lands in the
+  // `recipient` EVM address the circuit itself extracted from the real
+  // Bitcoin transaction's OP_RETURN output, so that's harmless. In
+  // practice btc-deposit/minter.ts's poll loop is what actually calls
+  // this now (see its own doc for why), not a manual frontend request —
+  // this entry stays for parity/testing, not because anything still
+  // depends on it being reachable via POST /api/relayer/relay.
   depositExternal: { functionName: "depositExternal" as const, argCount: 3 },
 };
 

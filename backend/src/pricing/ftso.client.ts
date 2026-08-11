@@ -27,12 +27,16 @@ const FTSO_V2_ABI = [
  * USDT0 uses the USDT/USD feed — same peg, no separate USDT0 feed exists.
  * The on-chain feed itself is named "FLR/USD" — it prices the native asset
  * directly, which is exactly what `C2FLR` (assetId 0, held natively — see
- * ShieldedVault.sol's nativeAssetId) actually is.
+ * ShieldedVault.sol's nativeAssetId) actually is. BTC/USD confirmed live
+ * the same way (a real `getFeedById` read against Coston2, not assumed from
+ * the encoding scheme alone) — it prices WrappedBTC, which is minted 1:1
+ * against real signet BTC.
  */
 const FEED_IDS: Record<AssetSymbol, `0x${string}`> = {
   C2FLR: "0x01464c522f55534400000000000000000000000000",
   FXRP: "0x015852502f55534400000000000000000000000000",
   USDT0: "0x01555344542f555344000000000000000000000000",
+  BTC: "0x014254432f55534400000000000000000000000000",
 };
 
 export interface UsdPrice {

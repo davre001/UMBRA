@@ -29,7 +29,7 @@ async function fetchProofInputs(id: string): Promise<BtcDepositProofInputs> {
   return (await res.json()) as BtcDepositProofInputs;
 }
 
-async function submitProof(id: string, proof: `0x${string}`, publicInputs: [string, string, string]): Promise<void> {
+async function submitProof(id: string, proof: `0x${string}`, publicInputs: [string, string, string, string]): Promise<void> {
   const res = await fetch(`${BACKEND_URL}/api/btc-deposit/${id}/proof`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-btc-deposit-secret": requireSecret() },

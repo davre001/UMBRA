@@ -19,17 +19,13 @@ import type { BtcDepositCircuitInputs } from "./types";
  * keeps a single source of truth for "what does a valid deposit tx look
  * like."
  *
- * PRIVACY NOTE, distinct from every other UMBRA circuit: `amountSats` and
- * `ownerKey` are NOT secrets here — Bitcoin's chain is public, so anyone
- * can already read them directly off the confirmed transaction. What
- * `blinding` protects is whether a third party can link "this specific BTC
- * payment" to "this specific UMBRA note_commitment" — and since this
- * backend necessarily assembles the proof (proving is too heavy for a
- * browser — see BTC_DEPOSIT_DESIGN.md's "Proving location" section), it
- * necessarily sees that linkage too, unlike `withdraw`/`pay`/etc., which
- * are proven entirely client-side and never reveal note contents to any
- * server. This is a real, disclosed privacy regression specific to the
- * deposit-only v1 design, not an oversight.
+ * Unlike every other UMBRA circuit, there is nothing private here at all:
+ * `recipient` (the depositor's own EVM address) and `amountSats` are both
+ * read straight off the confirmed Bitcoin transaction, which is public the
+ * moment it confirms — the circuit just proves that public data really
+ * appears in a really-confirmed signet block, then mints real WrappedBTC
+ * straight to `recipient`'s public balance. No blinding, no note, nothing
+ * for this backend (or anyone else) to ever unlink.
  */
 
 // A single explicit override (MEMPOOL_SIGNET_API_BASE) means exactly that
@@ -160,8 +156,8 @@ export function stripWitness(rawHex: string): Buffer {
   return Buffer.concat([version, inputCountBytes, inputsBytes, outputCountBytes, outputsBytes, locktime]);
 }
 
-/** Validates `tx` matches btc_deposit's fixed template exactly and extracts (ownerKey, amountSats) — mirrors bitcoin.nr's `parse_deposit_tx` assertions byte-for-byte, so a mismatched tx fails here with a specific reason instead of a doomed proving attempt. */
-export function parseDepositTx(tx: Buffer): { ownerKey: bigint; amountSats: bigint } {
+/** Validates `tx` matches btc_deposit's fixed template exactly and extracts (recipient, amountSats) — mirrors bitcoin.nr's `parse_deposit_tx` assertions byte-for-byte, so a mismatched tx fails here with a specific reason instead of a doomed proving attempt. The OP_RETURN push is a 32-byte "address as bytes32": 12 zero-padding bytes followed by the 20-byte EVM recipient address. */
+export function parseDepositTx(tx: Buffer): { recipient: `0x${string}`; amountSats: bigint } {
   if (tx.length !== TX_SIZE) {
     throw new TemplateMismatchError(`expected a ${TX_SIZE}-byte deposit tx (1 input, 2 outputs), got ${tx.length} bytes`);
   }
@@ -173,10 +169,13 @@ export function parseDepositTx(tx: Buffer): { ownerKey: bigint; amountSats: bigi
     if (tx[47 + i] !== 0) throw new TemplateMismatchError("output 0 (OP_RETURN) must carry 0 value");
   }
   if (tx[55] !== 0x22 || tx[56] !== 0x6a || tx[57] !== 0x20) {
-    throw new TemplateMismatchError("output 0 must be OP_RETURN + push32 (owner_key)");
+    throw new TemplateMismatchError("output 0 must be OP_RETURN + push32 (recipient)");
   }
-  const ownerKeyBytes = tx.subarray(58, 90);
-  const ownerKey = BigInt("0x" + ownerKeyBytes.toString("hex"));
+  const padding = tx.subarray(58, 70);
+  if (!padding.every((b) => b === 0)) {
+    throw new TemplateMismatchError("output 0's push32 must be zero-padded (12 bytes) before the 20-byte recipient address");
+  }
+  const recipient = ("0x" + tx.subarray(70, 90).toString("hex")) as `0x${string}`;
 
   const amountSats = tx.readBigUInt64LE(90);
   if (tx[98] !== 0x16 || tx[99] !== 0x00 || tx[100] !== 0x14) {
@@ -187,7 +186,7 @@ export function parseDepositTx(tx: Buffer): { ownerKey: bigint; amountSats: bigi
     throw new TemplateMismatchError(`output 1 must pay the vault address (expected ${VAULT_PUBKEY_HASH}, got ${destHash})`);
   }
 
-  return { ownerKey, amountSats };
+  return { recipient, amountSats };
 }
 
 interface MempoolBlockStatus {
@@ -243,7 +242,7 @@ export async function assembleDepositProofInputs(txid: string, checkpointHeight:
 
   const rawTxHex = (await mempoolGet(`/tx/${txid}/hex`)).trim();
   const tx = stripWitness(rawTxHex);
-  const { ownerKey, amountSats } = parseDepositTx(tx);
+  const { recipient, amountSats } = parseDepositTx(tx);
 
   const merkleProof = await mempoolGetJson<MempoolMerkleProof>(`/tx/${txid}/merkle-proof`);
   const actualDepth = merkleProof.merkle.length;
@@ -274,7 +273,7 @@ export async function assembleDepositProofInputs(txid: string, checkpointHeight:
     throw new MempoolFetchError(`header/block merkle_root mismatch at height ${expectedHeight} — inconsistent mempool.space response`);
   }
 
-  logger.info(`[btc-deposit] assembled proof inputs for ${txid}: height=${txHeight}, amountSats=${amountSats}, depth=${actualDepth}`);
+  logger.info(`[btc-deposit] assembled proof inputs for ${txid}: height=${txHeight}, recipient=${recipient}, amountSats=${amountSats}, depth=${actualDepth}`);
 
   return {
     checkpointHash,
@@ -283,7 +282,7 @@ export async function assembleDepositProofInputs(txid: string, checkpointHeight:
     merklePathElements,
     merklePathIndices,
     merkleActualDepth: actualDepth,
-    ownerKey: ownerKey.toString(),
+    recipient,
     amountSats: amountSats.toString(),
   };
 }

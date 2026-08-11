@@ -89,7 +89,6 @@ export const Navbar: React.FC = () => {
   const navLinks = [
     { name: 'Portfolio', href: '/portfolio' },
     { name: 'Shield', href: '/shield' },
-    { name: 'BTC Deposit', href: '/deposit-btc' },
     { name: 'Private Pay', href: '/pay' },
     { name: 'Dark Swap', href: '/swap' },
     { name: 'Faucet', href: '/faucet' },
