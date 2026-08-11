@@ -30,4 +30,27 @@ describe("btc-deposit / store", () => {
     const stillOriginal = store.getRecord(first.id);
     expect(stillOriginal?.blinding).toBe("42");
   });
+
+  it("refreshes checkpointHeight on a same-blinding resubmission while still awaiting_proof", async () => {
+    const store = await import("../src/btc-deposit/store");
+    const txid = "cc".repeat(32);
+    const first = store.createRecord({ txid, checkpointHeight: 100, ownerKey: "7", amountSats: "250000", blinding: "42" });
+    expect(first.checkpointHeight).toBe(100);
+
+    const refreshed = store.createRecord({ txid, checkpointHeight: 200, ownerKey: "7", amountSats: "250000", blinding: "42" });
+    expect(refreshed.id).toBe(first.id);
+    expect(refreshed.checkpointHeight).toBe(200);
+    expect(store.getRecord(first.id)?.checkpointHeight).toBe(200);
+  });
+
+  it("does NOT refresh checkpointHeight once a record is proven (terminal, not a bookkeeping field)", async () => {
+    const store = await import("../src/btc-deposit/store");
+    const txid = "dd".repeat(32);
+    const record = store.createRecord({ txid, checkpointHeight: 100, ownerKey: "7", amountSats: "250000", blinding: "42" });
+    store.markProven(record.id, "0xproof", ["0x1", "0x2", "0x3"]);
+
+    const resubmitted = store.createRecord({ txid, checkpointHeight: 200, ownerKey: "7", amountSats: "250000", blinding: "42" });
+    expect(resubmitted.status).toBe("proven");
+    expect(resubmitted.checkpointHeight).toBe(100);
+  });
 });

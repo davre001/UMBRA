@@ -56,6 +56,24 @@ export function createRecord(input: {
         logger.warn(`[btc-deposit] ${input.txid}: resubmitted with a different blinding than record ${existingId} — rejecting`);
         throw new BlindingMismatchError(input.txid);
       }
+      // checkpointHeight is captured once at submission time and never
+      // otherwise revisited (assembleDepositProofInputs trusts whatever
+      // the record already has, not a fresh lookup) — so a record
+      // submitted while an older checkpoint was live stays permanently
+      // stuck even after the checkpoint is refreshed to the value that
+      // would actually match its real confirming height, with no way to
+      // recover it. Same blinding means the same legitimate depositor
+      // (an attacker can't produce it), so it's safe to just refresh this
+      // bookkeeping field on resubmission rather than leaving the record
+      // unprovable forever — but only while it's still awaiting_proof;
+      // a proven/failed record is a terminal result, not something a
+      // resubmission should silently mutate.
+      if (existing.status === "awaiting_proof" && existing.checkpointHeight !== input.checkpointHeight) {
+        logger.info(
+          `[btc-deposit] ${input.txid}: refreshing stale checkpointHeight on record ${existingId} (${existing.checkpointHeight} -> ${input.checkpointHeight})`
+        );
+        existing.checkpointHeight = input.checkpointHeight;
+      }
       logger.info(`[btc-deposit] ${input.txid}: already submitted as ${existingId} (${existing.status}) — returning existing record`);
       return existing;
     }
