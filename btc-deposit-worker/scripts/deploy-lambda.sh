@@ -146,9 +146,15 @@ fi
 
 RULE_NAME="${FUNCTION_NAME}-schedule"
 echo "Ensuring EventBridge schedule (every ${POLL_MINUTES}m)..."
+# AWS requires the singular unit at exactly 1 ("rate(1 minute)") — the
+# plural form ("rate(1 minutes)") is a ValidationException, not just a
+# style nit. POLL_MINUTES defaults to 1 here (see this script's own header
+# comment), so this isn't an edge case worth skipping.
+RATE_UNIT="minutes"
+[ "$POLL_MINUTES" = "1" ] && RATE_UNIT="minute"
 aws events put-rule \
   --name "$RULE_NAME" \
-  --schedule-expression "rate(${POLL_MINUTES} minutes)" \
+  --schedule-expression "rate(${POLL_MINUTES} ${RATE_UNIT})" \
   --state ENABLED \
   --region "$AWS_REGION" \
   >/dev/null
