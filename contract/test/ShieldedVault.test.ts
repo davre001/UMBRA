@@ -210,6 +210,45 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     expect(await vault.isKnownRoot(await vault.currentRoot())).to.equal(true);
   });
 
+  it("pay() succeeds for an assetId marked external-source even after its isAllowedAsset entry is revoked", async () => {
+    // Real BTC never has an isAllowedAsset entry at all (only
+    // isExternalSourceAsset — see setExternalSourceAsset's own NatSpec).
+    // Reusing PAY_ASSET_ID/the real pay fixture here (rather than needing a
+    // second real proof for a second assetId) still exercises the exact
+    // code path that matters: shield() first (which does need
+    // isAllowedAsset, unconditionally — external assets are minted via
+    // depositExternal instead, never shield()), then revoking
+    // isAllowedAsset and marking external-source in its place, then
+    // confirming pay() doesn't fall back to requiring the revoked flag.
+    await token.connect(alice).approve(await vault.getAddress(), PAY_AMOUNT);
+    await vault.connect(alice).shield(PAY_ASSET_ID, PAY_AMOUNT, PAY_COMMITMENT);
+
+    await vault.connect(admin).setExternalSourceAsset(PAY_ASSET_ID, true);
+    await vault.connect(admin).setAsset(PAY_ASSET_ID, await token.getAddress(), false);
+    expect(await vault.isAllowedAsset(PAY_ASSET_ID)).to.equal(false);
+
+    const { proof, publicInputs } = loadFixture("pay", 4);
+    const outCommitment = publicInputs[3];
+
+    await expect(vault.pay(proof, publicInputs[0], publicInputs[1], PAY_ASSET_ID, outCommitment)).to.emit(
+      vault,
+      "Paid"
+    );
+  });
+
+  it("pay() still rejects an assetId that's neither allowlisted nor external-source", async () => {
+    await token.connect(alice).approve(await vault.getAddress(), PAY_AMOUNT);
+    await vault.connect(alice).shield(PAY_ASSET_ID, PAY_AMOUNT, PAY_COMMITMENT);
+    await vault.connect(admin).setAsset(PAY_ASSET_ID, await token.getAddress(), false);
+
+    const { proof, publicInputs } = loadFixture("pay", 4);
+    const outCommitment = publicInputs[3];
+
+    await expect(
+      vault.pay(proof, publicInputs[0], publicInputs[1], PAY_ASSET_ID, outCommitment)
+    ).to.be.revertedWithCustomError(vault, "AssetNotAllowed");
+  });
+
   it("places a dark-pool order — spends a regular note, creates a hidden order commitment", async () => {
     await token.connect(alice).approve(await vault.getAddress(), PLACE_ORDER_AMOUNT);
     await vault.connect(alice).shield(PLACE_ORDER_ASSET_ID, PLACE_ORDER_AMOUNT, PLACE_ORDER_COMMITMENT);

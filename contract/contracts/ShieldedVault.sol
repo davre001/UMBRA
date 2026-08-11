@@ -327,14 +327,22 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     ///         `withdraw` brings funds back into the open. Amount is private —
     ///         the circuit itself recomputes `outCommitment` from the spent
     ///         note's real amount and asserts equality, so this contract never
-    ///         needs to see or pass it through.
+    ///         needs to see or pass it through. An isExternalSourceAsset note
+    ///         (BTC) is exempt from the `isAllowedAsset` allowlist for the
+    ///         same reason `withdraw()`'s own `isExternal` branch is — it was
+    ///         never added to that mapping (only to isExternalSourceAsset),
+    ///         so without this exemption every BTC-backed note would be
+    ///         permanently stuck: mintable via depositExternal, payable to no
+    ///         one. Nothing else about `pay()` needs to change — assetId is
+    ///         already an opaque Field to payVerifier regardless of what
+    ///         backs it on-chain.
     function pay(bytes calldata proof, uint256 root, uint256 nullifierHash, uint256 assetId, uint256 outCommitment)
         external
         nonReentrant
     {
         if (!isKnownRoot[root]) revert UnknownRoot(root);
         if (isSpentNullifier[nullifierHash]) revert NullifierAlreadySpent(nullifierHash);
-        if (!isAllowedAsset[assetId]) revert AssetNotAllowed(assetId);
+        if (!isExternalSourceAsset[assetId] && !isAllowedAsset[assetId]) revert AssetNotAllowed(assetId);
 
         bytes32[] memory publicInputs = new bytes32[](4);
         publicInputs[0] = bytes32(root);
