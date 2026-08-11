@@ -1,15 +1,6 @@
 import { Router, Request, Response } from "express";
 import { logger } from "../shared/logger";
-import { assembleDepositProofInputs, parseDepositTx, stripWitness } from "./mempool";
-
-// Same override this file's own mempool.ts already respects internally
-// (assembleDepositProofInputs et al.) — this one route fetched a raw tx
-// directly instead of going through that module, so it silently ignored
-// MEMPOOL_SIGNET_API_BASE until this constant was added. Caught when
-// mempool.space proved unreachable from Render's network specifically
-// (works fine from other networks) but this route kept hard-failing even
-// after switching the env var to blockstream.info.
-const MEMPOOL_BASE = process.env.MEMPOOL_SIGNET_API_BASE ?? "https://mempool.space/signet/api";
+import { assembleDepositProofInputs, mempoolGet, parseDepositTx, stripWitness, SIGNET_API_BASES } from "./mempool";
 import { getCurrentCheckpointHeight, setCurrentCheckpointHeight } from "./checkpoint";
 import * as store from "./store";
 
@@ -70,12 +61,16 @@ btcDepositRouter.post("/submit", async (req, res, next) => {
       return;
     }
 
-    const rawHexRes = await fetch(`${MEMPOOL_BASE}/tx/${txid}/hex`);
-    if (!rawHexRes.ok) {
-      res.status(404).json({ error: `Could not fetch ${txid} from ${MEMPOOL_BASE} (HTTP ${rawHexRes.status})` });
+    let rawTxHex: string;
+    try {
+      rawTxHex = (await mempoolGet(`/tx/${txid}/hex`)).trim();
+    } catch (err) {
+      res.status(404).json({
+        error: `Could not fetch ${txid} from any signet data source (tried ${SIGNET_API_BASES.join(", ")}): ${err instanceof Error ? err.message : err}`,
+      });
       return;
     }
-    const tx = stripWitness((await rawHexRes.text()).trim());
+    const tx = stripWitness(rawTxHex);
     const { ownerKey, amountSats } = parseDepositTx(tx);
 
     let record;

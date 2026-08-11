@@ -32,7 +32,20 @@ import type { BtcDepositCircuitInputs } from "./types";
  * deposit-only v1 design, not an oversight.
  */
 
-const MEMPOOL_BASE = process.env.MEMPOOL_SIGNET_API_BASE ?? "https://mempool.space/signet/api";
+// A single explicit override (MEMPOOL_SIGNET_API_BASE) means exactly that
+// source, no fallback — otherwise try both real public signet indexers in
+// turn. Added after a live Coston2/Render deployment hit two DIFFERENT
+// real failure modes back to back: mempool.space is unreachable from
+// Render's own network entirely (confirmed, not a guess — see this repo's
+// deploy history), and blockstream.info rate-limited Render's IP under
+// repeated testing traffic. A single hardcoded base made every real
+// deposit submission depend on whichever one happened to be up; this
+// export is what backend/src/btc-deposit/btc-deposit.routes.ts's /submit
+// handler now also goes through, instead of its own separate hardcoded
+// fetch.
+export const SIGNET_API_BASES = process.env.MEMPOOL_SIGNET_API_BASE
+  ? [process.env.MEMPOOL_SIGNET_API_BASE]
+  : ["https://mempool.space/signet/api", "https://blockstream.info/signet/api"];
 
 export const HEADER_SIZE = 80;
 export const K = 6;
@@ -48,11 +61,19 @@ export const VAULT_PUBKEY_HASH = (process.env.BTC_VAULT_PUBKEY_HASH ?? "00".repe
 class MempoolFetchError extends Error {}
 class TemplateMismatchError extends Error {}
 
-async function mempoolGet(path: string): Promise<string> {
-  const url = `${MEMPOOL_BASE}${path}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new MempoolFetchError(`mempool.space ${path} -> HTTP ${res.status}`);
-  return res.text();
+/** Tries each of SIGNET_API_BASES in turn, returning the first that responds ok — see that export's own comment for why a single hardcoded source isn't reliable enough. */
+export async function mempoolGet(path: string): Promise<string> {
+  let lastErr: unknown;
+  for (const base of SIGNET_API_BASES) {
+    try {
+      const res = await fetch(`${base}${path}`);
+      if (res.ok) return res.text();
+      lastErr = new MempoolFetchError(`${base}${path} -> HTTP ${res.status}`);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new MempoolFetchError(String(lastErr));
 }
 
 async function mempoolGetJson<T>(path: string): Promise<T> {
