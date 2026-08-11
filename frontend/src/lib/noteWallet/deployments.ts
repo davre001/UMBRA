@@ -8,6 +8,8 @@ export interface AssetConfig {
   decimals: number;
   /** True for the one asset (C2FLR) that shield()/withdraw() treat as native value instead of an ERC20. */
   native?: boolean;
+  /** True for an isExternalSourceAsset (currently: BTC) — no EVM token contract and no public wallet balance to query at all; the asset only ever exists as a shielded note (minted via depositExternal, paid out via withdraw()'s ExternalWithdrawalRequested branch). Pages must skip their usual balanceOf/getBalance public-balance query for these. */
+  external?: boolean;
 }
 
 export interface ChainDeployment {

@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { erc20Abi, formatUnits, isAddress, parseEventLogs, parseUnits } from 'viem';
+import * as bitcoin from 'bitcoinjs-lib';
 import { useChainId, usePublicClient, useSwitchChain, useWriteContract } from 'wagmi';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useApp } from '@/providers/app-provider';
@@ -29,12 +30,13 @@ import {
   ShieldCheck,
   CheckCircle2,
   Lock,
-  RefreshCw
+  RefreshCw,
+  ArrowRight
 } from 'lucide-react';
 import Link from 'next/link';
 
 type Tab = 'deposit' | 'withdraw';
-type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0';
+type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0' | 'BTC';
 type FlowStep = 'idle' | 'approving' | 'screening' | 'submitting' | 'proving' | 'confirming' | 'finalized';
 
 const COSTON2_CHAIN_ID = 114;
@@ -42,7 +44,19 @@ const ASSET_OPTIONS: { sym: AssetSymbol; name: string }[] = [
   { sym: 'C2FLR', name: 'Coston2 Flare (native)' },
   { sym: 'FXRP', name: 'FAssets XRP' },
   { sym: 'USDT0', name: 'Tether USD' },
+  { sym: 'BTC', name: 'Bitcoin (signet)' },
 ];
+
+/** Decodes a pasted signet bech32 address (tb1q...) into the hash160 hex withdraw() expects as its `recipient` for an external-source asset — see ShieldedVault.sol's own NatSpec on why that field gets reinterpreted for BTC. Returns null for anything that isn't a valid bech32 address (including an already-hex destination, which callers should just pass through as-is). */
+function bech32ToHash160(input: string): `0x${string}` | null {
+  try {
+    const { data } = bitcoin.address.fromBech32(input.trim());
+    if (data.length !== 20) return null;
+    return (`0x` + Buffer.from(data).toString('hex')) as `0x${string}`;
+  } catch {
+    return null;
+  }
+}
 
 const DEPOSIT_TIMELINE_ERC20 = [
   { key: 'approving', label: 'Approve Token' },
@@ -91,8 +105,17 @@ export default function ShieldPage() {
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
 
   const assetConfig = deployment?.assets[asset];
+  const isExternalAsset = !!assetConfig?.external;
   const onCoston2 = chainId === COSTON2_CHAIN_ID;
-  const effectiveDestination = (destination || walletAddress || '') as `0x${string}` | '';
+  // BTC's "destination" isn't a real EVM address, so it must never silently
+  // default to the connected wallet's own address the way every other
+  // asset's does — an unset BTC destination should just stay empty until
+  // the depositor explicitly enters their real signet address. A pasted
+  // bech32 signet address (tb1q...) gets decoded to the hash160 hex
+  // withdraw() actually expects; anything else passes through as-is (an
+  // advanced user pasting the raw hex directly).
+  const rawDestination = destination || (isExternalAsset ? '' : walletAddress || '');
+  const effectiveDestination = (isExternalAsset ? bech32ToHash160(rawDestination) ?? rawDestination : rawDestination) as `0x${string}` | '';
 
   const publicBalanceQuery = useQuery({
     queryKey: ['publicBalance', chainId, asset, walletAddress],
@@ -105,7 +128,7 @@ export default function ShieldPage() {
             functionName: 'balanceOf',
             args: [walletAddress as `0x${string}`],
           }),
-    enabled: !!publicClient && !!assetConfig && !!walletAddress,
+    enabled: !!publicClient && !!assetConfig && !!walletAddress && !isExternalAsset,
   });
 
   const notesQuery = useQuery({
@@ -114,6 +137,10 @@ export default function ShieldPage() {
     enabled: !!walletAddress,
   });
 
+  // Compliance screening is an EVM-address concept the contract itself
+  // skips for external-source assets (see withdraw()'s own `isExternal`
+  // branch) — BTC's "destination" isn't a real Ethereum account to begin
+  // with, so screening it here would be both meaningless and misleading.
   const destinationScreenedQuery = useQuery({
     queryKey: ['isScreened', chainId, effectiveDestination],
     queryFn: () =>
@@ -123,7 +150,7 @@ export default function ShieldPage() {
         functionName: 'isScreened',
         args: [effectiveDestination as `0x${string}`],
       }),
-    enabled: !!publicClient && !!deployment && activeTab === 'withdraw' && isAddress(effectiveDestination),
+    enabled: !!publicClient && !!deployment && activeTab === 'withdraw' && !isExternalAsset && isAddress(effectiveDestination),
   });
 
   const assetNotes: StoredNote[] = useMemo(() => {
@@ -282,14 +309,18 @@ export default function ShieldPage() {
       addNotification('No Note Selected', 'Choose a shielded note to withdraw.', 'error');
       return;
     }
-    if (!effectiveDestination) {
-      addNotification('Missing Destination', 'Enter a destination address.', 'error');
+    if (!isAddress(effectiveDestination)) {
+      addNotification(
+        'Missing Destination',
+        isExternalAsset ? 'Enter a valid signet Bitcoin address.' : 'Enter a destination address.',
+        'error'
+      );
       return;
     }
 
     try {
       const amountValue = BigInt(note.amount);
-      await ensureDestinationScreened(effectiveDestination as `0x${string}`, setStep);
+      if (!isExternalAsset) await ensureDestinationScreened(effectiveDestination as `0x${string}`, setStep);
       const withdrawHash = await withdrawOneNote(note, effectiveDestination as `0x${string}`, setStep);
       await noteWallet.refreshSpentStatus();
 
@@ -330,15 +361,19 @@ export default function ShieldPage() {
   };
 
   const handleUnshieldAll = async () => {
-    if (!walletAddress || !publicClient || !vaultAddress || !assetConfig || !effectiveDestination) {
-      addNotification('Missing Destination', 'Enter a destination address.', 'error');
+    if (!walletAddress || !publicClient || !vaultAddress || !assetConfig || !isAddress(effectiveDestination)) {
+      addNotification(
+        'Missing Destination',
+        isExternalAsset ? 'Enter a valid signet Bitcoin address.' : 'Enter a destination address.',
+        'error'
+      );
       return;
     }
     const notes = assetNotes.filter((n) => n.kind === 'note');
     if (notes.length === 0) return;
 
     try {
-      await ensureDestinationScreened(effectiveDestination as `0x${string}`);
+      if (!isExternalAsset) await ensureDestinationScreened(effectiveDestination as `0x${string}`);
     } catch (err) {
       const message = getErrorMessage(err, 'Compliance screening failed.');
       addNotification('Compliance Screening Failed', message, 'error');
@@ -588,7 +623,7 @@ export default function ShieldPage() {
                 {/* Asset Selection */}
                 <div>
                   <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Select Asset Pool</label>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-4 gap-3">
                     {ASSET_OPTIONS.map((item) => (
                       <button
                         key={item.sym}
@@ -608,6 +643,20 @@ export default function ShieldPage() {
                 </div>
 
                 {activeTab === 'deposit' ? (
+                  isExternalAsset ? (
+                    <div className="rounded-lg border border-accent-primary/30 bg-accent-primary/5 p-4">
+                      <p className="text-[10px] text-text-secondary leading-relaxed mb-3">
+                        BTC deposits don&apos;t go through this form — it&apos;s a real cross-chain deposit (a signet Bitcoin
+                        transaction, not an EVM one), with its own dedicated flow.
+                      </p>
+                      <Link href="/deposit-btc">
+                        <AnimatedButton variant="primary" size="sm" className="rounded-lg">
+                          Go to BTC Deposit Gateway
+                          <ArrowRight size={12} />
+                        </AnimatedButton>
+                      </Link>
+                    </div>
+                  ) : (
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light">Amount</label>
@@ -627,6 +676,7 @@ export default function ShieldPage() {
                       <span className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-xs text-text-secondary font-bold font-mono">{asset}</span>
                     </div>
                   </div>
+                  )
                 ) : (
                   <>
                     <div>
@@ -667,7 +717,7 @@ export default function ShieldPage() {
                         <button
                           type="button"
                           onClick={handleUnshieldAll}
-                          disabled={bulkWithdrawing || !effectiveDestination}
+                          disabled={bulkWithdrawing || !isAddress(effectiveDestination)}
                           className="mt-2 flex items-center gap-1.5 text-[10px] text-accent-secondary hover:text-accent-secondary/80 underline cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {bulkWithdrawing ? (
@@ -684,8 +734,10 @@ export default function ShieldPage() {
 
                     <div>
                       <div className="flex items-center justify-between mb-2">
-                        <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light">Destination Address</label>
-                        {isAddress(effectiveDestination) && (
+                        <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light">
+                          {isExternalAsset ? 'Signet Bitcoin Address' : 'Destination Address'}
+                        </label>
+                        {!isExternalAsset && isAddress(effectiveDestination) && (
                           <span className={`text-[9px] uppercase tracking-wider font-mono ${
                             destinationScreenedQuery.isLoading
                               ? 'text-text-secondary'
@@ -703,13 +755,27 @@ export default function ShieldPage() {
                       </div>
                       <input
                         type="text"
-                        value={effectiveDestination}
+                        // Shows exactly what's typed for BTC (a bech32
+                        // address converts to a very different-looking
+                        // hex behind the scenes — binding this to that
+                        // converted value would yank the text out from
+                        // under the user mid-keystroke). Every other
+                        // asset keeps the original behavior: falls back
+                        // to displaying the connected wallet's own
+                        // address as a default when nothing's been typed.
+                        value={isExternalAsset ? destination : effectiveDestination}
                         onChange={(e) => setDestination(e.target.value)}
-                        placeholder="0x..."
+                        placeholder={isExternalAsset ? 'tb1q...' : '0x...'}
                         className="w-full bg-surface/30 border border-border-custom rounded-lg px-4 py-3 text-sm text-text-primary focus:outline-none focus:border-accent-primary/60 font-mono"
                         required
                       />
-                      {isAddress(effectiveDestination) && destinationScreenedQuery.data === false && (
+                      {isExternalAsset && (
+                        <p className="text-[9px] text-text-secondary/70 mt-1.5 leading-relaxed">
+                          Your own real signet address — the custodial relayer sends real BTC here. No compliance
+                          screening applies to BTC, since there&apos;s no real Ethereum account to screen.
+                        </p>
+                      )}
+                      {!isExternalAsset && isAddress(effectiveDestination) && destinationScreenedQuery.data === false && (
                         <p className="text-[9px] text-accent-secondary/80 mt-1.5 leading-relaxed">
                           Not screened yet — withdrawing will screen this address automatically before submitting.
                         </p>

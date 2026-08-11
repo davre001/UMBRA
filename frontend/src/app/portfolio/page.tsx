@@ -23,10 +23,10 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
-type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0';
-const ASSET_OPTIONS: AssetSymbol[] = ['C2FLR', 'FXRP', 'USDT0'];
+type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0' | 'BTC';
+const ASSET_OPTIONS: AssetSymbol[] = ['C2FLR', 'FXRP', 'USDT0', 'BTC'];
 
-const ASSET_ICONS: Record<AssetSymbol, string> = { C2FLR: 'FLR', FXRP: 'XRP', USDT0: 'USDT' };
+const ASSET_ICONS: Record<AssetSymbol, string> = { C2FLR: 'FLR', FXRP: 'XRP', USDT0: 'USDT', BTC: 'BTC' };
 
 export default function Portfolio() {
   const { isEntered, isWalletConnected, walletAddress, connectWallet } = useApp();
@@ -40,7 +40,10 @@ export default function Portfolio() {
     queryKey: ['portfolioPublicBalances', chainId, walletAddress],
     queryFn: async () => {
       const entries = await Promise.all(
-        ASSET_OPTIONS.map(async (sym) => {
+        // external-source assets (BTC) have no EVM token contract and no
+        // public wallet balance at all — they only ever exist as a
+        // shielded note, so there's nothing to query here.
+        ASSET_OPTIONS.filter((sym) => !deployment!.assets[sym].external).map(async (sym) => {
           const cfg = deployment!.assets[sym];
           const balance = cfg.native
             ? await publicClient!.getBalance({ address: walletAddress as `0x${string}` })
@@ -65,7 +68,7 @@ export default function Portfolio() {
   });
 
   const shieldedBalances = useMemo(() => {
-    const totals: Record<AssetSymbol, bigint> = { C2FLR: BigInt(0), FXRP: BigInt(0), USDT0: BigInt(0) };
+    const totals: Record<AssetSymbol, bigint> = { C2FLR: BigInt(0), FXRP: BigInt(0), USDT0: BigInt(0), BTC: BigInt(0) };
     if (!notesQuery.data || !deployment) return totals;
     for (const note of notesQuery.data) {
       if (note.kind !== 'note') continue;

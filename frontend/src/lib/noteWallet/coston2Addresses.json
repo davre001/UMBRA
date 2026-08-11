@@ -1,8 +1,8 @@
 {
   "chainId": 114,
   "rpcUrl": "https://flare-testnet.drpc.org",
-  "deployBlock": 33886500,
-  "vault": "0x8167C01A2F30BA047d258E73bab81d18bacc16ED",
+  "deployBlock": 33918800,
+  "vault": "0x46283cc9C4946290c352a064fd6503900F8f027b",
   "compliance": "0xC9192Ecaf662c977B28c614e49F558AAAB832577",
   "ownerKeyRegistry": "0x48C77021624f7b4baC092570CDD56EB163eC3e71",
   "stealthAnnouncer": "0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1",
@@ -13,6 +13,7 @@
   "assets": {
     "C2FLR": { "assetId": 0, "native": true, "decimals": 18 },
     "FXRP": { "assetId": 1, "token": "0x0b6A3645c240605887a5532109323A3E12273dc7", "decimals": 6 },
-    "USDT0": { "assetId": 2, "token": "0xC1A5B41512496B80903D1f32d6dEa3a73212E71F", "decimals": 6 }
+    "USDT0": { "assetId": 2, "token": "0xC1A5B41512496B80903D1f32d6dEa3a73212E71F", "decimals": 6 },
+    "BTC": { "assetId": 999, "external": true, "decimals": 8 }
   }
 }

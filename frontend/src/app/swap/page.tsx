@@ -39,7 +39,7 @@ import {
 import Link from 'next/link';
 
 type Tab = 'place' | 'orders';
-type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0';
+type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0' | 'BTC';
 type PlaceStep = 'idle' | 'proving' | 'submitting' | 'confirming' | 'finalized';
 
 const COSTON2_CHAIN_ID = 114;
@@ -47,6 +47,7 @@ const ASSET_OPTIONS: { sym: AssetSymbol; name: string }[] = [
   { sym: 'C2FLR', name: 'Coston2 Flare (native)' },
   { sym: 'FXRP', name: 'FAssets XRP' },
   { sym: 'USDT0', name: 'Tether USD' },
+  { sym: 'BTC', name: 'Bitcoin (signet)' },
 ];
 
 const PLACE_TIMELINE = [
@@ -757,7 +758,7 @@ export default function DarkPoolPage() {
                   {/* Asset In */}
                   <div>
                     <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">You&apos;re Selling</label>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-4 gap-3">
                       {ASSET_OPTIONS.map((item) => (
                         <button
                           key={item.sym}
@@ -811,7 +812,7 @@ export default function DarkPoolPage() {
                   {/* Asset Out */}
                   <div>
                     <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">You Want</label>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-4 gap-3">
                       {ASSET_OPTIONS.map((item) => (
                         <button
                           key={item.sym}

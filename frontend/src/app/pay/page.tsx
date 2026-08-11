@@ -37,7 +37,7 @@ import {
 import Link from 'next/link';
 
 type Tab = 'send' | 'incoming';
-type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0';
+type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0' | 'BTC';
 type SendStep = 'idle' | 'proving' | 'submitting' | 'confirming' | 'announcing' | 'finalized';
 
 const COSTON2_CHAIN_ID = 114;
@@ -45,6 +45,7 @@ const ASSET_OPTIONS: { sym: AssetSymbol; name: string }[] = [
   { sym: 'C2FLR', name: 'Coston2 Flare (native)' },
   { sym: 'FXRP', name: 'FAssets XRP' },
   { sym: 'USDT0', name: 'Tether USD' },
+  { sym: 'BTC', name: 'Bitcoin (signet)' },
 ];
 
 const SEND_TIMELINE = [
@@ -554,7 +555,7 @@ export default function PrivatePayPage() {
                   {/* Asset Selection */}
                   <div>
                     <label className="text-[10px] text-text-secondary uppercase tracking-widest font-light block mb-2">Select Asset Pool</label>
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-4 gap-3">
                       {ASSET_OPTIONS.map((item) => (
                         <button
                           key={item.sym}
