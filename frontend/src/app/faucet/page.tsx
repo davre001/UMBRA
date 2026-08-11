@@ -21,12 +21,15 @@ import {
   ExternalLink,
   Clock,
   Loader2,
+  Bitcoin,
+  ArrowRight,
 } from 'lucide-react';
 import Link from 'next/link';
 import { tokenIcon, networkIcon, SUPPORTED_CHAINS } from '@/lib/icons';
 import { formatAddress } from '@/lib/utils';
 
 const FLARE_FAUCET_URL = 'https://faucet.flare.network/';
+const SIGNET_FAUCET_URL = 'https://signetfaucet.com/';
 const COSTON2_CHAIN_ID = 114;
 
 // These are real assets minted by Flare's own Coston2 faucet — we deep-link
@@ -281,6 +284,46 @@ export default function FaucetPage() {
             ))}
           </div>
         </div>
+
+        {/* Bitcoin Signet — a real, separate chain, not an EVM asset, so it
+            doesn't fit the REAL_ASSETS balance-polling pattern above (no
+            wagmi balance to watch, no Flare faucet involved). Two real
+            steps: get real signet BTC from a public signet faucet into
+            your own signet wallet, then use /deposit-btc to build and
+            submit the actual UMBRA deposit transaction. */}
+        <GlowBorder active={false} glowColor="cyan">
+          <GlassCard className="p-5 mt-5 flex flex-col sm:flex-row sm:items-center gap-4 justify-between" hoverGlow={false}>
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg border border-accent-primary/20 bg-accent-primary/5 flex-shrink-0">
+                <Bitcoin size={18} className="text-accent-primary" />
+              </div>
+              <div>
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-text-primary font-display">
+                  Bitcoin Signet — real BTC, real chain
+                </h2>
+                <p className="text-[10px] text-text-secondary font-light mt-0.5 leading-relaxed max-w-xl">
+                  Not an EVM asset, so it isn&apos;t minted here. Claim real signet BTC into your own signet wallet from a
+                  public faucet, then head to BTC Deposit to build and submit the actual shielded deposit transaction.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-shrink-0 items-center gap-2">
+              <a href={SIGNET_FAUCET_URL} target="_blank" rel="noopener noreferrer">
+                <AnimatedButton variant="secondary" size="sm" className="rounded-lg">
+                  <ExternalLink size={13} />
+                  Signet Faucet
+                </AnimatedButton>
+              </a>
+              <Link href="/deposit-btc">
+                <AnimatedButton variant="primary" size="sm" className="rounded-lg">
+                  BTC Deposit
+                  <ArrowRight size={13} />
+                </AnimatedButton>
+              </Link>
+            </div>
+          </GlassCard>
+        </GlowBorder>
 
         {/* USDC — not yet available on Coston2 */}
         <GlowBorder active={false} glowColor="cyan">
