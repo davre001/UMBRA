@@ -1,15 +1,15 @@
 // A single explicit override (MEMPOOL_SIGNET_API_BASE) means exactly that
-// source, no fallback — otherwise try both real public signet indexers in
+// source, no fallback — otherwise try three real public signet indexers in
 // turn. Same fallback chain as ../btc-deposit/mempool.ts's SIGNET_API_BASES
-// — added after a live Coston2/Render deployment hit two DIFFERENT real
-// failure modes back to back: mempool.space is unreachable from Render's
-// own network entirely, and blockstream.info rate-limited Render's IP
-// under repeated testing traffic. A single hardcoded base made every real
-// withdrawal fulfillment (and the public solvency check) depend on
-// whichever one happened to be up.
+// — see that export's own comment for the three distinct real failure
+// modes (Render can't reach mempool.space at all, blockstream.info
+// rate-limited Render's IP for minutes at a time, mempool.emzy.de is a
+// community mirror confirmed serving the same real signet chain). A single
+// hardcoded base made every real withdrawal fulfillment (and the public
+// solvency check) depend on whichever one happened to be up.
 const SIGNET_API_BASES = process.env.MEMPOOL_SIGNET_API_BASE
   ? [process.env.MEMPOOL_SIGNET_API_BASE]
-  : ["https://mempool.space/signet/api", "https://blockstream.info/signet/api"];
+  : ["https://mempool.space/signet/api", "https://blockstream.info/signet/api", "https://mempool.emzy.de/signet/api"];
 
 async function signetFetch(path: string, init?: RequestInit): Promise<Response> {
   let lastErr: unknown;
