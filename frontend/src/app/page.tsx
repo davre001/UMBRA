@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { useApp } from '@/providers/app-provider';
 import { GlassCard } from '@/components/ui/glass-card';
 import { AnimatedButton } from '@/components/ui/animated-button';
-import { CountUp } from '@/components/ui/count-up';
 import {
   Shield,
   Cpu,
@@ -200,26 +199,6 @@ export default function Home() {
               <ArrowDown size={14} className="text-accent-primary/60" />
             </motion.div>
           </motion.div>
-        </section>
-
-        {/* ── STATS STRIP ── */}
-        <section className="relative z-10 border-y border-border-custom/40 bg-black/75 backdrop-blur-sm py-8 px-4">
-          <div className="max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-            {[
-              { label: 'Total Shielded Value', value: '$84.2M' },
-              { label: 'Active Stealth Sets', value: '1,492' },
-              { label: 'Avg Proof Time', value: '1.24s' },
-              { label: 'Compliance Rate', value: '100%' },
-            ].map((s, i) => (
-              <FadeUp key={i} delay={i * 0.1}>
-                <CountUp
-                  value={s.value}
-                  className="block text-2xl sm:text-3xl font-display font-extrabold text-text-primary tracking-tight tabular-nums"
-                />
-                <div className="text-[10px] text-accent-primary uppercase tracking-widest mt-1">{s.label}</div>
-              </FadeUp>
-            ))}
-          </div>
         </section>
 
         {/* ── 3 FEATURE CARDS ── */}
