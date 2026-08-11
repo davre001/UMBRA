@@ -53,6 +53,16 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm test
+        env:
+          # Not a secret — derived from the real deployed vault's public
+          # signet address (tb1qrmq4qvr3qmcn5s6yxlcr7y80cry0530n99g2mm), same
+          # value already committed as BTC_VAULT_PUBKEY_HASH's documented
+          # default throughout backend/. Needed because mempool.ts falls
+          # back to a zero placeholder when this is unset, which diverges
+          # from btc-deposit.test.ts's hardcoded real-address expectation —
+          # caught when CI (no backend/.env, correctly gitignored) failed a
+          # test that only ever passed locally.
+          BTC_VAULT_PUBKEY_HASH: 1ec150307106f13a434437f03f10efc0c8fa45f3
 
   deploy:
     name: Deploy to Render
