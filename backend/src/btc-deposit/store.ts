@@ -13,10 +13,32 @@ import type { BtcDepositRecord } from "./types";
  * pattern), not something this phase needed to duplicate to prove the
  * btc-deposit flow works. Disclosed here rather than left implicit.
  */
+/**
+ * Thrown by createRecord when `txid` was already submitted with a
+ * DIFFERENT blinding than this call's. Since `note_commitment =
+ * Poseidon(assetId, amount, ownerKey, blinding)`, whichever blinding gets
+ * stored first is the one the worker will actually prove and mint against
+ * — a real depositor's own later /submit call (their tx is public on
+ * signet the moment it confirms, so anyone can race to submit it first
+ * with a garbage blinding) must never have its blinding silently
+ * discarded in favor of an already-stored one, since that mints a note
+ * the real depositor can never produce a valid spend proof for. This
+ * can't be prevented outright without an auth/commit-reveal scheme (see
+ * BTC_DEPOSIT_DESIGN.md), but a loud, explicit conflict here at least
+ * turns "silently bricked note" into "visible, retryable error."
+ */
+export class BlindingMismatchError extends Error {
+  constructor(txid: string) {
+    super(`${txid} was already submitted with a different blinding — refusing to silently discard yours`);
+  }
+}
+
 const records = new Map<string, BtcDepositRecord>();
 // A given real Bitcoin txid should only ever have one deposit record —
-// resubmitting the same txid (e.g. a retried frontend request) returns the
-// existing record instead of creating a doomed duplicate.
+// resubmitting the same txid with the SAME blinding (e.g. a retried
+// frontend request) returns the existing record instead of creating a
+// doomed duplicate; resubmitting with a DIFFERENT blinding throws (see
+// BlindingMismatchError) rather than silently overriding or discarding.
 const txidToId = new Map<string, string>();
 
 export function createRecord(input: {
@@ -30,6 +52,10 @@ export function createRecord(input: {
   if (existingId) {
     const existing = records.get(existingId);
     if (existing) {
+      if (existing.blinding !== input.blinding) {
+        logger.warn(`[btc-deposit] ${input.txid}: resubmitted with a different blinding than record ${existingId} — rejecting`);
+        throw new BlindingMismatchError(input.txid);
+      }
       logger.info(`[btc-deposit] ${input.txid}: already submitted as ${existingId} (${existing.status}) — returning existing record`);
       return existing;
     }

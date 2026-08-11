@@ -39,66 +39,89 @@ function destinationToHash160(destination: `0x${string}`): string {
   return destination.slice(2).toLowerCase().padStart(40, "0");
 }
 
-async function fulfillOne(log: ExternalWithdrawalRequestedLog): Promise<void> {
+/**
+ * Attempts to fulfill a single stored record (already upserted as
+ * `pending` by the caller). Returns true iff this call is the one that
+ * broadcast it. On InsufficientFundsError, leaves the record `pending` —
+ * the caller MUST be able to find it again on a later poll independent of
+ * `lastProcessedBlock`/block-range log scanning, since that range only
+ * ever moves forward and would otherwise never re-surface this event (see
+ * `pollOnce`'s own retry-via-`listPending` pass, which is what actually
+ * makes this comment true — a prior version of this file left the record
+ * `pending` with an identical claim but nothing ever revisited it).
+ */
+export async function attemptFulfillment(record: BtcWithdrawalRequest): Promise<boolean> {
+  if (record.status === "broadcast") return false;
+  try {
+    logger.info(`[btc-withdrawal] fulfilling ${record.nullifierHash}: ${record.amountSats} sats -> ${record.destinationHash160}`);
+    const { rawHex, txid, feeSats } = await buildAndSignWithdrawal(record.destinationHash160, BigInt(record.amountSats));
+    const broadcastTxid = await broadcastTx(rawHex);
+    if (broadcastTxid !== txid) {
+      logger.warn(`[btc-withdrawal] ${record.nullifierHash}: locally-computed txid ${txid} != broadcast-returned ${broadcastTxid}, trusting the broadcast response`);
+    }
+    logger.info(`[btc-withdrawal] ${record.nullifierHash}: broadcast ${broadcastTxid} (fee ${feeSats} sats)`);
+    await store.markBroadcast(record.nullifierHash, broadcastTxid);
+    return true;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    if (err instanceof InsufficientFundsError) {
+      logger.error(`[btc-withdrawal] ${record.nullifierHash}: insufficient custodian funds — will retry next poll: ${reason}`);
+      return false;
+    }
+    await store.markFailed(record.nullifierHash, reason);
+    return false;
+  }
+}
+
+async function fulfillOne(log: ExternalWithdrawalRequestedLog): Promise<boolean> {
   const nullifierHash = log.args.nullifierHash.toString();
   const existing = store.getRecord(nullifierHash);
   if (existing?.status === "broadcast") {
     logger.debug(`[btc-withdrawal] ${nullifierHash}: already broadcast (${existing.payoutTxid}), skipping`);
-    return;
+    return false;
   }
 
-  const destinationHash160 = destinationToHash160(log.args.destination);
-  const amountSats = log.args.amount;
   const record: BtcWithdrawalRequest = existing ?? {
     nullifierHash,
     assetId: log.args.assetId.toString(),
-    destinationHash160,
-    amountSats: amountSats.toString(),
+    destinationHash160: destinationToHash160(log.args.destination),
+    amountSats: log.args.amount.toString(),
     status: "pending",
     requestedAtBlock: log.blockNumber.toString(),
     observedAt: Date.now(),
   };
   await store.upsertPending(record);
-
-  try {
-    logger.info(`[btc-withdrawal] fulfilling ${nullifierHash}: ${amountSats} sats -> ${destinationHash160}`);
-    const { rawHex, txid, feeSats } = await buildAndSignWithdrawal(destinationHash160, amountSats);
-    const broadcastTxid = await broadcastTx(rawHex);
-    if (broadcastTxid !== txid) {
-      logger.warn(`[btc-withdrawal] ${nullifierHash}: locally-computed txid ${txid} != broadcast-returned ${broadcastTxid}, trusting the broadcast response`);
-    }
-    logger.info(`[btc-withdrawal] ${nullifierHash}: broadcast ${broadcastTxid} (fee ${feeSats} sats)`);
-    await store.markBroadcast(nullifierHash, broadcastTxid);
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    if (err instanceof InsufficientFundsError) {
-      // Not a permanent failure — the custodian may be topped up later.
-      // Left `pending` so the next poll retries automatically; logged as
-      // an error because it needs a human to notice regardless.
-      logger.error(`[btc-withdrawal] ${nullifierHash}: insufficient custodian funds — will retry next poll: ${reason}`);
-      return;
-    }
-    await store.markFailed(nullifierHash, reason);
-  }
+  return attemptFulfillment(record);
 }
 
-/** One pass: scan for new ExternalWithdrawalRequested events (assetId == BTC_ASSET_ID) since the last processed block, fulfill each. A single failure doesn't stop the rest — see fulfillOne's own error handling. */
+/**
+ * One pass: (1) retries every already-stored `pending` record directly via
+ * `store.listPending()` — this is what actually closes the
+ * InsufficientFundsError retry gap, independent of block-range scanning,
+ * which by construction only ever looks forward and would otherwise never
+ * revisit a block once `lastProcessedBlock` moves past it; then (2) scans
+ * for brand-new ExternalWithdrawalRequested events (assetId == BTC_ASSET_ID)
+ * since the last processed block and fulfills each. A single failure
+ * doesn't stop the rest — see attemptFulfillment's own error handling.
+ */
 export async function pollOnce(): Promise<{ scanned: number; fulfilled: number }> {
+  let fulfilled = 0;
+
+  for (const record of store.listPending()) {
+    if (await attemptFulfillment(record)) fulfilled += 1;
+  }
+
   const vaultAddress = CONTRACTS.ShieldedVault as `0x${string}`;
   const fromBlock = (store.getLastProcessedBlock() ?? DEPLOY_BLOCK - BigInt(1)) + BigInt(1);
   const toBlock = await publicClient.getBlockNumber();
-  if (fromBlock > toBlock) return { scanned: 0, fulfilled: 0 };
+  if (fromBlock > toBlock) return { scanned: 0, fulfilled };
 
   const events = await fetchNewEvents(vaultAddress, fromBlock, toBlock);
   const btcEvents = events.filter((e) => e.args.assetId === BTC_ASSET_ID);
   logger.debug(`[btc-withdrawal] scanned blocks ${fromBlock}-${toBlock}: ${events.length} withdrawal event(s), ${btcEvents.length} for BTC`);
 
-  let fulfilled = 0;
   for (const log of btcEvents) {
-    const before = store.getRecord(log.args.nullifierHash.toString())?.status;
-    await fulfillOne(log);
-    const after = store.getRecord(log.args.nullifierHash.toString())?.status;
-    if (before !== "broadcast" && after === "broadcast") fulfilled += 1;
+    if (await fulfillOne(log)) fulfilled += 1;
   }
 
   await store.setLastProcessedBlock(toBlock);

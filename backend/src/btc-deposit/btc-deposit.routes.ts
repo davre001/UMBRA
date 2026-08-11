@@ -78,13 +78,22 @@ btcDepositRouter.post("/submit", async (req, res, next) => {
     const tx = stripWitness((await rawHexRes.text()).trim());
     const { ownerKey, amountSats } = parseDepositTx(tx);
 
-    const record = store.createRecord({
-      txid,
-      checkpointHeight,
-      ownerKey: ownerKey.toString(),
-      amountSats: amountSats.toString(),
-      blinding,
-    });
+    let record;
+    try {
+      record = store.createRecord({
+        txid,
+        checkpointHeight,
+        ownerKey: ownerKey.toString(),
+        amountSats: amountSats.toString(),
+        blinding,
+      });
+    } catch (err) {
+      if (err instanceof store.BlindingMismatchError) {
+        res.status(409).json({ error: err.message });
+        return;
+      }
+      throw err;
+    }
     res.status(201).json({ id: record.id, status: record.status, ownerKey: record.ownerKey, amountSats: record.amountSats });
   } catch (err) {
     next(err);

@@ -34,10 +34,30 @@ async function startBtcWithdrawalWatcher(): Promise<void> {
   await hydrateBtcWithdrawals();
   const intervalMs = Number(process.env.BTC_WITHDRAWAL_POLL_INTERVAL_MS ?? 30_000);
   logger.info(`[btc-withdrawal] starting fulfillment loop, polling every ${intervalMs}ms`);
-  const tick = () =>
-    pollBtcWithdrawals().catch((err) => {
+  // setInterval fires on a fixed wall-clock schedule regardless of whether
+  // the previous tick's promise has resolved — a cycle running long
+  // (header fetches, a real broadcast call) could otherwise overlap with
+  // the next one, and since fulfillOne/attemptFulfillment only skip a
+  // record already `broadcast` (not `pending`), two overlapping polls
+  // could both sign and broadcast a payout for the same nullifierHash.
+  // This flag is the guard: a tick that finds one still in flight is
+  // simply skipped, not queued — the next interval will pick it up once
+  // the running one finishes.
+  let running = false;
+  const tick = async () => {
+    if (running) {
+      logger.warn("[btc-withdrawal] previous poll cycle still running — skipping this tick");
+      return;
+    }
+    running = true;
+    try {
+      await pollBtcWithdrawals();
+    } catch (err) {
       logger.error(`[btc-withdrawal] poll cycle failed: ${err instanceof Error ? err.message : err}`);
-    });
+    } finally {
+      running = false;
+    }
+  };
   tick();
   setInterval(tick, intervalMs);
 }
