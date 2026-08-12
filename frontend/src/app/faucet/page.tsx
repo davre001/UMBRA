@@ -35,6 +35,8 @@ import {
   Copy,
   CheckCircle2,
   RefreshCw,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import Link from 'next/link';
 import { tokenIcon, networkIcon, SUPPORTED_CHAINS } from '@/lib/icons';
@@ -43,6 +45,7 @@ import { formatAddress } from '@/lib/utils';
 const FLARE_FAUCET_URL = 'https://faucet.flare.network/';
 const SIGNET_FAUCET_URL = 'https://faucet.coinbin.org/';
 const COSTON2_CHAIN_ID = 114;
+const BALANCE_VISIBILITY_STORAGE_KEY = 'umbra:portfolio-balances-visible';
 
 // These are real assets minted by Flare's own Coston2 faucet — we deep-link
 // rather than simulate a mint, since the whole point of this app is genuine
@@ -99,10 +102,14 @@ function FaucetAssetCard({
   asset,
   walletAddress,
   onReceived,
+  areBalancesVisible,
+  onToggleBalanceVisibility,
 }: {
   asset: (typeof REAL_ASSETS)[number];
   walletAddress: string | undefined;
   onReceived: (symbol: AssetSymbol) => void;
+  areBalancesVisible: boolean;
+  onToggleBalanceVisibility: () => void;
 }) {
   const { balance, formatted, enabled } = useFaucetBalance(asset.symbol, walletAddress);
   const [watching, setWatching] = useState(false);
@@ -137,10 +144,24 @@ function FaucetAssetCard({
         </div>
 
         <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-3 mb-5">
-          <span className="text-[9px] text-text-secondary uppercase tracking-widest block mb-1">
-            {enabled ? 'Your Balance' : 'Source'}
-          </span>
-          <span className="font-mono text-xs font-semibold text-accent-primary">
+          <div className="mb-1 flex items-center gap-1.5">
+            <span className="text-[9px] text-text-secondary uppercase tracking-widest">
+              {enabled ? 'Your Balance' : 'Source'}
+            </span>
+            {enabled && (
+              <button
+                type="button"
+                onClick={onToggleBalanceVisibility}
+                aria-label={areBalancesVisible ? 'Hide faucet balances' : 'Show faucet balances'}
+                aria-pressed={!areBalancesVisible}
+                title={areBalancesVisible ? 'Hide faucet balances' : 'Show faucet balances'}
+                className="rounded p-0.5 text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary cursor-pointer"
+              >
+                {areBalancesVisible ? <Eye size={12} /> : <EyeOff size={12} />}
+              </button>
+            )}
+          </div>
+          <span className={`inline-block font-mono text-xs font-semibold text-accent-primary transition-[filter] duration-200 ${enabled && !areBalancesVisible ? 'select-none blur-sm' : ''}`}>
             {enabled ? `${formatted ?? '—'} ${asset.symbol}` : 'Official Flare Faucet'}
           </span>
         </div>
@@ -178,7 +199,15 @@ function FaucetAssetCard({
  * WrappedBTC balance (via useFaucetBalance, exactly like the other three
  * cards) is what shows the deposit landing, with no further action here.
  */
-function BtcFaucetCard({ walletAddress }: { walletAddress: string | undefined }) {
+function BtcFaucetCard({
+  walletAddress,
+  areBalancesVisible,
+  onToggleBalanceVisibility,
+}: {
+  walletAddress: string | undefined;
+  areBalancesVisible: boolean;
+  onToggleBalanceVisibility: () => void;
+}) {
   const chainId = useChainId();
   const queryClient = useQueryClient();
   const { addNotification } = useApp();
@@ -285,8 +314,22 @@ function BtcFaucetCard({ walletAddress }: { walletAddress: string | undefined })
         </div>
 
         <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-3 mb-3">
-          <span className="text-[9px] text-text-secondary uppercase tracking-widest block mb-1">Your Balance</span>
-          <span className="font-mono text-xs font-semibold text-accent-primary">
+          <div className="mb-1 flex items-center gap-1.5">
+            <span className="text-[9px] text-text-secondary uppercase tracking-widest">Your Balance</span>
+            {enabled && (
+              <button
+                type="button"
+                onClick={onToggleBalanceVisibility}
+                aria-label={areBalancesVisible ? 'Hide faucet balances' : 'Show faucet balances'}
+                aria-pressed={!areBalancesVisible}
+                title={areBalancesVisible ? 'Hide faucet balances' : 'Show faucet balances'}
+                className="rounded p-0.5 text-text-secondary transition-colors hover:bg-white/10 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary cursor-pointer"
+              >
+                {areBalancesVisible ? <Eye size={12} /> : <EyeOff size={12} />}
+              </button>
+            )}
+          </div>
+          <span className={`inline-block font-mono text-xs font-semibold text-accent-primary transition-[filter] duration-200 ${enabled && !areBalancesVisible ? 'select-none blur-sm' : ''}`}>
             {enabled ? `${formatted ?? '—'} BTC` : 'Connect wallet'}
           </span>
         </div>
@@ -351,6 +394,29 @@ export default function FaucetPage() {
   const { isEntered, isWalletConnected, walletAddress, connectWallet, addNotification } = useApp();
   const [copied, setCopied] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [areBalancesVisible, setAreBalancesVisible] = useState(true);
+
+  useEffect(() => {
+    try {
+      const storedPreference = localStorage.getItem(BALANCE_VISIBILITY_STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (storedPreference !== null) setAreBalancesVisible(storedPreference === 'true');
+    } catch {
+      // Storage can be unavailable in privacy-restricted browser contexts.
+    }
+  }, []);
+
+  const toggleBalanceVisibility = useCallback(() => {
+    setAreBalancesVisible((currentVisibility) => {
+      const nextVisibility = !currentVisibility;
+      try {
+        localStorage.setItem(BALANCE_VISIBILITY_STORAGE_KEY, String(nextVisibility));
+      } catch {
+        // Keep the toggle functional for this session even if persistence fails.
+      }
+      return nextVisibility;
+    });
+  }, []);
 
   const handleCopyAddress = () => {
     if (!walletAddress) return;
@@ -476,9 +542,15 @@ export default function FaucetPage() {
                 asset={asset}
                 walletAddress={walletAddress || undefined}
                 onReceived={handleReceived}
+                areBalancesVisible={areBalancesVisible}
+                onToggleBalanceVisibility={toggleBalanceVisibility}
               />
             ))}
-            <BtcFaucetCard walletAddress={walletAddress || undefined} />
+            <BtcFaucetCard
+              walletAddress={walletAddress || undefined}
+              areBalancesVisible={areBalancesVisible}
+              onToggleBalanceVisibility={toggleBalanceVisibility}
+            />
           </div>
         </div>
 

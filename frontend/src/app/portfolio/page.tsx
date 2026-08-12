@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { erc20Abi, formatUnits } from 'viem';
 import { useChainId, usePublicClient } from 'wagmi';
 import { useQuery } from '@tanstack/react-query';
@@ -20,6 +20,8 @@ import {
   Lock,
   Wallet,
   ArrowRight,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -27,6 +29,7 @@ type AssetSymbol = 'C2FLR' | 'FXRP' | 'USDT0' | 'BTC';
 const ASSET_OPTIONS: AssetSymbol[] = ['C2FLR', 'FXRP', 'USDT0', 'BTC'];
 
 const ASSET_ICONS: Record<AssetSymbol, string> = { C2FLR: 'FLR', FXRP: 'XRP', USDT0: 'USDT', BTC: 'BTC' };
+const BALANCE_VISIBILITY_STORAGE_KEY = 'umbra:portfolio-balances-visible';
 
 export default function Portfolio() {
   const { isEntered, isWalletConnected, walletAddress, connectWallet } = useApp();
@@ -35,6 +38,27 @@ export default function Portfolio() {
   const deployment = useMemo(() => getDeployment(chainId), [chainId]);
   const vaultAddress = deployment?.vault;
   const noteWallet = useNoteWallet(vaultAddress, deployment?.deployBlock !== undefined ? BigInt(deployment.deployBlock) : undefined);
+  const [areBalancesVisible, setAreBalancesVisible] = useState(true);
+
+  useEffect(() => {
+    try {
+      const storedPreference = localStorage.getItem(BALANCE_VISIBILITY_STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (storedPreference !== null) setAreBalancesVisible(storedPreference === 'true');
+    } catch {
+      // Storage can be unavailable in privacy-restricted browser contexts.
+    }
+  }, []);
+
+  const toggleBalanceVisibility = () => {
+    const nextVisibility = !areBalancesVisible;
+    setAreBalancesVisible(nextVisibility);
+    try {
+      localStorage.setItem(BALANCE_VISIBILITY_STORAGE_KEY, String(nextVisibility));
+    } catch {
+      // Keep the toggle functional for this session even if persistence fails.
+    }
+  };
 
   const publicBalancesQuery = useQuery({
     queryKey: ['portfolioPublicBalances', chainId, walletAddress],
@@ -181,7 +205,19 @@ export default function Portfolio() {
             {/* Balances table */}
             <GlassCard className="p-6 mb-6" hoverGlow={false}>
               <div className="flex items-center justify-between border-b border-border-custom pb-4 mb-4">
-                <h2 className="text-sm uppercase tracking-wider font-display font-bold">Asset Balances</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm uppercase tracking-wider font-display font-bold">Asset Balances</h2>
+                  <button
+                    type="button"
+                    onClick={toggleBalanceVisibility}
+                    aria-label={areBalancesVisible ? 'Hide asset balances' : 'Show asset balances'}
+                    aria-pressed={!areBalancesVisible}
+                    title={areBalancesVisible ? 'Hide asset balances' : 'Show asset balances'}
+                    className="rounded-md p-1 text-text-secondary transition-colors hover:bg-surface/60 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-primary cursor-pointer"
+                  >
+                    {areBalancesVisible ? <Eye size={15} /> : <EyeOff size={15} />}
+                  </button>
+                </div>
                 <span className="text-[10px] text-text-secondary font-mono">Flare Coston2 Testnet</span>
               </div>
               <div className="overflow-x-auto">
@@ -205,14 +241,18 @@ export default function Portfolio() {
                             <span className="font-semibold">{sym}</span>
                           </td>
                           <td className="py-3 text-right font-mono font-medium">
+                            <span className={`inline-block transition-[filter] duration-200 ${areBalancesVisible ? '' : 'select-none blur-sm'}`}>
                             {publicBalance !== undefined && cfg
                               ? Number(formatUnits(publicBalance, cfg.decimals)).toLocaleString(undefined, { maximumFractionDigits: 4 })
                               : '—'}
+                            </span>
                           </td>
                           <td className="py-3 text-right font-mono font-medium text-accent-secondary">
+                            <span className={`inline-block transition-[filter] duration-200 ${areBalancesVisible ? '' : 'select-none blur-sm'}`}>
                             {cfg
                               ? Number(formatUnits(shieldedBalance, cfg.decimals)).toLocaleString(undefined, { maximumFractionDigits: 4 })
                               : '—'}
+                            </span>
                           </td>
                         </tr>
                       );
