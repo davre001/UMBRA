@@ -13,7 +13,7 @@ import { Callout } from 'nextra/components';
 | --- | --- |
 | Chain | Flare Coston2 testnet |
 | Chain ID | `114` |
-| Vault deploy block | `33478628` |
+| Vault deploy block | `33927500` |
 | Explorer | [coston2-explorer.flare.network](https://coston2-explorer.flare.network) |
 
 The app talks to Coston2 through `flare-testnet.drpc.org` rather than the
@@ -25,12 +25,18 @@ scan outright.
 
 | Contract | Address |
 | --- | --- |
-| `ShieldedVault` | `0xf3eEc625ef0AB89c2396a6e62Cc84E3d15f0Cdc7` |
+| `ShieldedVault` | `0x13643D75088cfaB4737E8b6c85813e95bfaB450B` |
+| `WrappedBTC` | `0x0E8012D34cCcE7252b680cE96b36f514C5D2Bd04` |
 | `ComplianceRegistry` | `0xC9192Ecaf662c977B28c614e49F558AAAB832577` |
 | `OwnerKeyRegistry` | `0x48C77021624f7b4baC092570CDD56EB163eC3e71` |
 | `StealthAnnouncer` | `0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1` |
 | `BatchWithdrawer` | `0x4E90ECc46d47FF8B8a13F5396931838b256A3fC1` |
 | `PrivacyKeyRegistry` | `0x8107172F8078c965bC9F334fD0bFefB2cFFAe275` |
+
+`ShieldedVault` was redeployed (2026-08-11) to add real Bitcoin bridging —
+`depositExternal` now mints public `WrappedBTC` directly instead of a
+hidden note, an ABI-breaking change. Every other contract above is
+unchanged and reused from the prior deployment.
 
 `ShieldedVault` holds the funds, the Merkle tree, and the nullifier set, and
 calls the per-circuit verifiers. `OwnerKeyRegistry`, `PrivacyKeyRegistry`,
@@ -60,9 +66,12 @@ root, an already-spent nullifier) doesn't block the rest of the batch; see
 | `C2FLR` | `0` | native | 18 |
 | `FXRP` | `1` | `0x0b6A3645c240605887a5532109323A3E12273dc7` | 6 |
 | `USDT0` | `2` | `0xC1A5B41512496B80903D1f32d6dEa3a73212E71F` | 6 |
+| `BTC` | `999` | `0x0E8012D34cCcE7252b680cE96b36f514C5D2Bd04` (`WrappedBTC`) | 8 |
 
 The asset ID is what appears inside note commitments — not the token address,
-which would be a needlessly large field element to hash.
+which would be a needlessly large field element to hash. `BTC` is the one
+asset that doesn't arrive via `shield()` — see
+[Bitcoin Bridge](/concepts/bitcoin-bridge) for how it mints instead.
 
 ## Verifiers
 
@@ -73,6 +82,9 @@ One generated Solidity verifier per circuit, all called by `ShieldedVault`:
 - `PlaceOrderVerifier`
 - `CancelOrderVerifier`
 - `MatchOrdersVerifier`
+- `BtcDepositHonkVerifier` — checked by `depositExternal`, not part of the
+  note/commitment scheme the other five belong to; see
+  [Bitcoin Bridge](/concepts/bitcoin-bridge)
 
 See [Noir Circuits](/reference/circuits) for each one's public inputs and the
 order they must be passed in.

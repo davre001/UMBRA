@@ -1,6 +1,6 @@
 ---
 title: Testnet Faucet
-description: Get C2FLR, FXRP, and USDT0 on Flare Coston2.
+description: Get C2FLR, FXRP, USDT0, and real signet Bitcoin.
 ---
 
 # Testnet Faucet
@@ -8,7 +8,8 @@ description: Get C2FLR, FXRP, and USDT0 on Flare Coston2.
 import { Callout } from 'nextra/components';
 
 Umbra runs on Flare Coston2. The **Faucet** page helps you get the three
-supported testnet assets.
+Coston2 testnet assets, plus a fourth card for bridging in real Bitcoin
+(signet).
 
 ## What you can get
 
@@ -17,11 +18,14 @@ supported testnet assets.
 | `C2FLR` | Coston2 Flare — native gas token | 18 |
 | `FXRP` | FAssets XRP — real bridge | 6 |
 | `USDT0` | Tether USD — testnet | 6 |
+| `BTC` | Real Bitcoin, signet | 8 |
 
-These are **real Coston2 assets** minted by Flare's own faucet. FXRP in
-particular comes from the actual FAssets bridge, not a simulated mint.
+The first three are **real Coston2 assets** minted by Flare's own faucet.
+FXRP in particular comes from the actual FAssets bridge, not a simulated
+mint. `BTC` is real signet Bitcoin, bridged in via a Noir proof — see
+[Bitcoin Bridge](/concepts/bitcoin-bridge).
 
-## How it works
+## How the Coston2 cards work
 
 The page deep-links to [Flare's faucet](https://faucet.flare.network/) rather
 than minting anything itself — the point of this app is genuine FAssets
@@ -32,12 +36,38 @@ balance as a baseline and starts watching. It polls every 5 seconds and
 refetches the moment you tab back in, so the card flashes **Received** as soon
 as tokens land. No manual balance checking.
 
+## How the BTC card works
+
+The BTC card auto-derives a signet deposit address from your connected
+wallet the moment you connect — no separate wallet, no manual "Derive"
+step. Copy that address, send it real signet BTC from any signet faucet or
+wallet, and wait for it to confirm (real Bitcoin block time, roughly ~10
+minutes on average but with real variance).
+
+Once confirmed, the card **automatically** builds, signs, and broadcasts
+the deposit transaction itself — no click required. From there, proving
+and minting are handled entirely by the backend; your `WrappedBTC` balance
+just appears once it lands.
+
+<Callout type="warning">
+  **Minting can currently be slow, or need an admin nudge.** The last step
+  before minting — refreshing an on-chain "checkpoint" to match your
+  deposit's exact confirming height — is still a manual, admin-run step
+  today, not yet automated. If your BTC balance doesn't update for a
+  while after the deposit transaction confirms, that's this known,
+  disclosed limitation, not a broken app. See
+  [Bitcoin Bridge](/concepts/bitcoin-bridge) for the full explanation.
+</Callout>
+
 ## Requirements
 
 - Wallet connected
-- Network set to **Flare Coston2**, chain ID `114`
+- Network set to **Flare Coston2**, chain ID `114`, for the three Coston2
+  cards (the BTC card's own address derivation and balance work as soon as
+  a wallet is connected, independent of which EVM network is selected)
 
-Balances only load on Coston2; on any other network the cards stay inert.
+Coston2 balances only load on Coston2; on any other network those three
+cards stay inert.
 
 <Callout type="info">
   **USDC is not available.** There's no official USDC on Coston2 yet. The page

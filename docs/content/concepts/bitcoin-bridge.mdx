@@ -1,0 +1,104 @@
+---
+title: Bitcoin Bridge
+description: How real signet Bitcoin becomes public WrappedBTC collateral, and the trust model behind it.
+---
+
+# Bitcoin Bridge
+
+import { Callout } from 'nextra/components';
+
+Every other asset in Umbra arrives via `shield()` — a plain ERC20 transfer
+plus a client-computed note commitment. Bitcoin can't work that way: there's
+no ERC20 on the Bitcoin side to transfer. Instead, a Noir circuit
+(`btc_deposit`) proves a real, confirmed Bitcoin signet payment happened,
+and a verified proof mints real `WrappedBTC` — an ordinary ERC20, not a
+note — directly to the depositor's public balance. From there `WrappedBTC`
+is exactly like FXRP or USDT0: `shield` it into a hidden note, `pay`,
+`placeOrder`/`matchOrders`, or `withdraw` it, no special-casing.
+
+## Why a public mint, not a private note
+
+An earlier version of this bridge minted a hidden note directly, with a
+manual on-chain "claim" step. That design had no real EVM-side collateral
+locked in `ShieldedVault` for a BTC-sourced note — if `withdraw()` had ever
+paid one out as if it were genuinely backed, it would have drained other
+users' real collateral. The current design fixes this at the root: the
+circuit binds the depositor's own EVM address (read straight from the
+Bitcoin transaction) and mints a real, publicly-backed `WrappedBTC` balance
+first. Only after that does the ordinary note/commitment system take over,
+the same way it does for any other asset.
+
+## The deposit transaction — a fixed template
+
+The circuit only accepts one exact shape: one input, two outputs.
+
+```
+output 0: OP_RETURN, 0 value, 34-byte script (OP_RETURN + push32 + 20-byte EVM address, zero-padded)
+output 1: P2WPKH payment to Umbra's vault address
+```
+
+The `OP_RETURN` output carries the depositor's own EVM address in the
+clear. Only the real depositor could have produced a Bitcoin transaction
+carrying their own address — signed with their own key — so the resulting
+mint's destination is fixed by the real payment, not by whoever happens to
+submit the proof. Anyone can observe a confirmed deposit and construct its
+proof (all the witness data — header chain, transaction bytes, Merkle
+path — is public chain data once the payment confirms), but they can never
+redirect where it mints.
+
+## What the circuit actually proves
+
+Given a bounded header chain anchored at a trusted, on-chain-registered
+checkpoint, plus a transaction and its Merkle-inclusion path under one of
+those headers: that a real Bitcoin signet payment matching the fixed
+template above happened, extracting the recipient address and satoshi
+amount directly from it. `depositExternal` checks this proof, checks the
+proof's checkpoint commitment matches what's currently registered
+on-chain, checks the payment's nullifier hasn't been used before, then
+mints.
+
+<Callout type="warning">
+  **Checkpoint trust.** The circuit doesn't validate Bitcoin's full history
+  back to genesis — it trusts one recent, admin-registered header
+  (`ShieldedVault.checkpoints[sourceChainId]`) as its root of trust, the
+  same model BTC Relay and SPV clients use, and proves only that a 6-header
+  chain (`K = 6`, roughly an hour of signet blocks) correctly extends
+  forward from it to the deposit's confirming block. Whoever controls what
+  gets registered as the checkpoint is trusted not to register one from a
+  forged or minority-fork chain.
+</Callout>
+
+## No manual claim — but one manual step remains
+
+The deposit side needs no clicks from you: the Faucet page's BTC card
+auto-derives your signet address on wallet connect (same signature-derived
+key scheme as your spending key — no separate wallet to install), then
+auto-builds, signs, and broadcasts the deposit transaction itself the
+moment your funding confirms. A backend watcher independently scans the
+vault's own Bitcoin address and self-registers any deposit whose browser
+closed before it could report itself, so a dropped connection during that
+narrow window can't strand already-moved BTC.
+
+<Callout type="info">
+  **Honest current limitation.** A deposit can only be proven once the
+  on-chain checkpoint is refreshed to align with its exact confirming
+  block height (`checkpoint_height + K == confirming_height`, checked
+  exactly). That refresh is currently a manual, admin-run script, not an
+  automated poll loop — so a real deposit can sit fully confirmed but
+  unminted until an admin runs it. See the
+  [repo README's Roadmap](https://github.com/davre001/UMBRA#roadmap) for
+  the planned fix.
+</Callout>
+
+## Withdrawal is custodial, and says so
+
+Paying real BTC back out is fulfilled by a custodian-held signet wallet —
+`withdraw()` for `WrappedBTC` emits an event instead of moving funds
+itself, and a backend relayer signs and broadcasts the real Bitcoin payout.
+Nothing cryptographic stops that custodian key from simply not paying out
+an already-nullified withdrawal; a public solvency endpoint (custodian
+balance vs. outstanding obligations) makes that risk checkable, not
+eliminated. See [Deployed Contracts](/reference/contracts) for the
+`BtcDepositHonkVerifier` address and
+[`backend/src/btc-withdrawal/`](https://github.com/davre001/UMBRA/tree/main/backend/src/btc-withdrawal)
+for the payout side.

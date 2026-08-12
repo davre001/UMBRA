@@ -25,8 +25,9 @@ npm run deploy:coston2
 
 | Contract | Replaces backend module | Purpose |
 | --- | --- | --- |
-| `ShieldedVault.sol` | `vault`, `dark-engine` | Locks allowlisted assets (native C2FLR, plus ERC20s FXRP and USDT0) as **hidden notes** in a commitment Merkle tree — not a public balance mapping. `withdraw`/`pay`/`placeOrder`/`cancelOrder`/`matchOrders` are each gated by a real UltraHonk (Noir/Barretenberg) proof, verified on-chain. |
-| `verifiers/*.sol` | `prover` | Generated (`bb write_solidity_verifier`) from `circuits/noir/*` — real zk-SNARK verification, using Aztec's public Ignition ceremony SRS, not a per-project trusted setup. |
+| `ShieldedVault.sol` | `vault`, `dark-engine` | Locks allowlisted assets (native C2FLR, plus ERC20s FXRP, USDT0, and WrappedBTC) as **hidden notes** in a commitment Merkle tree — not a public balance mapping. `withdraw`/`pay`/`placeOrder`/`cancelOrder`/`matchOrders` are each gated by a real UltraHonk (Noir/Barretenberg) proof, verified on-chain. `depositExternal` is the one exception — see [Bitcoin bridge](#bitcoin-bridge-depositexternal) below. |
+| `tokens/WrappedBTC.sol` | `btc-deposit` | Ordinary ERC20 (8 decimals, satoshi-denominated) representing bridged-in Bitcoin. `MINTER_ROLE` is granted only to `ShieldedVault`, which mints it via `depositExternal` once a `btc_deposit` proof verifies — no admin mint path. |
+| `verifiers/*.sol` | `prover` | Generated (`bb write_solidity_verifier`) from `circuits/noir/*` — real zk-SNARK verification, using Aztec's public Ignition ceremony SRS, not a per-project trusted setup. Includes `BtcDepositHonkVerifier` for the Bitcoin bridge. |
 | `lib/MerkleTreeWithHistory.sol`, `lib/poseidon2/` | — | Incremental commitment tree + the on-chain Poseidon2 hasher it needs (vendored, empirically verified against the circuits — see `circuits/README.md`). |
 | `ComplianceRegistry.sol` | `compliance` | Records sanction-screen results; `ShieldedVault.withdraw` gates on `isScreened(recipient)`. |
 | `OwnerKeyRegistry.sol` | — | Lets a wallet publish the public `ownerKey` its notes are credited to, so `pay`'s sender can look it up before building a note for that recipient — see `circuits/DESIGN.md`. Standalone; `ShieldedVault` doesn't read it. |
@@ -81,6 +82,38 @@ join-split). Order amounts are private too — `placeOrder`/`cancelOrder`/
 (a fill can consume less than an order's full `amountIn`, leaving a smaller
 residual order still on the book) but only matches two orders at a time —
 no N-way matching in a single proof. See `circuits/DESIGN.md`.
+
+## Bitcoin bridge (`depositExternal`)
+
+`depositExternal` is `ShieldedVault`'s one function that isn't part of the
+note/commitment scheme above — it mints an ordinary **public** ERC20
+balance (`WrappedBTC`), not a hidden note. A `btc_deposit` proof attests
+that a real, confirmed Bitcoin signet transaction paid the vault and
+carried the depositor's own EVM address in its `OP_RETURN` output; once
+verified, `depositExternal` mints `WrappedBTC` straight to that address.
+From there `WrappedBTC` is ordinary allowlisted collateral — `shield`,
+`pay`, `placeOrder`/`matchOrders`, and `withdraw` all treat it exactly like
+FXRP or USDT0, no special-casing.
+
+Three admin-gated registries make this work, all on `ShieldedVault`:
+
+- `checkpoints[sourceChainId]` — a Poseidon2 commitment to one trusted,
+  recent Bitcoin header (`setCheckpoint`, `DEFAULT_ADMIN_ROLE`-gated). The
+  circuit proves a header chain extends forward from this checkpoint by
+  exactly `K = 6` blocks to the deposit's confirming block — see
+  `circuits/BTC_DEPOSIT_DESIGN.md`'s "Known simplifications" for the full
+  trust model and why this currently needs a manual refresh
+  (`scripts/refresh-btc-checkpoint.ts`) per deposit height.
+- `trustedVerifiers[address]` — which verifier contracts `depositExternal`
+  will accept a proof from (shared allowlist mechanism with the rest of
+  this repo's verifiers).
+- `externalDepositToken[sourceChainId]` — which ERC20 a given source
+  chain's deposits mint (`WrappedBTC` for `"BTC_SIGNET"` today;
+  chain-namespaced so a future non-Bitcoin external deposit source doesn't
+  need a storage migration).
+
+`isSpentNullifier` (shared with the note-spending circuits) prevents the
+same Bitcoin transaction from ever minting twice.
 
 ## Network
 

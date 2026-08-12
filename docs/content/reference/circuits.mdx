@@ -1,15 +1,15 @@
 ---
 title: Noir Circuits
-description: Public and private inputs for each of Umbra's five Noir circuits.
+description: Public and private inputs for each of Umbra's six Noir circuits.
 ---
 
 # Noir Circuits
 
 import { Callout } from 'nextra/components';
 
-Five circuits, written in Noir, compiled to WASM, proven with Barretenberg
-(UltraHonk). Four run in your browser; `match_orders` runs on an off-chain
-worker.
+Six circuits, written in Noir, compiled to WASM, proven with Barretenberg
+(UltraHonk). Four run in your browser; `match_orders` and `btc_deposit` run
+server-side, on separate off-chain workers.
 
 Shared constants: Merkle depth `LEVELS = 20`, empty leaf
 `ZERO_VALUE = keccak256("umbra-shielded-vault-noir") % Fr`.
@@ -165,6 +165,39 @@ prove rather than wrapping.
   backend/matcher cross-check uses the same realistic fixture.
 </Callout>
 
+## `btc_deposit`
+
+A different shape from the five above — it doesn't spend or create a note
+at all. It proves a real, confirmed Bitcoin signet transaction paid
+Umbra's vault and carried a specific EVM address in its `OP_RETURN`
+output, binding that address (not a note owner) directly into the proof.
+See [Bitcoin Bridge](/concepts/bitcoin-bridge) for the full trust model
+and the fixed transaction template it checks against.
+
+**Public:** `checkpoint_commitment_pub`, `recipient`, `amount`, `nullifier`
+
+**Private:** `checkpoint_hash`, `headers[6]`, `tx` (non-witness
+transaction bytes), `merkle_path_elements[20]`, `merkle_path_indices[20]`,
+`merkle_actual_depth`
+
+**Constraints (informal)**
+
+```
+sha256d(checkpoint_hash) == checkpoint_commitment_pub   // via Poseidon2 commitment, not the raw hash
+headers[0].prev_hash == checkpoint_hash, each headers[i].prev_hash == sha256d(headers[i-1])
+each headers[i] satisfies real proof-of-work under its own target
+verify_tx_inclusion(tx, merkle_path_elements, merkle_path_indices, headers[5].merkle_root)
+parse_deposit_tx(tx) == (recipient, amount)   // fixed OP_RETURN + P2WPKH template
+nullifier == hash(tx_id)   // prevents the same Bitcoin payment minting twice
+```
+
+Unlike every other circuit here, `btc_deposit`'s witnesses are all public
+Bitcoin chain data once the payment confirms — there's no private spending
+key involved, so proof construction is permissionless. That's not a
+fund-safety gap: the mint always lands at the `recipient` embedded in the
+real, already-signed Bitcoin transaction, regardless of who submits the
+Flare-side proof.
+
 ## Where they run
 
 | Circuit | Proven by |
@@ -174,7 +207,12 @@ prove rather than wrapping.
 | `place_order` | Your browser |
 | `cancel_order` | Your browser |
 | `match_orders` | Off-chain matcher worker |
+| `btc_deposit` | Off-chain BTC deposit worker |
 
 `match_orders` needs both traders' order details, which no single browser
-has — hence the worker. Correctness is still enforced by the on-chain
-verifier, not by trusting the worker.
+has — hence the worker. `btc_deposit` is proven server-side for a
+different reason: at ~5,600 ACIR opcodes (dominated by two `sha256d`
+chains per header), it's roughly 4x heavier natively than `match_orders`,
+before accounting for WASM/browser proving's typical slowdown. Correctness
+is still enforced by the on-chain verifier in both cases, not by trusting
+the worker.

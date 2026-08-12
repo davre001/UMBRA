@@ -67,6 +67,40 @@ nothing is real money, so don't worry about breaking anything.
 
 ---
 
+## Step 2b — Bridge in real Bitcoin (optional, slower)
+
+This one uses **real signet Bitcoin** — a public Bitcoin test network, not
+simulated. It's genuinely free (signet coins have zero value), but it's
+also genuinely slower than the other three assets, since it waits on real
+Bitcoin block times.
+
+1. On the **Faucet** page, find the BTC card. It auto-derives a signet
+   deposit address for your connected wallet — no separate wallet or
+   "Derive" step needed.
+2. Click **Signet Faucet** to open an external signet faucet, and paste in
+   your derived address (shown on the BTC card, with a copy button).
+   Request some coins.
+3. Wait for your funding transaction to confirm on signet — usually around
+   10 minutes, but real Bitcoin block times vary and can occasionally run
+   much longer. You don't need to do anything during this wait.
+4. Once confirmed, the app **automatically** builds, signs, and broadcasts
+   the deposit transaction — no click needed. You'll see the card's status
+   change to "Depositing…" on its own the next time the page polls (every
+   few seconds) if you're watching, or you can just come back later.
+5. **Heads up — minting can be slow or need a nudge right now.** After the
+   deposit transaction itself confirms, it needs one more manual step
+   (an admin "checkpoint refresh") before it's actually provable — this is
+   a known, disclosed current limitation, not a bug (see the root
+   [README's Bitcoin bridge section](./README.md#bitcoin-bridge)). If your
+   BTC balance doesn't show up in Portfolio within an hour or so of the
+   deposit tx confirming, that's expected right now, not something you did
+   wrong.
+6. If you ever close the tab partway through, that's safe — a backend
+   watcher independently notices real deposits paid to the vault and
+   registers them even if your browser never got the chance to.
+
+---
+
 ## Step 3 — Shield some funds (make them private)
 
 "Shielding" means moving your public tokens into Umbra's private vault.
@@ -201,6 +235,7 @@ my FXRP for USDT0").
 - [ ] Connect wallet → land inside the app
 - [ ] Disconnect → returned to start screen
 - [ ] Claim free tokens from the Faucet
+- [ ] (optional) Fund your derived signet address → deposit auto-broadcasts with no click once confirmed
 - [ ] Shield a deposit → shows Success on the explorer
 - [ ] Portfolio balance updates without reloading
 - [ ] Withdraw to a fresh address → gets screened automatically, succeeds

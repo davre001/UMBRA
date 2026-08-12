@@ -3,4 +3,5 @@ export default {
   'dark-pool': 'Dark Pool Matching',
   'stealth-addresses': 'Note Delivery',
   compliance: 'Compliance',
+  'bitcoin-bridge': 'Bitcoin Bridge',
 };

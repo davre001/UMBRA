@@ -31,12 +31,22 @@ circuits/noir/
   place_order/    spend a note, create a hidden order commitment
   cancel_order/   spend an order commitment, create a refund note
   match_orders/   spend two order commitments, create the two matched notes
+  btc_deposit/    prove a real signet Bitcoin payment, mint public WrappedBTC — see BTC_DEPOSIT_DESIGN.md
 ```
 
 Each action circuit depends on `umbra_lib` (`{ path = "../lib" }`) and the
 official `noir-lang/poseidon` package (`tag = "v0.3.0"` — the `v0.1.1` tag
 the README shows first doesn't compile against current nargo, confirmed by
 trying it before landing on `v0.3.0`).
+
+`btc_deposit` is a different shape from the five action circuits above: it
+doesn't spend/create notes at all (it binds a real EVM recipient address
+directly, from a Bitcoin `OP_RETURN` output — see
+[`BTC_DEPOSIT_DESIGN.md`](./BTC_DEPOSIT_DESIGN.md)), it's heavy enough
+(~5,600 ACIR opcodes, dominated by two `sha256d` chains) that it's proven
+server-side rather than in-browser (see that doc's "Proving location"
+section), and its own worker package (`btc-deposit-worker/`) runs it
+independently of `matcher-worker/`'s EventBridge cadence.
 
 ## Compiling, proving, generating the Solidity verifier — per circuit
 

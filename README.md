@@ -21,6 +21,7 @@ settlement followed the rules.
 ![Noir](https://img.shields.io/badge/Noir-ZK_circuits-9D5CFF)
 ![Node.js](https://img.shields.io/badge/Node.js-Express-339933?logo=nodedotjs&logoColor=white)
 ![Flare](https://img.shields.io/badge/Flare-Coston2_testnet-E62058)
+![Bitcoin](https://img.shields.io/badge/Bitcoin-Signet-F7931A?logo=bitcoin&logoColor=white)
 
 📖 **Full documentation:** [docs-umbra.vercel.app](https://docs-umbra.vercel.app/)
 
@@ -52,6 +53,7 @@ See [Roadmap](#roadmap) for what's next.
 
 - [What stays private](#what-stays-private)
 - [How it works](#how-it-works)
+- [Bitcoin bridge](#bitcoin-bridge)
 - [Architecture](#architecture)
 - [Repository layout](#repository-layout)
 - [Quick start](#quick-start)
@@ -119,10 +121,41 @@ for the guided version.
 | | |
 | --- | --- |
 | Chain | Flare (Coston2 testnet) |
-| ZK circuits | [Noir](https://noir-lang.org/), compiled to WASM, proven client-side with Barretenberg |
+| ZK circuits | [Noir](https://noir-lang.org/), compiled to WASM, proven client-side with Barretenberg (server-side for `btc_deposit` — see [Bitcoin bridge](#bitcoin-bridge)) |
 | Pricing | Flare Time Series Oracle (FTSOv2) |
 | Compliance | `ComplianceRegistry` gates `withdraw()` today via a disclosed `ATTESTER_ROLE` placeholder, not FDC yet — see [Roadmap](#roadmap) |
-| Assets | FAssets (FXRP, and more) |
+| Assets | FAssets (FXRP, and more), plus real Bitcoin (signet) via a native bridge — see [Bitcoin bridge](#bitcoin-bridge) |
+
+## Bitcoin bridge
+
+Real signet Bitcoin bridges in as genuine, public collateral — not a
+simulated or wrapped-by-trust token. Send BTC to a signet address derived
+from your connected wallet; a Noir circuit (`btc_deposit`) proves that a
+real, confirmed Bitcoin transaction paid the vault and carried your EVM
+address in its `OP_RETURN` output, and a verified proof mints real
+`WrappedBTC` (an ordinary ERC20, 8 decimals) straight to your public
+balance. From there it's ordinary allowlisted collateral — shield, pay,
+swap, and dark-pool all work on it exactly like FXRP or USDT0.
+
+The whole deposit side needs zero manual steps: the Faucet page's BTC card
+auto-derives your signet address on wallet connect, auto-broadcasts the
+deposit transaction the moment your funding confirms (no click), and a
+backend watcher independently scans the vault's own address to self-
+register any deposit whose browser closed before it could report itself —
+so a dropped connection can't strand funds. See
+[`backend/src/btc-deposit/`](./backend/src/btc-deposit) and
+[`frontend/src/app/faucet/page.tsx`](./frontend/src/app/faucet/page.tsx).
+
+**Honest current limitation**: the circuit trusts one admin-registered
+"checkpoint" header as its root of trust (the same model BTC Relay/SPV
+clients use), and a deposit can only be proven once that checkpoint is
+refreshed to align with its exact confirming block height. That refresh is
+currently a manual, admin-run script (`contract/scripts/
+refresh-btc-checkpoint.ts`), not yet automated — a deposit can sit proven-
+but-unminted until someone runs it. See [Roadmap](#roadmap) and
+[`BTC_DEPOSIT_DESIGN.md`](./contract/circuits/BTC_DEPOSIT_DESIGN.md)'s
+"Known simplifications" for the full disclosed trust model (checkpoint
+trust, fixed K = 6 confirmation window, signet signer-check not verified).
 
 ## Architecture
 
@@ -137,17 +170,21 @@ flowchart LR
         PR["pricing"]
         CO["compliance"]
         RL["relayer"]
+        BD["btc-deposit<br/>watcher + auto-minter"]
     end
 
     MW["🔐 matcher-worker<br/>(AWS Lambda)<br/>match_orders proving"]
+    BW["🔐 btc-deposit-worker<br/>(AWS Lambda)<br/>btc_deposit proving"]
     DB[("🗄️ Turso<br/>order book / match state")]
     FTSO["📈 FTSOv2 oracle"]
+    BTC["₿ Bitcoin signet<br/>(mempool.space)"]
 
     subgraph Coston2["⛓️ Flare Coston2"]
         SV["ShieldedVault"]
         OKR["OwnerKeyRegistry"]
         SA["StealthAnnouncer"]
         CR["ComplianceRegistry"]
+        WBTC["WrappedBTC"]
     end
 
     FE -->|"proof-authorized txs<br/>shield · pay · order · withdraw"| SV
@@ -155,6 +192,7 @@ flowchart LR
     FE -->|register / lookup key| OKR
     FE -->|discover incoming notes| SA
     FE -->|screen address| CO
+    FE -->|"sign + broadcast deposit tx<br/>(auto, no click)"| BTC
 
     DE <-->|persist| DB
     DE -->|awaiting proof| MW
@@ -166,6 +204,12 @@ flowchart LR
     CO -->|record screen| CR
     RL -->|gasless relay| SV
     SV -->|withdraw gate| CR
+
+    BD -->|scan vault address<br/>self-register| BTC
+    BD -->|awaiting proof| BW
+    BW -->|proof| BD
+    BD -->|"depositExternal (auto-mint)"| SV
+    SV -->|mint| WBTC
 ```
 
 Every write to `ShieldedVault` is authorized by a ZK proof, not by who submits
@@ -176,10 +220,12 @@ matcher see order details without ever being able to touch funds.
 
 ```
 umbra/
-├── backend/     # Express + TypeScript API — dark-engine matcher, pricing, compliance, relayer
-├── contract/    # Solidity contracts + Noir circuits, deployed to Coston2
-├── frontend/    # Next.js 16 + React 19 app
-└── docs/        # Nextra docs site — docs-umbra.vercel.app
+├── backend/              # Express + TypeScript API — dark-engine matcher, pricing, compliance, relayer, btc-deposit/btc-withdrawal
+├── contract/             # Solidity contracts + Noir circuits, deployed to Coston2
+├── frontend/             # Next.js 16 + React 19 app
+├── matcher-worker/       # AWS Lambda — match_orders proving (server-side, EventBridge-scheduled)
+├── btc-deposit-worker/   # AWS Lambda — btc_deposit proving (server-side, 1-minute poll)
+└── docs/                 # Nextra docs site — docs-umbra.vercel.app
 ```
 
 ## Quick start
@@ -213,6 +259,8 @@ can't be freshly re-derived.
 | `pricing` | Live FTSOv2 midpoint rate lookup |
 | `compliance` | Real on-chain address screening against `ComplianceRegistry` |
 | `relayer` | Real gasless relaying — proof-authorized `ShieldedVault` writes submitted on a user's behalf |
+| `btc-deposit` | Real signet chain data + fixed-template tx parsing for `btc-deposit-worker`; a poll loop that self-registers deposits the frontend never reported; auto-submits `depositExternal` once proven — see [Bitcoin bridge](#bitcoin-bridge) |
+| `btc-withdrawal` | Custodial signet payout relayer — fulfills `ExternalWithdrawalRequested` events, publishes a public solvency check at `GET /api/btc-withdrawal/solvency` |
 
 ```bash
 cd backend
@@ -239,7 +287,7 @@ for animation.
 | `/shield` | Deposit FAssets into shielded balances |
 | `/pay` | Private pay — send, register your payment key, claim incoming payments |
 | `/swap` | Dark pool trading — place, cancel, and claim orders |
-| `/faucet` | Deep-links to Flare's Coston2 faucet for testnet assets |
+| `/faucet` | Deep-links to Flare's Coston2 faucet for C2FLR/FXRP/USDT0, plus a real signet Bitcoin deposit flow — auto-derives your deposit address and auto-broadcasts once funded, no separate claim step (see [Bitcoin bridge](#bitcoin-bridge)) |
 
 ```bash
 cd frontend
@@ -250,13 +298,24 @@ npm run lint    # lint the codebase
 
 ## Status
 
-Umbra runs on the **Flare Coston2 testnet** — no real funds are at risk. See
+Umbra runs on the **Flare Coston2 testnet**, bridging real **Bitcoin
+signet** — no real funds are at risk on either chain. See
 [Deployed Contracts](https://docs-umbra.vercel.app/reference/contracts) for
 live addresses, and [Getting Started](https://docs-umbra.vercel.app/getting-started)
-to make your first shielded deposit.
+to make your first shielded deposit. The BTC deposit path (auto-broadcast,
+self-registration watcher, auto-mint) is live and verified end-to-end
+against the real deployment, including automatic recovery of a deposit
+whose browser closed mid-flight — see [Bitcoin bridge](#bitcoin-bridge) for
+the one still-manual step (checkpoint refresh).
 
 ## Roadmap
 
+- **Automate the BTC checkpoint refresh.** Today, unblocking a proven
+  BTC deposit for minting requires an admin to manually run
+  `scripts/refresh-btc-checkpoint.ts` once it's confirmed at a specific
+  height — see [Bitcoin bridge](#bitcoin-bridge). A poll loop that does
+  this automatically (mirroring `btc-deposit`'s existing watcher/minter
+  pattern) would close the last manual step in the deposit flow.
 - **Real FDC compliance verification.** `ComplianceRegistry.screen()` is
   currently gated by `ATTESTER_ROLE` — a disclosed placeholder, not a real
   attestation. Shipping this for real means swapping that access check for

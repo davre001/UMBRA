@@ -1,8 +1,8 @@
 # BTC deposit circuit design
 
-> **Superseded, 2026-08-11**: this document describes the original
-> private-note design (`depositExternal` minting a hidden Poseidon2 note,
-> `owner_key`/`blinding`, a manual on-chain "claim" via
+> **Superseded, 2026-08-11, updated 2026-08-12**: this document describes
+> the original private-note design (`depositExternal` minting a hidden
+> Poseidon2 note, `owner_key`/`blinding`, a manual on-chain "claim" via
 > `frontend/src/app/deposit-btc/page.tsx`). That page and the note-minting
 > path are gone. `btc_deposit`'s circuit now binds a real EVM `recipient`
 > address + `amount` directly (see `contracts/tokens/WrappedBTC.sol` and
@@ -15,6 +15,27 @@
 > to deposits (`withdraw()`'s real-BTC-payout path for BTC specifically is
 > also now dormant — see `contract/scripts/redeploy-vault-wrapped-btc.ts`'s
 > own comment on why `setExternalSourceAsset` is no longer called for it).
+>
+> **Since this banner was written, two more pieces closed out the deposit
+> UX** (see the root [README's Bitcoin bridge
+> section](../../README.md#bitcoin-bridge) for the user-facing summary):
+> `frontend/src/app/faucet/page.tsx`'s `BtcFaucetCard` now auto-builds,
+> signs, and broadcasts the deposit transaction itself the moment a
+> confirmed UTXO appears — no click required, verified live against the
+> real deployment. `backend/src/btc-deposit/depositWatcher.ts` closes the
+> one remaining gap that left (a browser closing between broadcast and
+> reporting itself to the backend, which would otherwise strand real,
+> already-moved BTC forever): it independently scans the vault's own
+> address every 30s and self-registers anything template-matching it
+> doesn't already know, and keeps every pending record's `checkpointHeight`
+> in sync with the live on-chain checkpoint so a later refresh actually
+> reaches it (a real bug, found and fixed live: a record's
+> `checkpointHeight` is frozen at registration time, and the watcher's own
+> "already known, skip" fast path was — before the fix — also skipping the
+> one thing that could unstick it after a refresh). One genuine gap
+> remains, disclosed rather than fixed: the checkpoint refresh itself
+> (`scripts/refresh-btc-checkpoint.ts`) is still a manual, admin-run step
+> per deposit height, not yet automated — see the root README's Roadmap.
 
 This is a **new** design-doc convention, specific to `btc_deposit` — it is
 not a continuation of `DESIGN.md`'s existing structure (that file has one
