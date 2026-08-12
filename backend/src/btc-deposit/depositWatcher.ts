@@ -67,7 +67,15 @@ export async function pollOnce(): Promise<{ scanned: number; registered: number 
 
   let registered = 0;
   for (const { txid } of txs) {
-    if (store.hasRecord(txid)) continue;
+    if (store.hasRecord(txid)) {
+      // Already registered — no need to re-fetch/re-parse the tx, but
+      // still keep its checkpointHeight in sync with the live checkpoint
+      // every poll, or a checkpoint refresh run after this record was
+      // first registered would otherwise never reach it (each record's
+      // checkpointHeight is frozen at registration time — see store.ts).
+      store.refreshCheckpointHeight(txid, checkpointHeight);
+      continue;
+    }
     try {
       const rawTxHex = (await mempoolGet(`/tx/${txid}/hex`)).trim();
       const tx = stripWitness(rawTxHex);

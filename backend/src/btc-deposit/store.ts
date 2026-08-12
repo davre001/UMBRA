@@ -70,9 +70,28 @@ export function getRecord(id: string): BtcDepositRecord | undefined {
   return records.get(id);
 }
 
-/** Whether `txid` already has a record — lets depositWatcher.ts skip a transaction it's already seen without paying createRecord's (harmless, but pointless-to-repeat) lookup-and-maybe-refresh cost every poll. */
+/** Whether `txid` already has a record — lets depositWatcher.ts skip re-fetching/re-parsing a transaction it's already seen (recipient/amountSats never change) while still calling refreshCheckpointHeight below on every poll. */
 export function hasRecord(txid: string): boolean {
   return txidToId.has(txid);
+}
+
+/**
+ * Refreshes checkpointHeight on an already-registered awaiting_proof
+ * record — the standalone version of createRecord's own resubmission
+ * refresh (see its comment above) for callers, like depositWatcher.ts,
+ * that already know the recipient/amountSats and don't want to pay the
+ * cost of re-fetching and re-parsing the raw transaction just to keep
+ * checkpointHeight in sync with the live checkpoint every poll. A no-op
+ * once the record leaves awaiting_proof (proven/minted/failed are
+ * terminal) or if the height hasn't actually changed.
+ */
+export function refreshCheckpointHeight(txid: string, checkpointHeight: number): void {
+  const id = txidToId.get(txid);
+  if (!id) return;
+  const record = records.get(id);
+  if (!record || record.status !== "awaiting_proof" || record.checkpointHeight === checkpointHeight) return;
+  logger.info(`[btc-deposit] ${txid}: refreshing stale checkpointHeight on record ${id} (${record.checkpointHeight} -> ${checkpointHeight})`);
+  record.checkpointHeight = checkpointHeight;
 }
 
 export function listAwaitingProof(): BtcDepositRecord[] {
