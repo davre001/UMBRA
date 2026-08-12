@@ -70,6 +70,11 @@ export function getRecord(id: string): BtcDepositRecord | undefined {
   return records.get(id);
 }
 
+/** Whether `txid` already has a record — lets depositWatcher.ts skip a transaction it's already seen without paying createRecord's (harmless, but pointless-to-repeat) lookup-and-maybe-refresh cost every poll. */
+export function hasRecord(txid: string): boolean {
+  return txidToId.has(txid);
+}
+
 export function listAwaitingProof(): BtcDepositRecord[] {
   return [...records.values()].filter((r) => r.status === "awaiting_proof");
 }
