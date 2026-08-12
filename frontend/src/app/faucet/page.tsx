@@ -192,12 +192,14 @@ function FaucetAssetCard({
  * BTC's faucet card — same shell/sizing as the other three so it sits on
  * the same grid row, but its own flow: get real signet BTC into an
  * address auto-derived from the connected wallet (no separate wallet, no
- * manual "Derive" step), then one click builds+signs+broadcasts the real
- * signet deposit transaction with the wallet's own EVM address baked in
- * as the recipient. From there, proving and minting are both fully
- * automatic (see backend/src/btc-deposit/minter.ts) — this card's own
- * WrappedBTC balance (via useFaucetBalance, exactly like the other three
- * cards) is what shows the deposit landing, with no further action here.
+ * manual "Derive" step). As soon as a confirmed UTXO shows up there, this
+ * card automatically builds+signs+broadcasts the signet deposit
+ * transaction itself (see the auto-deposit effect below) — no click
+ * needed, since the signing key is already cached client-side from wallet
+ * connection (see useNoteWallet's getSignature). From there, proving and
+ * minting are both fully automatic too (see backend/src/btc-deposit/minter.ts)
+ * — this card's own WrappedBTC balance (via useFaucetBalance, exactly like
+ * the other three cards) is what shows the deposit landing.
  */
 function BtcFaucetCard({
   walletAddress,
@@ -220,6 +222,13 @@ function BtcFaucetCard({
   const [copied, setCopied] = useState(false);
   const [depositId, setDepositId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Tracks which UTXO's txid we've already auto-fired a deposit attempt for,
+  // so the auto-deposit effect below fires exactly once per UTXO instead of
+  // re-triggering on every poll/re-render. A failed attempt leaves this set
+  // (no automatic retry loop) but the manual button below stays available.
+  // State (not a ref) because the render below reads it to decide whether
+  // to label the button "Retry" — reading a ref during render isn't allowed.
+  const [autoAttemptedTxid, setAutoAttemptedTxid] = useState<string | null>(null);
 
   // Auto-derives on wallet connect — no manual "Derive" click. Reuses the
   // same cached wallet signature every other note-wallet derivation on
@@ -273,7 +282,7 @@ function BtcFaucetCard({
     setTimeout(() => setCopied(false), 1500);
   };
 
-  /** One click: build, sign, broadcast the fixed-template deposit tx spending the largest confirmed UTXO, then submit its txid for proving — no separate steps, no claim afterward. */
+  /** Build, sign, broadcast the fixed-template deposit tx spending the largest confirmed UTXO, then submit its txid for proving — no separate steps, no claim afterward. Fires automatically (see the effect below) as well as from the manual retry button. */
   const handleDeposit = async () => {
     if (!walletAddress || !largestUtxo || !vaultPubkeyHash || feeRateQuery.data === undefined) return;
     try {
@@ -292,6 +301,25 @@ function BtcFaucetCard({
       setBusy(false);
     }
   };
+
+  // Auto-deposit: reacting to an external system (Bitcoin, via utxosQuery's
+  // 8s poll above) — the canonical case react-hooks/set-state-in-effect's
+  // own guidance calls out as fine to suppress ("subscribe for updates from
+  // some external system"). The moment a confirmed UTXO shows up and
+  // nothing is already in flight for it, fire the deposit ourselves — no
+  // click required. Only runs while this card is mounted (i.e. the Faucet
+  // page is open) and the fee rate has loaded. autoAttemptedTxid makes this
+  // a one-shot per UTXO, not a retry loop; busy/depositId keep it from
+  // overlapping a submission that's already running or already succeeded.
+  useEffect(() => {
+    if (!largestUtxo || !vaultPubkeyHash || !walletAddress || feeRateQuery.data === undefined) return;
+    if (busy || depositId) return;
+    if (autoAttemptedTxid === largestUtxo.txid) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setAutoAttemptedTxid(largestUtxo.txid);
+    handleDeposit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [largestUtxo?.txid, vaultPubkeyHash, walletAddress, feeRateQuery.data, busy, depositId, autoAttemptedTxid]);
 
   const depositStatus = depositStatusQuery.data?.status;
   const statusLabel =
@@ -355,24 +383,32 @@ function BtcFaucetCard({
               Signet Faucet
             </AnimatedButton>
           </a>
-          {largestUtxo && depositStatus !== 'minted' && (
-            <AnimatedButton
-              variant="primary"
-              size="sm"
-              fullWidth
-              className="rounded-lg"
-              onClick={handleDeposit}
-              disabled={busy || !!depositId || feeRateQuery.data === undefined}
-            >
-              {busy ? (
-                <span className="flex items-center gap-1.5"><RefreshCw size={13} className="animate-spin" />Depositing…</span>
-              ) : statusLabel ? (
-                <span className="flex items-center gap-1.5"><RefreshCw size={13} className="animate-spin" />{statusLabel}</span>
-              ) : (
-                `Deposit ${formatSats(largestUtxo.value)}`
-              )}
-            </AnimatedButton>
-          )}
+          {largestUtxo && depositStatus !== 'minted' && (() => {
+            // Already attempted automatically for this exact UTXO and it's
+            // not in flight or submitted — that attempt failed, so this is
+            // a manual retry, not the (invisible, automatic) first try.
+            const isRetry = !busy && !depositId && autoAttemptedTxid === largestUtxo.txid;
+            return (
+              <AnimatedButton
+                variant="primary"
+                size="sm"
+                fullWidth
+                className="rounded-lg"
+                onClick={handleDeposit}
+                disabled={busy || !!depositId || feeRateQuery.data === undefined}
+              >
+                {busy ? (
+                  <span className="flex items-center gap-1.5"><RefreshCw size={13} className="animate-spin" />Depositing…</span>
+                ) : statusLabel ? (
+                  <span className="flex items-center gap-1.5"><RefreshCw size={13} className="animate-spin" />{statusLabel}</span>
+                ) : isRetry ? (
+                  `Retry Deposit ${formatSats(largestUtxo.value)}`
+                ) : (
+                  <span className="flex items-center gap-1.5"><Loader2 size={13} className="animate-spin" />Auto-depositing…</span>
+                )}
+              </AnimatedButton>
+            );
+          })()}
           {depositStatus === 'minted' && (
             <div className="flex items-center justify-center gap-1.5 text-[10px] text-success-state uppercase tracking-wider py-2">
               <CheckCircle2 size={13} />
