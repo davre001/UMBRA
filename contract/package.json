@@ -6,8 +6,8 @@
   "scripts": {
     "compile": "hardhat compile",
     "build": "hardhat compile",
-    "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit",
+    "typecheck": "hardhat compile && tsc --noEmit",
+    "lint": "hardhat compile && tsc --noEmit",
     "test": "hardhat test",
     "coverage": "hardhat coverage",
     "test:coverage": "hardhat coverage",
@@ -21,6 +21,7 @@
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@flarenetwork/flare-periphery-contracts": "^0.1.52",
     "@types/chai": "^4.3.16",
+    "@types/mocha": "^10.0.6",
     "@types/node": "^22.0.0",
     "chai": "^4.3.7",
     "dotenv": "^16.4.5",
