@@ -15,5 +15,10 @@
     "dev:backend": "pnpm --filter umbra-backend dev",
     "dev:frontend": "pnpm --filter frontend dev",
     "dev:docs": "pnpm --filter docs dev"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "nextra-theme-docs@4.6.1": "patches/nextra-theme-docs@4.6.1.patch"
+    }
   }
 }
