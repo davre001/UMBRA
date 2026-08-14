@@ -7,8 +7,8 @@
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "outDir": "dist",
-    "types": ["node", "mocha", "chai"]
+    "outDir": "dist"
   },
-  "include": ["./scripts", "./test", "./hardhat.config.ts", "./typechain-types"]
+  "include": ["./scripts", "./test", "./hardhat.config.ts", "./typechain-types"],
+  "files": ["./hardhat.config.ts"]
 }
