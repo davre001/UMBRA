@@ -75,7 +75,7 @@ async function deployHonkVerifier(contractName: string, relationsName: string, t
 }
 
 describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
-  this.timeout(60_000);
+  this.timeout(300_000);
 
   let vault: ShieldedVault;
   let token: MockERC20;

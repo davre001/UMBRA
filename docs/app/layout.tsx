@@ -2,14 +2,8 @@ import type { Metadata } from 'next';
 import { Footer, Layout, Navbar } from 'nextra-theme-docs';
 import { Head } from 'nextra/components';
 import { getPageMap } from 'nextra/page-map';
-import { Space_Grotesk } from 'next/font/google';
 import Image from 'next/image';
 import 'nextra-theme-docs/style.css';
-
-const spaceGrotesk = Space_Grotesk({
-  subsets: ['latin'],
-  weight: ['700'],
-});
 
 export const metadata: Metadata = {
   title: {
@@ -32,8 +26,8 @@ const navbar = (
       <span style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
         <Image src="/logo.png" alt="" width={28} height={28} priority />
         <span
-          className={spaceGrotesk.className}
           style={{
+            fontFamily: 'Space Grotesk, system-ui, -apple-system, sans-serif',
             fontWeight: 700,
             letterSpacing: '0.1em',
             fontSize: '1.125rem',
@@ -57,6 +51,7 @@ const footer = (
 );
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const pageMap = await getPageMap();
   return (
     <html lang="en" dir="ltr" suppressHydrationWarning>
       <Head backgroundColor={{ dark: '#0a0a0a', light: '#fafafa' }} />
@@ -64,10 +59,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <Layout
           navbar={navbar}
           footer={footer}
-          pageMap={await getPageMap()}
+          pageMap={pageMap}
           docsRepositoryBase="https://github.com/davre001/UMBRA/tree/main/docs"
           editLink="Edit this page on GitHub"
-          nextThemes={{ defaultTheme: 'dark' }}
           sidebar={{ defaultMenuCollapseLevel: 1 }}
         >
           {children}

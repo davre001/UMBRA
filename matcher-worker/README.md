@@ -20,9 +20,9 @@ checkout.
 
 ```bash
 cd matcher-worker
-npm install
+pnpm install
 cp .env.example .env   # fill in BACKEND_URL + MATCHER_INTERNAL_SECRET (must match backend/.env)
-npm run sync-circuit   # copies contract/circuits/noir/match_orders/target/match_orders.json into ./circuit/
+pnpm run sync-circuit   # copies contract/circuits/noir/match_orders/target/match_orders.json into ./circuit/
 ```
 
 `sync-circuit` requires `contract/`'s compiled circuit artifact to already
@@ -32,8 +32,8 @@ Re-run it whenever `match_orders/src/main.nr` changes and gets recompiled.
 ## Run locally
 
 ```bash
-npm start            # polls forever, POLL_INTERVAL_MS apart
-npm start -- --once  # single pass, then exit
+pnpm start            # polls forever, POLL_INTERVAL_MS apart
+pnpm start -- --once  # single pass, then exit
 ```
 
 For each `awaiting_proof` match: fetches its full proof inputs (private —
@@ -53,7 +53,7 @@ there's no need for the extra ECR/container-image machinery a bigger bundle
 would need.
 
 ```bash
-npm run package-lambda     # tsc build + sync-circuit + stage a prod-only
+pnpm run package-lambda     # tsc build + sync-circuit + stage a prod-only
                             # node_modules into lambda-build/
 
 BACKEND_URL=https://your-backend.example.com \

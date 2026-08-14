@@ -21,19 +21,19 @@ jobs:
   build:
     name: Lint, Typecheck & Build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache: pnpm
 
-      - run: npm ci
-      - run: npm run lint
-      - run: npx tsc --noEmit
-      - run: npm run build
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter frontend run lint
+      - run: pnpm --filter frontend run typecheck
+      - run: pnpm --filter frontend run build

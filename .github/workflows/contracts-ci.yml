@@ -22,18 +22,18 @@ jobs:
   test:
     name: Compile & Test
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: contract
     steps:
       - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: contract/package-lock.json
+          cache: pnpm
 
-      - run: npm ci
-      - run: npx hardhat compile
-      - run: npx hardhat test
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter umbra-contracts run compile
+      - run: pnpm --filter umbra-contracts test

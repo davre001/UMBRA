@@ -1,0 +1,15 @@
+packages:
+  - "backend"
+  - "frontend"
+  - "contract"
+  - "btc-deposit-worker"
+  - "matcher-worker"
+  - "docs"
+
+patchedDependencies:
+  nextra-theme-docs@4.6.1: patches/nextra-theme-docs@4.6.1.patch
+
+overrides:
+  chai: "^4.3.7"
+  "@types/chai": "^4.3.16"
+  zod: "^3.23.8"

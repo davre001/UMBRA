@@ -5,7 +5,12 @@
   "description": "Umbra on-chain contracts — Shielded Vault, verifiers, dark-pool settlement — deployed to Flare Coston2 testnet.",
   "scripts": {
     "compile": "hardhat compile",
+    "build": "hardhat compile",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
     "test": "hardhat test",
+    "coverage": "hardhat coverage",
+    "test:coverage": "hardhat coverage",
     "deploy:coston2": "hardhat run scripts/deploy.ts --network coston2",
     "clean": "hardhat clean"
   },
@@ -15,7 +20,9 @@
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@flarenetwork/flare-periphery-contracts": "^0.1.52",
+    "@types/chai": "^4.3.16",
     "@types/node": "^22.0.0",
+    "chai": "^4.3.7",
     "dotenv": "^16.4.5",
     "hardhat": "^2.22.0",
     "ts-node": "^10.9.2",

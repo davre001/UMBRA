@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment files and secrets
+.env
+.env*.local
+*.pem
+*.key
+
+# Build outputs and caches
+dist/
+build/
+.next/
+out/
+coverage/
+.turbo/
+.cache/
+
+# Artifacts and logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Hardhat & contracts
+contract/artifacts/
+contract/cache/
+contract/typechain-types/
+
+# OS files
+.DS_Store
+Thumbs.db

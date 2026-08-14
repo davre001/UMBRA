@@ -1,0 +1,19 @@
+{
+  "name": "umbra-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "lint": "pnpm -r --if-present run lint",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "test": "pnpm -r --if-present run test",
+    "build": "pnpm -r --if-present run build",
+    "contracts:compile": "pnpm --filter umbra-contracts compile",
+    "contracts:test": "pnpm --filter umbra-contracts test",
+    "contracts:coverage": "pnpm --filter umbra-contracts coverage",
+    "backend:coverage": "pnpm --filter umbra-backend test:coverage",
+    "dev:backend": "pnpm --filter umbra-backend dev",
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev:docs": "pnpm --filter docs dev"
+  }
+}

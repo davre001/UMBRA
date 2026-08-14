@@ -3,13 +3,8 @@ import { ethers } from "hardhat";
 import * as fs from "fs";
 import * as path from "path";
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
-import { ShieldedVault, BatchWithdrawer } from "../typechain-types";
+import { ShieldedVault, BatchWithdrawer, MockERC20 } from "../typechain-types";
 
-// Same real fixture ShieldedVault.test.ts uses — see its own comment for
-// provenance. Only one withdraw fixture exists (one fixed nullifier), which
-// is enough to test both paths here: a successful batched withdrawal, and a
-// failing item (replaying that same nullifier) not blocking the rest of the
-// batch.
 const NOIR_DIR = path.join(__dirname, "../circuits/noir");
 function loadFixture(circuit: "withdraw", pubCount: number) {
   const fixtures = path.join(NOIR_DIR, circuit, "fixtures");
@@ -53,11 +48,13 @@ describe("BatchWithdrawer (real Noir/UltraHonk circuit)", function () {
 
   let vault: ShieldedVault;
   let batcher: BatchWithdrawer;
+  let token: MockERC20;
   let admin: HardhatEthersSigner;
   let alice: HardhatEthersSigner;
+  let bob: HardhatEthersSigner;
 
   beforeEach(async () => {
-    [admin, alice] = await ethers.getSigners();
+    [admin, alice, bob] = await ethers.getSigners();
 
     const hasher = await deployHasher();
     const withdrawVerifier = await deployHonkVerifier("WithdrawHonkVerifier", "WithdrawRelationsLib", "WithdrawZKTranscriptLib");
@@ -79,18 +76,165 @@ describe("BatchWithdrawer (real Noir/UltraHonk circuit)", function () {
     );
     await vault.connect(admin).setAsset(WITHDRAW_ASSET_ID, ethers.ZeroAddress, true);
 
+    const Token = await ethers.getContractFactory("MockERC20");
+    token = await Token.deploy("Test USD", "USD0");
+    await vault.connect(admin).setAsset(1n, await token.getAddress(), true);
+
     const Batcher = await ethers.getContractFactory("BatchWithdrawer");
     batcher = await Batcher.deploy();
   });
 
-  it("submits a real withdraw via the batcher with one signature", async () => {
-    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
-    const { proof, publicInputs } = loadFixture("withdraw", 5);
+  describe("Single and Multiple Batch Withdrawals", () => {
+    it("submits a real withdraw via the batcher with one signature", async () => {
+      await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
+      const { proof, publicInputs } = loadFixture("withdraw", 5);
 
-    const before = await ethers.provider.getBalance(WITHDRAW_RECIPIENT);
+      const before = await ethers.provider.getBalance(WITHDRAW_RECIPIENT);
 
-    await expect(
-      batcher.batchWithdraw(await vault.getAddress(), [
+      await expect(
+        batcher.batchWithdraw(await vault.getAddress(), [
+          {
+            proof,
+            root: publicInputs[0],
+            nullifierHash: publicInputs[1],
+            amount: WITHDRAW_AMOUNT,
+            assetId: WITHDRAW_ASSET_ID,
+            recipient: WITHDRAW_RECIPIENT,
+          },
+        ])
+      )
+        .to.emit(batcher, "WithdrawAttempted")
+        .withArgs(await vault.getAddress(), 0n, publicInputs[1], true);
+
+      expect(await ethers.provider.getBalance(WITHDRAW_RECIPIENT)).to.equal(before + WITHDRAW_AMOUNT);
+      expect(await vault.isSpentNullifier(publicInputs[1])).to.equal(true);
+    });
+
+    it("handles an empty batch call gracefully with zero events and zero state changes", async () => {
+      const tx = await batcher.batchWithdraw(await vault.getAddress(), []);
+      const receipt = await tx.wait();
+      expect(receipt!.logs).to.have.length(0);
+    });
+  });
+
+  describe("Partial Success & Fault Tolerance", () => {
+    it("doesn't let one failing item block the rest of the batch", async () => {
+      await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
+      const { proof, publicInputs } = loadFixture("withdraw", 5);
+      const call = {
+        proof,
+        root: publicInputs[0],
+        nullifierHash: publicInputs[1],
+        amount: WITHDRAW_AMOUNT,
+        assetId: WITHDRAW_ASSET_ID,
+        recipient: WITHDRAW_RECIPIENT,
+      };
+
+      const before = await ethers.provider.getBalance(WITHDRAW_RECIPIENT);
+
+      // Same real proof submitted twice in one batch: item 0 spends the
+      // nullifier for real, item 1 replays it and must fail on-chain
+      // (NullifierAlreadySpent) — without reverting item 0's already-confirmed
+      // withdrawal or the transaction as a whole.
+      const tx = await batcher.batchWithdraw(await vault.getAddress(), [call, call]);
+      const receipt = await tx.wait();
+      const events = receipt!.logs
+        .map((log) => {
+          try {
+            return batcher.interface.parseLog(log);
+          } catch {
+            return null;
+          }
+        })
+        .filter((e): e is NonNullable<typeof e> => e !== null && e.name === "WithdrawAttempted");
+
+      expect(events).to.have.length(2);
+      expect(events[0].args.index).to.equal(0n);
+      expect(events[0].args.success).to.equal(true);
+      expect(events[1].args.index).to.equal(1n);
+      expect(events[1].args.success).to.equal(false);
+
+      // The real transfer from item 0 still happened, exactly once.
+      expect(await ethers.provider.getBalance(WITHDRAW_RECIPIENT)).to.equal(before + WITHDRAW_AMOUNT);
+    });
+
+    it("gracefully catches a call to an invalid/reverting target without reverting batch", async () => {
+      const { proof, publicInputs } = loadFixture("withdraw", 5);
+      const invalidCall = {
+        proof,
+        root: publicInputs[0],
+        nullifierHash: publicInputs[1],
+        amount: WITHDRAW_AMOUNT,
+        assetId: WITHDRAW_ASSET_ID,
+        recipient: WITHDRAW_RECIPIENT,
+      };
+
+      // Target a deployed contract that does not implement withdraw (e.g. MockERC20)
+      const nonVaultContract = await token.getAddress();
+      const tx = await batcher.batchWithdraw(nonVaultContract, [invalidCall]);
+      const receipt = await tx.wait();
+      const events = receipt!.logs
+        .map((log) => {
+          try {
+            return batcher.interface.parseLog(log);
+          } catch {
+            return null;
+          }
+        })
+        .filter((e): e is NonNullable<typeof e> => e !== null && e.name === "WithdrawAttempted");
+
+      expect(events).to.have.length(1);
+      expect(events[0].args.vault).to.equal(nonVaultContract);
+      expect(events[0].args.success).to.equal(false);
+    });
+
+    it("handles batch with tampered roots and invalid amounts emitting success: false", async () => {
+      await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
+      const { proof, publicInputs } = loadFixture("withdraw", 5);
+
+      const tamperedRootCall = {
+        proof,
+        root: "0x1111111111111111111111111111111111111111111111111111111111111111",
+        nullifierHash: publicInputs[1],
+        amount: WITHDRAW_AMOUNT,
+        assetId: WITHDRAW_ASSET_ID,
+        recipient: WITHDRAW_RECIPIENT,
+      };
+
+      const tamperedAmountCall = {
+        proof,
+        root: publicInputs[0],
+        nullifierHash: publicInputs[1],
+        amount: 999999n,
+        assetId: WITHDRAW_ASSET_ID,
+        recipient: WITHDRAW_RECIPIENT,
+      };
+
+      const tx = await batcher.batchWithdraw(await vault.getAddress(), [tamperedRootCall, tamperedAmountCall]);
+      const receipt = await tx.wait();
+      const events = receipt!.logs
+        .map((log) => {
+          try {
+            return batcher.interface.parseLog(log);
+          } catch {
+            return null;
+          }
+        })
+        .filter((e): e is NonNullable<typeof e> => e !== null && e.name === "WithdrawAttempted");
+
+      expect(events).to.have.length(2);
+      expect(events[0].args.success).to.equal(false);
+      expect(events[1].args.success).to.equal(false);
+      expect(await vault.isSpentNullifier(publicInputs[1])).to.equal(false);
+    });
+  });
+
+  describe("Invariants & Balance Safety", () => {
+    it("holds no funds — a native withdrawal pays the recipient directly", async () => {
+      await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
+      const { proof, publicInputs } = loadFixture("withdraw", 5);
+
+      await batcher.batchWithdraw(await vault.getAddress(), [
         {
           proof,
           root: publicInputs[0],
@@ -99,68 +243,31 @@ describe("BatchWithdrawer (real Noir/UltraHonk circuit)", function () {
           assetId: WITHDRAW_ASSET_ID,
           recipient: WITHDRAW_RECIPIENT,
         },
-      ])
-    )
-      .to.emit(batcher, "WithdrawAttempted")
-      .withArgs(await vault.getAddress(), 0n, publicInputs[1], true);
+      ]);
 
-    expect(await ethers.provider.getBalance(WITHDRAW_RECIPIENT)).to.equal(before + WITHDRAW_AMOUNT);
-    expect(await vault.isSpentNullifier(publicInputs[1])).to.equal(true);
-  });
+      expect(await ethers.provider.getBalance(await batcher.getAddress())).to.equal(0n);
+    });
 
-  it("doesn't let one failing item block the rest of the batch", async () => {
-    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
-    const { proof, publicInputs } = loadFixture("withdraw", 5);
-    const call = {
-      proof,
-      root: publicInputs[0],
-      nullifierHash: publicInputs[1],
-      amount: WITHDRAW_AMOUNT,
-      assetId: WITHDRAW_ASSET_ID,
-      recipient: WITHDRAW_RECIPIENT,
-    };
+    it("allows any arbitrary third party relayer to execute the batch for the recipient", async () => {
+      await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
+      const { proof, publicInputs } = loadFixture("withdraw", 5);
 
-    const before = await ethers.provider.getBalance(WITHDRAW_RECIPIENT);
+      const before = await ethers.provider.getBalance(WITHDRAW_RECIPIENT);
 
-    // Same real proof submitted twice in one batch: item 0 spends the
-    // nullifier for real, item 1 replays it and must fail on-chain
-    // (NullifierAlreadySpent) — without reverting item 0's already-confirmed
-    // withdrawal or the transaction as a whole.
-    const tx = await batcher.batchWithdraw(await vault.getAddress(), [call, call]);
-    const receipt = await tx.wait();
-    const events = receipt!.logs
-      .map((log) => {
-        try {
-          return batcher.interface.parseLog(log);
-        } catch {
-          return null;
-        }
-      })
-      .filter((e): e is NonNullable<typeof e> => e !== null && e.name === "WithdrawAttempted");
+      // Bob (relayer) executes the batch
+      await batcher.connect(bob).batchWithdraw(await vault.getAddress(), [
+        {
+          proof,
+          root: publicInputs[0],
+          nullifierHash: publicInputs[1],
+          amount: WITHDRAW_AMOUNT,
+          assetId: WITHDRAW_ASSET_ID,
+          recipient: WITHDRAW_RECIPIENT,
+        },
+      ]);
 
-    expect(events).to.have.length(2);
-    expect(events[0].args.success).to.equal(true);
-    expect(events[1].args.success).to.equal(false);
-
-    // The real transfer from item 0 still happened, exactly once.
-    expect(await ethers.provider.getBalance(WITHDRAW_RECIPIENT)).to.equal(before + WITHDRAW_AMOUNT);
-  });
-
-  it("holds no funds — a native withdrawal pays the recipient directly", async () => {
-    await vault.connect(alice).shield(WITHDRAW_ASSET_ID, WITHDRAW_AMOUNT, WITHDRAW_COMMITMENT, { value: WITHDRAW_AMOUNT });
-    const { proof, publicInputs } = loadFixture("withdraw", 5);
-
-    await batcher.batchWithdraw(await vault.getAddress(), [
-      {
-        proof,
-        root: publicInputs[0],
-        nullifierHash: publicInputs[1],
-        amount: WITHDRAW_AMOUNT,
-        assetId: WITHDRAW_ASSET_ID,
-        recipient: WITHDRAW_RECIPIENT,
-      },
-    ]);
-
-    expect(await ethers.provider.getBalance(await batcher.getAddress())).to.equal(0n);
+      expect(await ethers.provider.getBalance(WITHDRAW_RECIPIENT)).to.equal(before + WITHDRAW_AMOUNT);
+      expect(await ethers.provider.getBalance(await batcher.getAddress())).to.equal(0n);
+    });
   });
 });

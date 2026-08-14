@@ -101,7 +101,7 @@ the installed `bb`'s nightly build exactly (see that file's own comment). If
 you change any circuit, regenerate its `target/proof`/`target/public_inputs`
 via the steps above, copy them into `fixtures/`, copy the compiled
 `target/<circuit>.json` into `frontend/public/circuits/`, and re-verify with
-`circuits/scripts/noir-onchain-verify.ts` before running `npm test`.
+`circuits/scripts/noir-onchain-verify.ts` before running `pnpm test`.
 
 `cancelOrder`/`matchOrders` are verified at the proof/verifier level (real
 proof, real on-chain `verify()`, tamper-rejection — same rigor as every

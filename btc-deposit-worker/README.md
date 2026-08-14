@@ -23,9 +23,9 @@ available, independent of this monorepo's checkout layout.
 
 ```bash
 cd btc-deposit-worker
-npm install
+pnpm install
 cp .env.example .env   # fill in BACKEND_URL + BTC_DEPOSIT_INTERNAL_SECRET (must match backend/.env)
-npm run sync-circuit   # copies contract/circuits/noir/btc_deposit/target/btc_deposit.json into ./circuit/
+pnpm run sync-circuit   # copies contract/circuits/noir/btc_deposit/target/btc_deposit.json into ./circuit/
 ```
 
 `sync-circuit` requires `contract/`'s compiled circuit artifact to already
@@ -35,8 +35,8 @@ Re-run it whenever `btc_deposit/src/*.nr` changes and gets recompiled.
 ## Run locally
 
 ```bash
-npm start            # polls forever, POLL_INTERVAL_MS apart (default 3s — no batching reason to wait longer)
-npm start -- --once  # single pass, then exit
+pnpm start            # polls forever, POLL_INTERVAL_MS apart (default 3s — no batching reason to wait longer)
+pnpm start -- --once  # single pass, then exit
 ```
 
 For each `awaiting_proof` deposit: fetches its full proof inputs (private —
@@ -65,7 +65,7 @@ reasoning) — its own function and EventBridge schedule, **not**
 batching, a cadence this flow has no reason to share.
 
 ```bash
-npm run package-lambda     # tsc build + sync-circuit + stage a prod-only
+pnpm run package-lambda     # tsc build + sync-circuit + stage a prod-only
                             # node_modules into lambda-build/
 
 BACKEND_URL=https://your-backend.example.com \

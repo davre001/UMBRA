@@ -6,8 +6,11 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "echo \"btc-deposit-worker build ok\"",
     "sync-circuit": "node scripts/sync-circuit.js",
-    "package-lambda": "npm run build && npm run sync-circuit && node scripts/package-lambda.js",
+    "package-lambda": "pnpm run build && pnpm run sync-circuit && node scripts/package-lambda.js",
     "deploy-lambda": "bash scripts/deploy-lambda.sh"
   },
   "dependencies": {

@@ -3,10 +3,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   turbopack: {
-    // Pin the workspace root to frontend/ — without this Turbopack falls back to
-    // scanning the monorepo root (backend/ + root node_modules included) because
-    // of the extra package-lock.json there, which massively slows cold compiles.
-    root: path.join(__dirname),
+    // Set workspace root for Turbopack to find monorepo dependencies
+    root: path.join(__dirname, ".."),
   },
   // Cross-origin isolation — required for SharedArrayBuffer, which is what
   // lets @aztec/bb.js's WASM UltraHonk backend run multi-threaded in the

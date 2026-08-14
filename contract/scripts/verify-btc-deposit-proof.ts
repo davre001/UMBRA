@@ -13,6 +13,8 @@ import * as path from "path";
  * not something `contract/`'s own tests should depend on) — run manually:
  *   npx hardhat run scripts/verify-btc-deposit-proof.ts
  */
+import type { BtcDepositHonkVerifier } from "../typechain-types";
+
 async function main() {
   const outputPath = path.join(__dirname, "../../btc-deposit-worker/onchain-check-output.json");
   const { proof, publicInputs } = JSON.parse(fs.readFileSync(outputPath, "utf8"));
@@ -29,7 +31,7 @@ async function main() {
     });
     const verifier = await Verifier.deploy();
     await verifier.waitForDeployment();
-    return verifier;
+    return verifier as unknown as BtcDepositHonkVerifier;
   }
 
   const verifier = await deployHonkVerifier("BtcDepositHonkVerifier", "BtcDepositRelationsLib", "BtcDepositZKTranscriptLib");

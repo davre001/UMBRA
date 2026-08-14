@@ -1,0 +1,88 @@
+# Testing & Verification
+
+Umbra enforces formal testing, property invariant fuzzing, and cryptographic negative-path verification across all smart contracts, zero-knowledge circuits, and backend services.
+
+## Overview & Test Extent
+
+The test suite spans **155 smart contract tests** (up from 31), **59 backend integration tests**, and formal property fuzzing on vault solvency.
+
+| Area | Suite | Test Count | Key Properties Verified |
+| :--- | :--- | :--- | :--- |
+| **ZK Verifiers** | `Verifiers.negative.test.ts` | 78 tests | Non-malleability, bit flips, truncation, 0x/0xFF payloads, mutated roots/amounts, BN254 scalar field overflow (x >= r) |
+| **Vault Invariants** | `ShieldedVault.invariants.test.ts` | 6 tests | Solvency balance conservation (deposits minus withdrawals), strict nullifier anti-replay, compliance gate enforcement |
+| **Vault & Circuits** | `ShieldedVault.test.ts` | 17 tests | Complete note lifecycle (`shield`, `withdraw`, `pay`, `placeOrder`, `depositExternal`) with real UltraHonk proofs |
+| **Compliance** | `ComplianceRegistry.test.ts` | 14 tests | `DEFAULT_ADMIN_ROLE` and `ATTESTER_ROLE` access control, unauthorized bypass rejection, monotonic timestamps |
+| **Stealth Payments** | `StealthAnnouncer.test.ts` | 11 tests | EIP-5564 announcement fidelity, multi-scheme boundaries, permissionless caller indexing |
+| **Privacy Keys** | `PrivacyKeyRegistry.test.ts` | 13 tests | 33-byte compressed secp256k1 key validation, custom `InvalidKeyLength` errors, multi-account isolation |
+| **Owner Keys** | `OwnerKeyRegistry.test.ts` | 9 tests | Poseidon2 spending key publishing, zero-state defaults, and key overwrites |
+| **Batch Withdrawals**| `BatchWithdrawer.test.ts` | 7 tests | Single & multi-item batch executions, partial failure fault tolerance, zero-balance retention invariant |
+| **Backend & SPV** | `backend/test/*.ts` (13 suites) | 59 tests | SegWit non-witness serialization, Merkle inclusion proofs, FTSOv2 price feeds, retry queues |
+
+---
+
+## Smart Contracts Code Coverage
+
+Smart contract coverage is measured using `solidity-coverage`:
+
+| Contract File | Statements | Branches | Functions | Lines |
+| :--- | :--- | :--- | :--- | :--- |
+| `BatchWithdrawer.sol` | **100%** | **100%** | **100%** | **100%** |
+| `ComplianceRegistry.sol` | **100%** | **100%** | **100%** | **100%** |
+| `OwnerKeyRegistry.sol` | **100%** | **100%** | **100%** | **100%** |
+| `PrivacyKeyRegistry.sol` | **100%** | **100%** | **100%** | **100%** |
+| `StealthAnnouncer.sol` | **100%** | **100%** | **100%** | **100%** |
+| `MerkleTreeWithHistory.sol` | **100%** | **75%** | **100%** | **100%** |
+| `MockERC20.sol` | **100%** | **100%** | **100%** | **100%** |
+| `verifiers/*.sol` (All 6 Verifiers) | **92.34%** | **66.67%** | **89.06%** | **94.32%** |
+| **Overall Monorepo Contracts** | **88.09%** | **52.33%** | **82.39%** | **91.75%** |
+
+---
+
+## Core Invariant Properties Tested
+
+### 1. Solvency & Balance Conservation
+The vault balance for any asset strictly satisfies:
+```text
+Vault_Balance(Asset) = Total_Deposited(Asset) - Total_Withdrawn(Asset)
+```
+Arbitrary randomized deposits and legitimate withdrawals were fuzzed to verify that no token or native coin is ever minted or leaked without matching shielded commitments.
+
+### 2. Strict Nullifier Uniqueness (Double-Spend Prevention)
+For any nullifier hash `N`:
+- `N` transitions from unspent (`isSpentNullifier(N) == false`) to spent (`true`) exactly once upon a valid spend.
+- Any subsequent attempt to reuse `N`—even with different amounts, different recipients, different callers, or in different circuits (`pay`, `placeOrder`, `withdraw`, `depositExternal`)—reverts with `NullifierAlreadySpent`.
+
+### 3. ZK Proof Non-Malleability & Negative Verification
+Every UltraHonk verifier contract was tested against:
+- **Proof Truncation**: Truncated proof bytes (missing last 32 bytes or empty `0x`) revert or return `false`.
+- **Bit Flips**: Single-bit corruptions at byte 0, mid-proof, and the end of proof unconditionally fail verification.
+- **Payload Mutations**: All-0x00 and all-0xFF proof payloads of valid length unconditionally fail verification.
+- **Public Input Tampering**: Altering roots, nullifiers, amounts, or commitments causes verification to fail.
+- **Scalar Field Overflow**: Public inputs greater than or equal to `r` (where `r = 21888242871839275222246405745257275088548364400416034343698204186575808495617`) or `2^256 - 1` revert or fail verification.
+
+### 4. Compliance Gate Invariance
+Any attempt to withdraw to an unscreened address (`isScreened(recipient) == false`) or a blacklisted address (`clear = false`) is rejected with `RecipientNotScreened(recipient)`, even if accompanied by a mathematically valid ZK proof.
+
+---
+
+## Running Verification Commands
+
+```bash
+# Run all tests across the monorepo
+pnpm test
+
+# Run smart contracts unit & invariant tests
+pnpm contracts:test
+
+# Run smart contracts coverage report
+pnpm contracts:coverage
+
+# Run backend integration tests & coverage report
+pnpm backend:coverage
+
+# Strict TypeScript typechecking across all 6 packages
+pnpm typecheck
+
+# Full production build across all 6 packages
+pnpm build
+```

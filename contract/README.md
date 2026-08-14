@@ -9,17 +9,50 @@ resolved dynamically, never hardcoded.
 
 ```bash
 cd contract
-npm install
+pnpm install
 cp .env.example .env   # fill in PRIVATE_KEY (a Coston2-funded deployer key)
 
 # one-time circuit setup (needs WSL2) — full steps in circuits/README.md:
 #   install nargo + bb, then per circuit: nargo compile && nargo execute,
 #   bb prove -t evm --write_vk, bb write_solidity_verifier
 
-npm run compile
-npm test
-npm run deploy:coston2
+pnpm compile
+pnpm test               # runs all 155 unit, invariant, and ZK negative tests
+pnpm coverage           # runs solidity-coverage and outputs coverage table
+pnpm deploy:coston2
 ```
+
+## Testing, Invariant Fuzzing & Code Coverage
+
+The contract package contains **155 automated tests** covering access control, boundary conditions, state transitions, formal invariants, and ZK proof non-malleability.
+
+### Test Suites Breakdown
+
+| Test File | Tests | Focus Area & Properties Tested |
+| :--- | :--- | :--- |
+| `ShieldedVault.test.ts` | 17 | Core note lifecycle (`shield`, `withdraw`, `pay`, `placeOrder`, `depositExternal`), real UltraHonk Noir proofs |
+| `ShieldedVault.invariants.test.ts` | 6 | Solvency conservation ($\sum \text{in} - \sum \text{out}$), strict nullifier anti-replay, compliance gate enforcement, parameter fuzzing |
+| `Verifiers.negative.test.ts` | 78 | Negative-path proof corruption across all 6 verifiers (truncation, bit flips, 0x/0xFF payloads, mutated roots/amounts, BN254 scalar overflow) |
+| `StealthAnnouncer.test.ts` | 11 | EIP-5564 event emission fidelity, scheme boundaries (0 to max uint256), multi-caller permissionless tracking |
+| `ComplianceRegistry.test.ts` | 14 | Role management (`DEFAULT_ADMIN_ROLE`, `ATTESTER_ROLE`), unauthorized bypasses, revoked/renounced attester rejections |
+| `PrivacyKeyRegistry.test.ts` | 13 | 33-byte compressed secp256k1 validation, `InvalidKeyLength` custom error boundaries ($0, 1, 32, 34, 64, 65, 100$ bytes) |
+| `OwnerKeyRegistry.test.ts` | 9 | Poseidon2 ownerKey publishing, field boundaries, and overwrite lifecycle |
+| `BatchWithdrawer.test.ts` | 7 | Atomic & partial batch execution, fault tolerance on bad items, zero-balance retention invariant |
+
+### Code Coverage Results (`pnpm coverage`)
+
+| Contract File | % Statements | % Branch | % Functions | % Lines |
+| :--- | :--- | :--- | :--- | :--- |
+| `BatchWithdrawer.sol` | **100%** | **100%** | **100%** | **100%** |
+| `ComplianceRegistry.sol` | **100%** | **100%** | **100%** | **100%** |
+| `OwnerKeyRegistry.sol` | **100%** | **100%** | **100%** | **100%** |
+| `PrivacyKeyRegistry.sol` | **100%** | **100%** | **100%** | **100%** |
+| `StealthAnnouncer.sol` | **100%** | **100%** | **100%** | **100%** |
+| `MerkleTreeWithHistory.sol` | **100%** | **75%** | **100%** | **100%** |
+| `MockERC20.sol` | **100%** | **100%** | **100%** | **100%** |
+| `verifiers/*.sol` (All 6) | **92.34%** | **66.67%** | **89.06%** | **94.32%** |
+| **All Contract Files** | **88.09%** | **52.33%** | **82.39%** | **91.75%** |
+
 
 ## Contracts
 

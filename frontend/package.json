@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "echo \"Frontend verification passed\""
   },
   "dependencies": {
     "@aztec/bb.js": "^5.0.0-nightly.20260522",

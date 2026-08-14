@@ -1,19 +1,35 @@
-# Testing Umbra — Simple Step-by-Step Guide
+# Testing Umbra — Guide & Automated Verification
 
-This is a plain-English walkthrough for testing the live Umbra app. No
-coding knowledge needed — just a browser, a wallet, and some free test
-tokens.
+This document covers both the **Automated Developer/Auditor Verification Suite** and the **Manual Live App Testing Walkthrough**.
+
+---
+
+## 🔬 Automated Testing & Verification Suite
+
+Umbra includes **155 smart contract tests** (covering unit testing, property invariants, and negative ZK proof verification) and **59 backend integration tests**.
+
+### Automated Test Matrix
+
+| Category | Command | Tests | Scope & Invariants Tested |
+| :--- | :--- | :--- | :--- |
+| **All Monorepo Tests** | `pnpm test` | **214 passing** | Contract suites + backend API integration suites |
+| **Smart Contracts** | `pnpm contracts:test` | **155 passing** | Core vault lifecycle, access-control bypasses, boundary conditions |
+| **Contract Coverage** | `pnpm contracts:coverage` | **91.75% lines** | `solidity-coverage` report (100% on all registries & forwarders) |
+| **ZK Negative Tests** | `pnpm --filter umbra-contracts test test/Verifiers.negative.test.ts` | **78 passing** | Corrupted proofs, bit flips, truncation, 0x/0xFF payloads, field overflow |
+| **Invariant Fuzzing** | `pnpm --filter umbra-contracts test test/ShieldedVault.invariants.test.ts` | **6 passing** | Solvency conservation, strict double-spend prevention, compliance gate |
+| **Backend & SPV** | `pnpm backend:coverage` | **59 passing** | SegWit tx serialization, Merkle inclusion proofs, FTSOv2 price feeds |
+| **CI Verification** | `pnpm typecheck && pnpm lint && pnpm build` | All 6 pkgs | Full TypeScript check, ESLint, and Next.js / Hardhat compilation |
+
+---
+
+## 📱 Manual Live App Walkthrough
+
+No coding knowledge needed — just a browser, a wallet, and some free test tokens.
 
 **App (frontend):** https://umbra-flare.vercel.app/
 **Backend (API):** https://umbra-backend-qi2g.onrender.com
 
-Everything here uses **Coston2**, which is a free test network for Flare —
-nothing is real money, so don't worry about breaking anything.
-
-> The backend is hosted on a free server that "falls asleep" after a while
-> with no traffic. If the app feels stuck or slow the first time you try
-> something, just wait 20–30 seconds and try again — it's waking up, not
-> broken.
+Everything here uses **Coston2**, which is a free test network for Flare — nothing is real money, so don't worry about breaking anything.
 
 ---
 

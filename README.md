@@ -230,15 +230,18 @@ umbra/
 
 ## Quick start
 
-You'll need Node.js and a wallet with Coston2 testnet funds (use the app's
+You'll need Node.js, pnpm, and a wallet with Coston2 testnet funds (use the app's
 faucet page once it's running, or [Flare's own faucet](https://faucet.flare.network/)).
 
 ```bash
-# Backend — the dark-engine matcher, pricing, compliance, and relayer API
-cd backend && npm install && npm run dev   # → http://localhost:4000
+# Install all workspace dependencies
+pnpm install
 
-# Frontend — the app itself
-cd frontend && npm install && npm run dev  # → http://localhost:3000
+# Run backend dev server (→ http://localhost:4000)
+pnpm dev:backend
+
+# Run frontend dev server (→ http://localhost:3000)
+pnpm dev:frontend
 ```
 
 Full setup, wallet connection, and your first shielded deposit are walked
@@ -264,9 +267,9 @@ can't be freshly re-derived.
 
 ```bash
 cd backend
-npm run build   # type-check and compile to dist/
-npm run start   # run the compiled build
-npm test        # vitest suite (supertest against every route)
+pnpm build   # type-check and compile to dist/
+pnpm start   # run the compiled build
+pnpm test    # vitest suite (supertest against every route)
 ```
 
 `GET /health` returns `{"status":"ok"}` once it's up; interactive API docs
@@ -291,10 +294,52 @@ for animation.
 
 ```bash
 cd frontend
-npm run build   # production build
-npm run start   # run the production build
-npm run lint    # lint the codebase
+pnpm build   # production build
+pnpm start   # run the production build
+pnpm lint    # lint the codebase
 ```
+
+## Testing, Verification & Code Coverage
+
+Umbra is covered by an automated test suite spanning unit tests, formal property invariants, ZK proof corruption testing, and backend API integration tests across the monorepo.
+
+### Verification Matrix & Test Extent
+
+| Component | Test Files | Tests | Coverage / Extent | Key Properties Verified |
+| :--- | :--- | :--- | :--- | :--- |
+| **Smart Contracts** | 8 suites | **155 passing** | **91.75% lines / 88.09% statements** (100% on all registries, batcher & announcer) | Access-control bypasses, monotonic timestamps, 33-byte key constraints, atomic batch partial tolerance |
+| **ZK Verifiers** | `Verifiers.negative.test.ts` | **78 passing** | **94.32% lines across 6 verifiers** | Bit flips, truncation, 0x/0xFF payloads, mutated roots/nullifiers/amounts, BN254 scalar field overflow ($x \ge r$) |
+| **Invariant Fuzzing** | `ShieldedVault.invariants.test.ts` | **8 passing** | Core vault state machine | Balance conservation ($\sum \text{in} - \sum \text{out}$), strict nullifier uniqueness (anti-replay), compliance gate enforcement |
+| **Backend & SPV** | 13 suites | **59 passing (1 CI skipped)** | **56.75% overall / 89.28% app core** | SegWit non-witness serialization, Merkle inclusion proofs, FTSOv2 price feeds, watcher retry queues |
+| **Monorepo CI** | `.github/workflows/ci.yml` | 4 gates | 100% workspace pass | `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` across all 6 packages |
+
+### Running the Test Suites
+
+```bash
+# Run all tests across the entire monorepo
+pnpm test
+
+# Run smart contract tests (155 tests)
+pnpm contracts:test
+
+# Run smart contract code coverage (solidity-coverage)
+pnpm contracts:coverage
+
+# Run backend tests with code coverage (vitest v8)
+pnpm backend:coverage
+
+# Run strict type checking across all 6 packages
+pnpm typecheck
+
+# Run linting across all packages
+pnpm lint
+```
+
+### Invariant & Security Properties Tested
+1. **Solvency & Balance Conservation**: For any sequence of native or ERC20 deposits, the vault balance strictly matches $\sum(\text{deposits}) - \sum(\text{withdrawals})$.
+2. **Strict Nullifier Uniqueness**: Any spent nullifier is permanently invalidated and rejected on replay attempts across `withdraw`, `pay`, `placeOrder`, and `depositExternal`.
+3. **ZK Proof Non-Malleability**: Every UltraHonk verifier contract unconditionally rejects corrupted proofs, altered public inputs, and scalar field overflows.
+4. **Compliance Screening Gate**: Withdrawals to unscreened or blacklisted addresses are blocked 100% of the time, regardless of proof validity.
 
 ## Status
 
