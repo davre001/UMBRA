@@ -67,6 +67,7 @@ describe("ShieldedVault Invariants & Fuzzing", function () {
     const placeOrderVerifier = await deployHonkVerifier("PlaceOrderHonkVerifier", "PlaceOrderRelationsLib", "PlaceOrderZKTranscriptLib");
     const cancelOrderVerifier = await deployHonkVerifier("CancelOrderHonkVerifier", "CancelOrderRelationsLib", "CancelOrderZKTranscriptLib");
     const matchOrdersVerifier = await deployHonkVerifier("MatchOrdersHonkVerifier", "MatchOrdersRelationsLib", "MatchOrdersZKTranscriptLib");
+    const checkpointRelayVerifier = await deployHonkVerifier("CheckpointRelayHonkVerifier", "CheckpointRelayRelationsLib", "CheckpointRelayZKTranscriptLib");
 
     const Vault = await ethers.getContractFactory("ShieldedVault");
     vault = await Vault.deploy(
@@ -76,6 +77,7 @@ describe("ShieldedVault Invariants & Fuzzing", function () {
       await placeOrderVerifier.getAddress(),
       await cancelOrderVerifier.getAddress(),
       await matchOrdersVerifier.getAddress(),
+      await checkpointRelayVerifier.getAddress(),
       admin.address,
       NATIVE_ASSET_ID
     );

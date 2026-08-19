@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { stripWitness, parseDepositTx, TX_SIZE } from "../src/btc-deposit/mempool";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { stripWitness, parseDepositTx, assembleDepositProofInputs, TX_SIZE, HEADER_SIZE, K } from "../src/btc-deposit/mempool";
 
 describe("btc-deposit / stripWitness", () => {
   // Real signet transaction 913c43415145e84d11b73d292eff432b4ba832913f31096f30f0a6de4721f82b
@@ -38,8 +38,7 @@ describe("btc-deposit / stripWitness", () => {
   });
 });
 
-describe("btc-deposit / parseDepositTx", () => {
-  function buildSyntheticDepositTx(recipient: `0x${string}`, amountSats: bigint, vaultPubkeyHash: Buffer): Buffer {
+function buildSyntheticDepositTx(recipient: `0x${string}`, amountSats: bigint, vaultPubkeyHash: Buffer): Buffer {
     const version = Buffer.from([0x02, 0x00, 0x00, 0x00]);
     const inputCount = Buffer.from([0x01]);
     const prevTxid = Buffer.alloc(32, 0x11);
@@ -79,15 +78,16 @@ describe("btc-deposit / parseDepositTx", () => {
       out1Script,
       locktime,
     ]);
-  }
+}
 
-  // Must match the real BTC_VAULT_PUBKEY_HASH now in .env (vitest.setup.ts
-  // loads it via dotenv/config) — mempool.ts's VAULT_PUBKEY_HASH constant
-  // is real, not the zero placeholder, as of this deployment's real
-  // custodian address (tb1qrmq4qvr3qmcn5s6yxlcr7y80cry0530n99g2mm).
-  const VAULT_HASH = Buffer.from("1ec150307106f13a434437f03f10efc0c8fa45f3", "hex");
-  const RECIPIENT = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC" as const;
+// Must match the real BTC_VAULT_PUBKEY_HASH now in .env (vitest.setup.ts
+// loads it via dotenv/config) — mempool.ts's VAULT_PUBKEY_HASH constant
+// is real, not the zero placeholder, as of this deployment's real
+// custodian address (tb1qrmq4qvr3qmcn5s6yxlcr7y80cry0530n99g2mm).
+const VAULT_HASH = Buffer.from("1ec150307106f13a434437f03f10efc0c8fa45f3", "hex");
+const RECIPIENT = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC" as const;
 
+describe("btc-deposit / parseDepositTx", () => {
   it("extracts recipient and amountSats from a template-matching tx", () => {
     const tx = buildSyntheticDepositTx(RECIPIENT, 250000n, VAULT_HASH);
     expect(tx.length).toBe(TX_SIZE);
@@ -118,5 +118,87 @@ describe("btc-deposit / parseDepositTx", () => {
     const tx = buildSyntheticDepositTx(RECIPIENT, 250000n, VAULT_HASH);
     tx[41] = 1; // claim a 1-byte scriptSig
     expect(() => parseDepositTx(tx)).toThrow(/scriptSig/);
+  });
+});
+
+function reverseHex(hex: string): string {
+  return Buffer.from(hex, "hex").reverse().toString("hex");
+}
+
+describe("btc-deposit / assembleDepositProofInputs", () => {
+  const CHECKPOINT_HEIGHT = 1000;
+  const EXPECTED_HEIGHT = CHECKPOINT_HEIGHT + K; // K headers past the checkpoint — assembleDepositProofInputs's own fixed v1 constraint
+  const TXID = "cc".repeat(32);
+  const EMBEDDED_MERKLE_ROOT = Buffer.alloc(32, 0xcd);
+
+  function buildTipHeader(): Buffer {
+    const header = Buffer.alloc(HEADER_SIZE, 0);
+    EMBEDDED_MERKLE_ROOT.copy(header, 36); // bytes 36-68 of a real Bitcoin header are its merkle root
+    return header;
+  }
+
+  /** Routes every mempool.ts endpoint this function calls to a deterministic, self-consistent synthetic response. */
+  function mockRealisticAssembly(overrides: { confirmed?: boolean; blockHeight?: number; merkleDepth?: number; corruptMerkleRoot?: boolean } = {}) {
+    const { confirmed = true, blockHeight = EXPECTED_HEIGHT, merkleDepth = 1, corruptMerkleRoot = false } = overrides;
+    const depositTx = buildSyntheticDepositTx(RECIPIENT, 250000n, VAULT_HASH);
+    const reportedMerkleRoot = corruptMerkleRoot
+      ? reverseHex(Buffer.alloc(32, 0xff).toString("hex"))
+      : reverseHex(EMBEDDED_MERKLE_ROOT.toString("hex"));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const text = (body: string) => ({ ok: true, text: async () => body });
+        if (url.endsWith(`/tx/${TXID}`)) return text(JSON.stringify({ status: { confirmed, block_height: blockHeight } }));
+        if (url.endsWith(`/tx/${TXID}/hex`)) return text(depositTx.toString("hex"));
+        if (url.endsWith(`/tx/${TXID}/merkle-proof`)) {
+          return text(JSON.stringify({ block_height: blockHeight, merkle: Array(merkleDepth).fill("dd".repeat(32)), pos: 0 }));
+        }
+        if (url.match(/\/block-height\/(\d+)$/)) return text("aa".repeat(32)); // display-order block hash, any value — reverseHex'd but never independently checked
+        // Every header request gets the same (tip) header — harmless since
+        // assembleDepositProofInputs only ever inspects headers[K-1]'s
+        // embedded merkle root, and every other header just needs to be a
+        // real HEADER_SIZE-byte buffer (its content isn't otherwise checked
+        // here — real header-chain/PoW linkage is the circuit's job, not
+        // this assembly step's).
+        if (url.match(/\/block\/[0-9a-f]{64}\/header$/)) return text(buildTipHeader().toString("hex"));
+        if (url.match(/\/block\/[0-9a-f]{64}$/)) return text(JSON.stringify({ merkle_root: reportedMerkleRoot }));
+        throw new Error(`Unexpected fetch: ${url}`);
+      })
+    );
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("assembles real-shaped circuit inputs when the tx confirms exactly K headers past the checkpoint", async () => {
+    mockRealisticAssembly();
+    const result = await assembleDepositProofInputs(TXID, CHECKPOINT_HEIGHT);
+    expect(result.headers).toHaveLength(K);
+    expect(result.headers.every((h) => Buffer.from(h, "hex").length === HEADER_SIZE)).toBe(true);
+    expect(result.recipient.toLowerCase()).toBe(RECIPIENT.toLowerCase());
+    expect(result.amountSats).toBe("250000");
+    expect(result.merklePathElements).toHaveLength(20); // MAX_MERKLE_DEPTH, zero-padded
+    expect(result.merklePathIndices).toHaveLength(20);
+    expect(result.merkleActualDepth).toBe(1);
+  });
+
+  it("rejects an unconfirmed tx", async () => {
+    mockRealisticAssembly({ confirmed: false });
+    await expect(assembleDepositProofInputs(TXID, CHECKPOINT_HEIGHT)).rejects.toThrow(/not yet confirmed/);
+  });
+
+  it("rejects a tx confirmed at the wrong height relative to the checkpoint", async () => {
+    mockRealisticAssembly({ blockHeight: EXPECTED_HEIGHT + 1 });
+    await expect(assembleDepositProofInputs(TXID, CHECKPOINT_HEIGHT)).rejects.toThrow(/needs it at exactly/);
+  });
+
+  it("rejects a Merkle path deeper than MAX_MERKLE_DEPTH", async () => {
+    mockRealisticAssembly({ merkleDepth: 21 });
+    await expect(assembleDepositProofInputs(TXID, CHECKPOINT_HEIGHT)).rejects.toThrow(/exceeds MAX_MERKLE_DEPTH/);
+  });
+
+  it("rejects when the tip header's embedded merkle root disagrees with the independently-reported one", async () => {
+    mockRealisticAssembly({ corruptMerkleRoot: true });
+    await expect(assembleDepositProofInputs(TXID, CHECKPOINT_HEIGHT)).rejects.toThrow(/merkle_root mismatch/);
   });
 });

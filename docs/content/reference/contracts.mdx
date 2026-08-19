@@ -25,7 +25,7 @@ scan outright.
 
 | Contract | Address |
 | --- | --- |
-| `ShieldedVault` | `0x13643D75088cfaB4737E8b6c85813e95bfaB450B` |
+| `ShieldedVault` | `0xa289AF1069a8ce415434ac329B86578cF9b9c15f` |
 | `WrappedBTC` | `0x0E8012D34cCcE7252b680cE96b36f514C5D2Bd04` |
 | `ComplianceRegistry` | `0xC9192Ecaf662c977B28c614e49F558AAAB832577` |
 | `OwnerKeyRegistry` | `0x48C77021624f7b4baC092570CDD56EB163eC3e71` |
@@ -33,10 +33,19 @@ scan outright.
 | `BatchWithdrawer` | `0x4E90ECc46d47FF8B8a13F5396931838b256A3fC1` |
 | `PrivacyKeyRegistry` | `0x8107172F8078c965bC9F334fD0bFefB2cFFAe275` |
 
-`ShieldedVault` was redeployed (2026-08-11) to add real Bitcoin bridging —
-`depositExternal` now mints public `WrappedBTC` directly instead of a
-hidden note, an ABI-breaking change. Every other contract above is
-unchanged and reused from the prior deployment.
+`ShieldedVault` was redeployed (2026-08-17) for an admin-timelock +
+permissionless-checkpoint-relay redesign: `setTrustedVerifier`/
+`setExternalDepositToken` now require a queue step, a public 48h delay,
+then a separate execute step (`ADMIN_TIMELOCK_DELAY`); `setCheckpoint` is
+gone, replaced by a one-time timelocked genesis plus a permissionless,
+proof-gated `extendCheckpoint` for every update after — see [Bitcoin
+Bridge](/concepts/bitcoin-bridge). `DEFAULT_ADMIN_ROLE` on this vault is
+held by a real, deployed 2-of-3 Safe, not a single EOA — see
+[`docs/LIMITATIONS.md`](https://github.com/davre001/UMBRA/blob/main/docs/LIMITATIONS.md)
+\#6. Before that, `ShieldedVault` was separately redeployed (2026-08-11) to
+add real Bitcoin bridging — `depositExternal` mints public `WrappedBTC`
+directly instead of a hidden note. Every other contract above is unchanged
+and reused across both redeployments.
 
 `ShieldedVault` holds the funds, the Merkle tree, and the nullifier set, and
 calls the per-circuit verifiers. `OwnerKeyRegistry`, `PrivacyKeyRegistry`,
@@ -85,6 +94,9 @@ One generated Solidity verifier per circuit, all called by `ShieldedVault`:
 - `BtcDepositHonkVerifier` — checked by `depositExternal`, not part of the
   note/commitment scheme the other five belong to; see
   [Bitcoin Bridge](/concepts/bitcoin-bridge)
+- `CheckpointRelayHonkVerifier` — checked by the permissionless
+  `extendCheckpoint`, proving a real 6-header extension of the BTC
+  checkpoint; see [Bitcoin Bridge](/concepts/bitcoin-bridge)
 
 See [Noir Circuits](/reference/circuits) for each one's public inputs and the
 order they must be passed in.

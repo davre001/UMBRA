@@ -15,7 +15,7 @@ import { ShieldedVault, ComplianceRegistry, MockERC20 } from "../typechain-types
 // same commitment, so the resulting on-chain root lines up.
 const NOIR_DIR = path.join(__dirname, "../circuits/noir");
 function loadFixture(
-  circuit: "withdraw" | "pay" | "place_order" | "cancel_order" | "match_orders" | "btc_deposit",
+  circuit: "withdraw" | "pay" | "place_order" | "cancel_order" | "match_orders" | "btc_deposit" | "checkpoint_relay",
   pubCount: number
 ) {
   const fixtures = path.join(NOIR_DIR, circuit, "fixtures");
@@ -84,6 +84,25 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
   let alice: HardhatEthersSigner;
   let btcDepositVerifierAddress: string;
 
+  // Re-supplies the same args to queue then execute, fast-forwarding
+  // Hardhat's clock past ADMIN_TIMELOCK_DELAY in between — exercises the
+  // real timelocked path (not a shortcut around it) for every test below
+  // that needs one of the three gated setters to actually take effect.
+  async function queueAndExecute<T>(queueCall: Promise<unknown>, executeCall: () => Promise<T>): Promise<T> {
+    await queueCall;
+    const delay = await vault.ADMIN_TIMELOCK_DELAY();
+    await ethers.provider.send("evm_increaseTime", [Number(delay)]);
+    await ethers.provider.send("evm_mine", []);
+    return executeCall();
+  }
+
+  async function initializeCheckpoint(checkpointRoot: string) {
+    await queueAndExecute(
+      vault.connect(admin).queueInitializeCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot),
+      () => vault.connect(admin).executeInitializeCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot)
+    );
+  }
+
   beforeEach(async () => {
     [admin, alice] = await ethers.getSigners();
 
@@ -94,6 +113,7 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     const cancelOrderVerifier = await deployHonkVerifier("CancelOrderHonkVerifier", "CancelOrderRelationsLib", "CancelOrderZKTranscriptLib");
     const matchOrdersVerifier = await deployHonkVerifier("MatchOrdersHonkVerifier", "MatchOrdersRelationsLib", "MatchOrdersZKTranscriptLib");
     const btcDepositVerifier = await deployHonkVerifier("BtcDepositHonkVerifier", "BtcDepositRelationsLib", "BtcDepositZKTranscriptLib");
+    const checkpointRelayVerifier = await deployHonkVerifier("CheckpointRelayHonkVerifier", "CheckpointRelayRelationsLib", "CheckpointRelayZKTranscriptLib");
     btcDepositVerifierAddress = await btcDepositVerifier.getAddress();
 
     const Vault = await ethers.getContractFactory("ShieldedVault");
@@ -104,6 +124,7 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
       await placeOrderVerifier.getAddress(),
       await cancelOrderVerifier.getAddress(),
       await matchOrdersVerifier.getAddress(),
+      await checkpointRelayVerifier.getAddress(),
       admin.address,
       WITHDRAW_ASSET_ID // nativeAssetId — the withdraw fixture's assetId 0 doubles as "the native leg" here
     );
@@ -115,7 +136,10 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     await vault.connect(admin).setAsset(WITHDRAW_ASSET_ID, ethers.ZeroAddress, true);
     await vault.connect(admin).setAsset(PAY_ASSET_ID, await token.getAddress(), true);
     await token.mint(alice.address, ethers.parseEther("1000000"));
-    await vault.connect(admin).setTrustedVerifier(btcDepositVerifierAddress, true);
+    await queueAndExecute(
+      vault.connect(admin).queueSetTrustedVerifier(btcDepositVerifierAddress, true),
+      () => vault.connect(admin).executeSetTrustedVerifier(btcDepositVerifierAddress, true)
+    );
 
     const Compliance = await ethers.getContractFactory("ComplianceRegistry");
     compliance = await Compliance.deploy(admin.address);
@@ -285,7 +309,11 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     const wrappedBtc = await WrappedBTC.deploy(admin.address);
     await wrappedBtc.waitForDeployment();
     await wrappedBtc.connect(admin).grantRole(await wrappedBtc.MINTER_ROLE(), await vault.getAddress());
-    await vault.connect(admin).setExternalDepositToken(BTC_SIGNET_SOURCE_CHAIN_ID, await wrappedBtc.getAddress());
+    const wrappedBtcAddress = await wrappedBtc.getAddress();
+    await queueAndExecute(
+      vault.connect(admin).queueSetExternalDepositToken(BTC_SIGNET_SOURCE_CHAIN_ID, wrappedBtcAddress),
+      () => vault.connect(admin).executeSetExternalDepositToken(BTC_SIGNET_SOURCE_CHAIN_ID, wrappedBtcAddress)
+    );
     return wrappedBtc;
   }
 
@@ -293,7 +321,7 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     const wrappedBtc = await deployWrappedBtcAndRegister();
     const { proof, publicInputs } = loadFixture("btc_deposit", 4);
     const [checkpointRoot, , , nullifier] = publicInputs;
-    await vault.connect(admin).setCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot);
+    await initializeCheckpoint(checkpointRoot);
 
     const balanceBefore = await wrappedBtc.balanceOf(BTC_DEPOSIT_RECIPIENT);
     const tx = await vault.depositExternal(btcDepositVerifierAddress, proof, {
@@ -321,7 +349,7 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     await deployWrappedBtcAndRegister();
     const { proof, publicInputs } = loadFixture("btc_deposit", 4);
     const [checkpointRoot, , , nullifier] = publicInputs;
-    await vault.connect(admin).setCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot);
+    await initializeCheckpoint(checkpointRoot);
 
     await expect(
       vault.depositExternal(alice.address /* not a registered verifier */, proof, {
@@ -354,7 +382,7 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
   it("depositExternal rejects when no token is registered for the source chain", async () => {
     const { proof, publicInputs } = loadFixture("btc_deposit", 4);
     const [checkpointRoot, , , nullifier] = publicInputs;
-    await vault.connect(admin).setCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot);
+    await initializeCheckpoint(checkpointRoot);
 
     await expect(
       vault.depositExternal(btcDepositVerifierAddress, proof, {
@@ -371,7 +399,7 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
     await deployWrappedBtcAndRegister();
     const { proof, publicInputs } = loadFixture("btc_deposit", 4);
     const [checkpointRoot, , , nullifier] = publicInputs;
-    await vault.connect(admin).setCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, checkpointRoot);
+    await initializeCheckpoint(checkpointRoot);
     const deposit = {
       sourceChainId: BTC_SIGNET_SOURCE_CHAIN_ID,
       checkpointRoot,
@@ -385,6 +413,167 @@ describe("ShieldedVault (real Noir/UltraHonk circuits)", function () {
       vault,
       "NullifierAlreadySpent"
     );
+  });
+
+  // Timelock mechanics — exercised via setTrustedVerifier's own triplet (the
+  // other two gated setters, setExternalDepositToken/initializeCheckpoint,
+  // share the exact same _queue/_cancel/_consume internals, already
+  // exercised indirectly by every test above that calls queueAndExecute/
+  // initializeCheckpoint).
+  describe("admin action timelock", () => {
+    it("executeSetTrustedVerifier reverts before ADMIN_TIMELOCK_DELAY has elapsed", async () => {
+      const target = alice.address;
+      await vault.connect(admin).queueSetTrustedVerifier(target, true);
+      await expect(vault.connect(admin).executeSetTrustedVerifier(target, true)).to.be.revertedWithCustomError(
+        vault,
+        "AdminActionNotReady"
+      );
+    });
+
+    it("executeSetTrustedVerifier succeeds once ADMIN_TIMELOCK_DELAY has elapsed, applying the queued args", async () => {
+      const target = alice.address;
+      expect(await vault.trustedVerifiers(target)).to.equal(false);
+      await queueAndExecute(
+        vault.connect(admin).queueSetTrustedVerifier(target, true),
+        () => vault.connect(admin).executeSetTrustedVerifier(target, true)
+      );
+      expect(await vault.trustedVerifiers(target)).to.equal(true);
+    });
+
+    it("cancelSetTrustedVerifier removes a queued action so executing it afterward reverts", async () => {
+      const target = alice.address;
+      await vault.connect(admin).queueSetTrustedVerifier(target, true);
+      await vault.connect(admin).cancelSetTrustedVerifier(target, true);
+
+      const delay = await vault.ADMIN_TIMELOCK_DELAY();
+      await ethers.provider.send("evm_increaseTime", [Number(delay)]);
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(vault.connect(admin).executeSetTrustedVerifier(target, true)).to.be.revertedWithCustomError(
+        vault,
+        "AdminActionNotQueued"
+      );
+      expect(await vault.trustedVerifiers(target)).to.equal(false);
+    });
+
+    it("queueSetTrustedVerifier rejects queuing the identical action twice", async () => {
+      const target = alice.address;
+      await vault.connect(admin).queueSetTrustedVerifier(target, true);
+      await expect(vault.connect(admin).queueSetTrustedVerifier(target, true)).to.be.revertedWithCustomError(
+        vault,
+        "AdminActionAlreadyQueued"
+      );
+    });
+
+    it("queue/cancel/execute all reject a non-admin caller", async () => {
+      const target = alice.address;
+      await expect(vault.connect(alice).queueSetTrustedVerifier(target, true)).to.be.reverted;
+      await vault.connect(admin).queueSetTrustedVerifier(target, true);
+      await expect(vault.connect(alice).cancelSetTrustedVerifier(target, true)).to.be.reverted;
+      await expect(vault.connect(alice).executeSetTrustedVerifier(target, true)).to.be.reverted;
+    });
+
+    it("cancelSetExternalDepositToken removes a queued action so executing it afterward reverts", async () => {
+      const token = alice.address;
+      await vault.connect(admin).queueSetExternalDepositToken(BTC_SIGNET_SOURCE_CHAIN_ID, token);
+      await vault.connect(admin).cancelSetExternalDepositToken(BTC_SIGNET_SOURCE_CHAIN_ID, token);
+
+      const delay = await vault.ADMIN_TIMELOCK_DELAY();
+      await ethers.provider.send("evm_increaseTime", [Number(delay)]);
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(
+        vault.connect(admin).executeSetExternalDepositToken(BTC_SIGNET_SOURCE_CHAIN_ID, token)
+      ).to.be.revertedWithCustomError(vault, "AdminActionNotQueued");
+      expect(await vault.externalDepositToken(BTC_SIGNET_SOURCE_CHAIN_ID)).to.equal(ethers.ZeroAddress);
+    });
+
+    it("cancelInitializeCheckpoint removes a queued genesis so executing it afterward reverts", async () => {
+      const root = ethers.zeroPadValue("0x03", 32);
+      await vault.connect(admin).queueInitializeCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, root);
+      await vault.connect(admin).cancelInitializeCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, root);
+
+      const delay = await vault.ADMIN_TIMELOCK_DELAY();
+      await ethers.provider.send("evm_increaseTime", [Number(delay)]);
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(
+        vault.connect(admin).executeInitializeCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, root)
+      ).to.be.revertedWithCustomError(vault, "AdminActionNotQueued");
+      expect(await vault.checkpoints(BTC_SIGNET_SOURCE_CHAIN_ID)).to.equal(ethers.ZeroHash);
+    });
+
+    it("queueSetExternalDepositToken/queueInitializeCheckpoint also reject a non-admin caller", async () => {
+      await expect(
+        vault.connect(alice).queueSetExternalDepositToken(BTC_SIGNET_SOURCE_CHAIN_ID, alice.address)
+      ).to.be.reverted;
+      await expect(
+        vault.connect(alice).queueInitializeCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, ethers.zeroPadValue("0x04", 32))
+      ).to.be.reverted;
+    });
+
+    it("executeInitializeCheckpoint rejects re-initializing an already-initialized source chain", async () => {
+      const { publicInputs } = loadFixture("btc_deposit", 4);
+      const [checkpointRoot] = publicInputs;
+      await initializeCheckpoint(checkpointRoot);
+
+      const otherRoot = ethers.zeroPadValue("0x02", 32);
+      await expect(
+        queueAndExecute(
+          vault.connect(admin).queueInitializeCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, otherRoot),
+          () => vault.connect(admin).executeInitializeCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, otherRoot)
+        )
+      ).to.be.revertedWithCustomError(vault, "CheckpointAlreadyInitialized");
+    });
+  });
+
+  // extendCheckpoint — the permissionless proof-gated path that replaces
+  // admin-only setCheckpoint for every update after genesis. Uses a real
+  // checkpoint_relay proof (circuits/noir/checkpoint_relay) extending the
+  // same real signet checkpoint the btc_deposit fixture above was proven
+  // against, so both fixtures compose the way they would in production: the
+  // relay advances the checkpoint, then a deposit proof against the new
+  // checkpoint becomes provable.
+  describe("extendCheckpoint (permissionless checkpoint relay)", () => {
+    it("reverts before any checkpoint has been initialized for the source chain", async () => {
+      const { proof, publicInputs } = loadFixture("checkpoint_relay", 2);
+      const [, newCommitment] = publicInputs;
+      await expect(
+        vault.extendCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, proof, newCommitment)
+      ).to.be.revertedWithCustomError(vault, "CheckpointNotInitialized");
+    });
+
+    it("accepts a real checkpoint_relay proof and advances checkpoints[sourceChainId], callable by anyone", async () => {
+      const { proof, publicInputs } = loadFixture("checkpoint_relay", 2);
+      const [oldCommitment, newCommitment] = publicInputs;
+      await initializeCheckpoint(oldCommitment);
+      expect(await vault.checkpoints(BTC_SIGNET_SOURCE_CHAIN_ID)).to.equal(oldCommitment);
+
+      // alice, not admin — nobody's role gates this call.
+      await expect(vault.connect(alice).extendCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, proof, newCommitment))
+        .to.emit(vault, "CheckpointUpdated")
+        .withArgs(BTC_SIGNET_SOURCE_CHAIN_ID, newCommitment);
+
+      expect(await vault.checkpoints(BTC_SIGNET_SOURCE_CHAIN_ID)).to.equal(newCommitment);
+    });
+
+    it("rejects a proof whose old checkpoint doesn't match what's currently on-chain", async () => {
+      const { proof, publicInputs } = loadFixture("checkpoint_relay", 2);
+      const [, newCommitment] = publicInputs;
+      // Initialize to a different, unrelated checkpoint — not the real
+      // fixture's old commitment the proof was actually generated against.
+      await initializeCheckpoint(ethers.zeroPadValue("0x02", 32));
+
+      // The underlying UltraHonk verifier reverts with its own low-level
+      // error (e.g. SumcheckFailed) on a public-input mismatch rather than
+      // returning false in every case — same ambiguity
+      // Verifiers.negative.test.ts already documents for every other
+      // circuit's verify() call. Either shape means the mismatched proof was
+      // correctly rejected; extendCheckpoint's own InvalidProof only fires
+      // for the "returned false" shape.
+      await expect(vault.extendCheckpoint(BTC_SIGNET_SOURCE_CHAIN_ID, proof, newCommitment)).to.be.reverted;
+      expect(await vault.checkpoints(BTC_SIGNET_SOURCE_CHAIN_ID)).to.not.equal(newCommitment);
+    });
   });
 
   it("routes withdraw() to ExternalWithdrawalRequested for an assetId marked external-source, instead of transferring", async () => {

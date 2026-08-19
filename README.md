@@ -147,15 +147,49 @@ so a dropped connection can't strand funds. See
 [`frontend/src/app/faucet/page.tsx`](./frontend/src/app/faucet/page.tsx).
 
 **Honest current limitation**: the circuit trusts one admin-registered
-"checkpoint" header as its root of trust (the same model BTC Relay/SPV
-clients use), and a deposit can only be proven once that checkpoint is
-refreshed to align with its exact confirming block height. That refresh is
-currently a manual, admin-run script (`contract/scripts/
-refresh-btc-checkpoint.ts`), not yet automated — a deposit can sit proven-
-but-unminted until someone runs it. See [Roadmap](#roadmap) and
+genesis "checkpoint" header as its root of trust (the same model BTC
+Relay/SPV clients use — see `docs/LIMITATIONS.md` #1), and a deposit can
+only be proven once that checkpoint has advanced to align with its exact
+confirming block height. Every advance after genesis is permissionless and
+proof-gated, not an admin action — `btc-checkpoint-relay-worker/` runs
+automatically, pacing real signet block production, so a proven-but-unminted
+deposit unblocks itself within roughly one signet block of the worker's own
+poll interval rather than waiting on a manual operator step. That genesis
+value, and the other one-time bridge-config admin actions
+(`setTrustedVerifier`/`setExternalDepositToken`), are held by a real 2-of-3
+Safe and gated by a 48h public timelock, not a single EOA — see
+`docs/THREAT_MODEL.md` and `docs/LIMITATIONS.md` #6. See
+[Roadmap](#roadmap) and
 [`BTC_DEPOSIT_DESIGN.md`](./contract/circuits/BTC_DEPOSIT_DESIGN.md)'s
-"Known simplifications" for the full disclosed trust model (checkpoint
-trust, fixed K = 6 confirmation window, signet signer-check not verified).
+"Known simplifications" for the full disclosed trust model (genesis
+checkpoint trust, fixed K = 6 confirmation window, no cross-fork chainwork
+comparison yet, signet signer-check not verified).
+
+### Withdrawing back to Bitcoin
+
+Withdrawing WrappedBTC calls the same `withdraw()` every other asset uses;
+for this one asset, the contract never attempts an ERC20 transfer and
+instead emits `ExternalWithdrawalRequested` for an off-chain relayer
+(`backend/src/btc-withdrawal/`) to fulfill on real signet. Fulfillment
+funds from a real 2-of-3 P2WSH Bitcoin reserve, not a single custodian
+key: real signet deposit inflow lands in a hot wallet
+(`BTC_CUSTODIAN_WIF`), which a sweep loop periodically moves in full into
+the reserve, and every payout is built as an unsigned PSBT that needs 2 of
+3 independently-held signers to sign before it broadcasts
+(`backend/scripts/sign-btc-withdrawal.ts`) — this backend can stage a
+payout but never holds a key that can complete one alone. A public
+solvency report (`GET /api/btc-withdrawal/solvency`) and a secret-gated
+overdue-withdrawal detail route make both the reserve's real balance and
+any withdrawal stuck waiting on signers independently checkable — see
+[`docs/RUNBOOK_BTC_WITHDRAWAL.md`](./docs/RUNBOOK_BTC_WITHDRAWAL.md).
+
+**Honest current limitation**: there is no automatic reclaim or payout
+timeout yet — if the custodian/reserve signers are simply unavailable
+(not compromised, just offline), a nullified withdrawal sits waiting with
+no automatic path back to the user, only a human-operated runbook. See
+`docs/LIMITATIONS.md` #7 and #8 for this and two smaller disclosed gaps
+(no dedicated frontend UI for a Bitcoin withdrawal destination yet; a
+narrow concurrent-withdrawal UTXO-selection race).
 
 ## Architecture
 
@@ -171,13 +205,16 @@ flowchart LR
         CO["compliance"]
         RL["relayer"]
         BD["btc-deposit<br/>watcher + auto-minter"]
+        BWD["btc-withdrawal<br/>sweep + PSBT staging"]
     end
 
     MW["🔐 matcher-worker<br/>(AWS Lambda)<br/>match_orders proving"]
     BW["🔐 btc-deposit-worker<br/>(AWS Lambda)<br/>btc_deposit proving"]
+    CW["🔐 btc-checkpoint-relay-worker<br/>(AWS Lambda)<br/>checkpoint_relay proving"]
     DB[("🗄️ Turso<br/>order book / match state")]
     FTSO["📈 FTSOv2 oracle"]
     BTC["₿ Bitcoin signet<br/>(mempool.space)"]
+    RSV["₿ 2-of-3 reserve (signet)<br/>3 independent signers"]
 
     subgraph Coston2["⛓️ Flare Coston2"]
         SV["ShieldedVault"]
@@ -185,6 +222,7 @@ flowchart LR
         SA["StealthAnnouncer"]
         CR["ComplianceRegistry"]
         WBTC["WrappedBTC"]
+        SAFE["2-of-3 Safe<br/>DEFAULT_ADMIN_ROLE, 48h timelock"]
     end
 
     FE -->|"proof-authorized txs<br/>shield · pay · order · withdraw"| SV
@@ -210,6 +248,17 @@ flowchart LR
     BW -->|proof| BD
     BD -->|"depositExternal (auto-mint)"| SV
     SV -->|mint| WBTC
+
+    CW -->|"fetch real headers"| BTC
+    CW -->|proof| BD
+    BD -->|"extendCheckpoint (auto-advance)"| SV
+
+    SV -->|ExternalWithdrawalRequested| BWD
+    BTC -->|"sweep (auto)"| RSV
+    BWD -->|"stage unsigned PSBT"| RSV
+    RSV -->|"2-of-3 signs + broadcasts"| BTC
+
+    SAFE -.->|holds admin, timelocked| SV
 ```
 
 Every write to `ShieldedVault` is authorized by a ZK proof, not by who submits
@@ -225,6 +274,7 @@ umbra/
 ├── frontend/             # Next.js 16 + React 19 app
 ├── matcher-worker/       # AWS Lambda — match_orders proving (server-side, EventBridge-scheduled)
 ├── btc-deposit-worker/   # AWS Lambda — btc_deposit proving (server-side, 1-minute poll)
+├── btc-checkpoint-relay-worker/ # AWS Lambda — checkpoint_relay proving (server-side, ~10-minute poll)
 └── docs/                 # Nextra docs site — docs-umbra.vercel.app
 ```
 
@@ -262,8 +312,8 @@ can't be freshly re-derived.
 | `pricing` | Live FTSOv2 midpoint rate lookup |
 | `compliance` | Real on-chain address screening against `ComplianceRegistry` |
 | `relayer` | Real gasless relaying — proof-authorized `ShieldedVault` writes submitted on a user's behalf |
-| `btc-deposit` | Real signet chain data + fixed-template tx parsing for `btc-deposit-worker`; a poll loop that self-registers deposits the frontend never reported; auto-submits `depositExternal` once proven — see [Bitcoin bridge](#bitcoin-bridge) |
-| `btc-withdrawal` | Custodial signet payout relayer — fulfills `ExternalWithdrawalRequested` events, publishes a public solvency check at `GET /api/btc-withdrawal/solvency` |
+| `btc-deposit` | Real signet chain data + fixed-template tx parsing for `btc-deposit-worker`; a poll loop that self-registers deposits the frontend never reported; auto-submits `depositExternal` once proven; also submits `btc-checkpoint-relay-worker`'s `extendCheckpoint` proofs on its behalf — see [Bitcoin bridge](#bitcoin-bridge) |
+| `btc-withdrawal` | Fulfills `ExternalWithdrawalRequested` events by staging a real spending PSBT against a 2-of-3 signet reserve (this backend holds no reserve private key — see [Bitcoin bridge](#bitcoin-bridge)); publishes a public solvency + overdue-withdrawal check at `GET /api/btc-withdrawal/solvency` |
 
 ```bash
 cd backend
@@ -307,11 +357,19 @@ Umbra is covered by an automated test suite spanning unit tests, formal property
 
 | Component | Test Files | Tests | Coverage / Extent | Key Properties Verified |
 | :--- | :--- | :--- | :--- | :--- |
-| **Smart Contracts** | 8 suites | **155 passing** | **91.75% lines / 88.09% statements** (100% on all registries, batcher & announcer) | Access-control bypasses, monotonic timestamps, 33-byte key constraints, atomic batch partial tolerance |
-| **ZK Verifiers** | `Verifiers.negative.test.ts` | **78 passing** | **94.32% lines across 6 verifiers** | Bit flips, truncation, 0x/0xFF payloads, mutated roots/nullifiers/amounts, BN254 scalar field overflow ($x \ge r$) |
+| **Smart Contracts** | 8 suites | **167 passing** | **91.75% lines / 88.09% statements**\* (100% on all registries, batcher & announcer) | Access-control bypasses, timelock queue/execute/cancel (all 3 gated setters, including both previously-untested cancel functions), permissionless `extendCheckpoint`, 33-byte key constraints, atomic batch partial tolerance |
+| **ZK Verifiers** | `Verifiers.negative.test.ts` | **78 passing** | **94.32% lines across 6 verifiers**\* | Bit flips, truncation, 0x/0xFF payloads, mutated roots/nullifiers/amounts, BN254 scalar field overflow ($x \ge r$) |
 | **Invariant Fuzzing** | `ShieldedVault.invariants.test.ts` | **8 passing** | Core vault state machine | Balance conservation ($\sum \text{in} - \sum \text{out}$), strict nullifier uniqueness (anti-replay), compliance gate enforcement |
-| **Backend & SPV** | 13 suites | **59 passing (1 CI skipped)** | **56.75% overall / 89.28% app core** | SegWit non-witness serialization, Merkle inclusion proofs, FTSOv2 price feeds, watcher retry queues |
-| **Monorepo CI** | `.github/workflows/ci.yml` | 4 gates | 100% workspace pass | `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` across all 6 packages |
+| **Backend & SPV** | 24 suites | **158 passing (2 CI skipped)** | **82.5% overall lines / 96% app core**, 87.4% on `btc-withdrawal`, 88.6% on `btc-deposit`, 92.9% on `compliance` | SegWit non-witness serialization, Merkle inclusion proofs, FTSOv2 price feeds, watcher retry + rate-cap branches, 2-of-3 reserve derivation + PSBT sign/combine/finalize, sweep, real on-chain `StealthAnnouncer` (both plaintext and ECIES-encrypted branches)/`extendCheckpoint`/`matchOrders` submission paths, forced real-failure branches on the compliance and withdrawal-PSBT routes (see below) |
+| **Monorepo CI** | `.github/workflows/ci.yml` | 4 gates | 100% workspace pass | `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build` across all 7 packages |
+
+\* Contract line/statement coverage percentages predate this session's timelock/checkpoint-relay/Safe test additions (167 passing now vs. 155 originally measured against) — a fresh `pnpm contracts:coverage` run didn't complete in time to capture final numbers for this table; re-run it for current figures.
+
+**On backend coverage specifically**: 82.5% overall is a large jump from an earlier-measured 56.75%, achieved mostly by adding real on-chain tests (gated `it.skipIf(!!process.env.CI)`, same convention `relayer.test.ts` already established — needs a funded local `PRIVATE_KEY`, never runs in CI) for previously-untested submission paths, and by forcing genuinely untriggered error branches with real spies on real modules (`compliance.routes.ts`, `btc-withdrawal.routes.ts`) rather than fabricating them. Every file that was under 80% got individually triaged; three kinds of gap remain, and only the first two are permanent:
+
+- **Deliberately walled off, not a gap**: `dark-engine/store.ts` (18.5%) and `btc-withdrawal/store.ts`'s own Turso passthrough functions are never exercised under `NODE_ENV=test` on purpose — this repo's own store.ts comments explain why tests must never be able to write to the real hosted database. Forcing this up would mean defeating that safety rail.
+- **Blocked on the same real dependency**: `matcher.ts`, most of `submitter.ts`'s `submitMatch` success path, and `shared/scan.ts`'s `OrdersMatched` branch all need a vault Merkle tree state only reachable via live in-test Noir proving — `contract/test/ShieldedVault.test.ts` already disclosed this as out of scope for the identical reason before this session touched it. `relayer.service.ts`'s real withdraw test exists but only actually runs the first time ever against a fresh vault (a fixture-ordering constraint, not a design flaw) — it didn't land this run because the vault's tree had already moved past that state.
+- **Fixed this pass**: `compliance.routes.ts` (76.5%→92.9%) and `btc-withdrawal.routes.ts` (72.3%→81.5%)'s error-handling branches, and `submitter.ts`'s encrypted-announcement branch (73.9%→78.3%, registering a real `PrivacyKeyRegistry` key for the test run rather than only ever exercising the plaintext fallback) — all ordinary gaps with no structural blocker, just not written yet before this pass.
 
 ### Running the Test Suites
 
@@ -319,7 +377,7 @@ Umbra is covered by an automated test suite spanning unit tests, formal property
 # Run all tests across the entire monorepo
 pnpm test
 
-# Run smart contract tests (155 tests)
+# Run smart contract tests (164 tests)
 pnpm contracts:test
 
 # Run smart contract code coverage (solidity-coverage)
@@ -328,7 +386,7 @@ pnpm contracts:coverage
 # Run backend tests with code coverage (vitest v8)
 pnpm backend:coverage
 
-# Run strict type checking across all 6 packages
+# Run strict type checking across all 7 packages
 pnpm typecheck
 
 # Run linting across all packages
@@ -347,20 +405,33 @@ Umbra runs on the **Flare Coston2 testnet**, bridging real **Bitcoin
 signet** — no real funds are at risk on either chain. See
 [Deployed Contracts](https://docs-umbra.vercel.app/reference/contracts) for
 live addresses, and [Getting Started](https://docs-umbra.vercel.app/getting-started)
-to make your first shielded deposit. The BTC deposit path (auto-broadcast,
-self-registration watcher, auto-mint) is live and verified end-to-end
-against the real deployment, including automatic recovery of a deposit
-whose browser closed mid-flight — see [Bitcoin bridge](#bitcoin-bridge) for
-the one still-manual step (checkpoint refresh).
+to make your first shielded deposit.
+
+The core dark pool (shield/pay/swap/withdraw for C2FLR/FXRP/USDT0) is live
+and verified end-to-end against the real deployment. The BTC bridge
+described above — deposit auto-broadcast/self-registration/auto-mint,
+permissionless checkpoint advancement, the 2-of-3 reserve withdrawal path,
+and the Safe/timelock admin handoff — is fully built and locally tested,
+but **not yet live on the deployed app**: `ShieldedVault` was redeployed
+this round to add the timelock and checkpoint-relay redesign, and its
+one-time bridge-config actions (trusting the deposit verifier, registering
+WrappedBTC, the checkpoint genesis) are sitting in their required 48h
+public timelock window before they can execute — BTC deposits and
+withdrawals are unavailable on the live app until that completes and the
+backend/worker deployments catch up. The rest of this README describes the
+finished design, not a claim that every piece of it is live at this exact
+moment; check `docs/LIMITATIONS.md` and the live app itself for current
+reality.
 
 ## Roadmap
 
-- **Automate the BTC checkpoint refresh.** Today, unblocking a proven
-  BTC deposit for minting requires an admin to manually run
-  `scripts/refresh-btc-checkpoint.ts` once it's confirmed at a specific
-  height — see [Bitcoin bridge](#bitcoin-bridge). A poll loop that does
-  this automatically (mirroring `btc-deposit`'s existing watcher/minter
-  pattern) would close the last manual step in the deposit flow.
+- **Cumulative-chainwork checkpoint fork choice.** `extendCheckpoint`
+  (permissionless, proof-gated — see [Bitcoin bridge](#bitcoin-bridge) and
+  `docs/LIMITATIONS.md` #1) currently accepts strictly linear extension
+  only, with no comparison across competing forks. Full BTC-Relay-style
+  "most cumulative work wins" resolution would close the remaining
+  signet-specific gap where a low-effort competing fork could still race
+  the honest chain.
 - **Real FDC compliance verification.** `ComplianceRegistry.screen()` is
   currently gated by `ATTESTER_ROLE` — a disclosed placeholder, not a real
   attestation. Shipping this for real means swapping that access check for
@@ -376,6 +447,21 @@ the one still-manual step (checkpoint refresh).
   (see [What stays private](#what-stays-private)). Routing that call through
   the existing relayer would close this, at the cost of making that one step
   depend on backend uptime instead of being fully client-side.
+- **BTC withdrawal timeout/reclaim path.** A nullified withdrawal has no
+  automatic recourse today if the custodian/reserve signers are simply
+  unavailable — see [Bitcoin bridge](#bitcoin-bridge) and
+  `docs/LIMITATIONS.md` #7. Closing it for real needs either a
+  double-payment-race-safe reclaim circuit or reserve-signer bonding.
+- **Dedicated frontend UI for a Bitcoin withdrawal destination.** `Shield →
+  Withdraw`'s destination field is EVM-address-shaped for every asset today;
+  a real Bitcoin withdrawal currently needs a hand-computed `hash160`
+  pasted into that same field rather than a real `tb1q...` address typed in
+  directly — see `docs/LIMITATIONS.md` #8.
+- **Checkpoint-relay liveness observability.** Withdrawal staleness is
+  publicly checkable (`overdueCount`/`oldestOverdueMs` on the solvency
+  report), but nothing yet compares the tracked BTC checkpoint height
+  against the real signet tip and surfaces the gap if
+  `btc-checkpoint-relay-worker` stalls — see `docs/LIMITATIONS.md` #8.
 
 ## License
 

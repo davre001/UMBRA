@@ -110,7 +110,27 @@ export async function markBroadcast(nullifierHash: string, payoutTxid: string): 
   if (!record) return;
   record.status = "broadcast";
   record.payoutTxid = payoutTxid;
+  record.broadcastAt = Date.now();
+  record.psbt = undefined; // fully spent — no reason to keep the staging PSBT around
   logger.info(`[btc-withdrawal] ${nullifierHash}: broadcast as ${payoutTxid}`);
+  await saveRecord(record);
+}
+
+/** Stages a real spending PSBT against the 2-of-3 reserve — see bitcoin-tx.ts's buildWithdrawalPsbt. Moves the record out of `pending` (so the watcher's own retry loop stops re-staging it every poll) until scripts/sign-btc-withdrawal.ts's signers push it to `broadcast`. */
+export async function markAwaitingSignatures(nullifierHash: string, psbtBase64: string): Promise<void> {
+  const record = records.get(nullifierHash);
+  if (!record) return;
+  record.status = "awaiting_signatures";
+  record.psbt = psbtBase64;
+  logger.info(`[btc-withdrawal] ${nullifierHash}: PSBT staged, awaiting >= threshold reserve signatures`);
+  await saveRecord(record);
+}
+
+/** Replaces a record's stored PSBT with an updated one (e.g. after combining in another signer's partial signature) — the record must already be `awaiting_signatures`. */
+export async function updatePsbt(nullifierHash: string, psbtBase64: string): Promise<void> {
+  const record = records.get(nullifierHash);
+  if (!record || record.status !== "awaiting_signatures") return;
+  record.psbt = psbtBase64;
   await saveRecord(record);
 }
 
@@ -130,6 +150,13 @@ export function listPending(): BtcWithdrawalRequest[] {
 /** Every request this process currently knows about, newest first — used by the solvency route to sum outstanding (pending + failed-but-not-yet-resolved) obligations. */
 export function listAll(): BtcWithdrawalRequest[] {
   return [...records.values()].sort((a, b) => b.observedAt - a.observedAt);
+}
+
+/** Total sats actually broadcast (paid out) since `sinceMs` (a wall-clock timestamp, e.g. `Date.now() - ONE_HOUR_MS`) — what rate-limit.ts's rolling-window cap check sums against. Keyed off `broadcastAt`, not `observedAt`/`requestedAtBlock` — a withdrawal can sit `pending` for a while before it's actually paid out, and the cap is about real outbound payments, not requests. */
+export function sumBroadcastSatsSince(sinceMs: number): bigint {
+  return [...records.values()]
+    .filter((r) => r.status === "broadcast" && r.broadcastAt !== undefined && r.broadcastAt >= sinceMs)
+    .reduce((sum, r) => sum + BigInt(r.amountSats), BigInt(0));
 }
 
 export function getLastProcessedBlock(): bigint | null {

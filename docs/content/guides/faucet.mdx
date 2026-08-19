@@ -50,12 +50,14 @@ and minting are handled entirely by the backend; your `WrappedBTC` balance
 just appears once it lands.
 
 <Callout type="warning">
-  **Minting can currently be slow, or need an admin nudge.** The last step
-  before minting — refreshing an on-chain "checkpoint" to match your
-  deposit's exact confirming height — is still a manual, admin-run step
-  today, not yet automated. If your BTC balance doesn't update for a
-  while after the deposit transaction confirms, that's this known,
-  disclosed limitation, not a broken app. See
+  **Minting can still take a little while — that's normal.** The last step
+  before minting — an on-chain Bitcoin "checkpoint" advancing to cover your
+  deposit's exact confirming height — now happens automatically (a
+  scheduled worker proves and submits each advance, no admin step), but it
+  still paces real signet block production, roughly 10 minutes per block.
+  If your balance doesn't update within about an hour of your deposit
+  transaction confirming, check whether that worker is actually running for
+  this deployment before assuming something's wrong — see
   [Bitcoin Bridge](/concepts/bitcoin-bridge) for the full explanation.
 </Callout>
 

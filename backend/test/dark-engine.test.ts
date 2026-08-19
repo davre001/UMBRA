@@ -119,11 +119,15 @@ describe("dark-engine routes", () => {
       expect(match.status).toBe(200);
       expect(match.body.status).toBe("awaiting_proof");
     },
-    // Was 20s; submitOrder now makes one extra live isSpentNullifier
+    // Was 20s, then 40s; submitOrder now makes one extra live isSpentNullifier
     // readContract call per submission (see matcher.ts) on top of the two
     // real order submissions and real Merkle-path assembly this test already
-    // does, pushing total real-network time past the old budget.
-    40_000
+    // does, and this has been observed to genuinely exceed 40s under real
+    // network variance (confirmed by re-running this file in isolation with
+    // nothing else competing for the connection and still timing out at
+    // exactly 40s) — bumped again rather than chasing a root cause in a live
+    // third-party RPC/API's own response time.
+    60_000
   );
 
   it("404s for an unknown match id", async () => {

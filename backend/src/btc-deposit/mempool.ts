@@ -211,9 +211,10 @@ interface MempoolMerkleProof {
  * confirming block to be EXACTLY `checkpointHeight + K` — a fixed,
  * disclosed v1 constraint (see BTC_DEPOSIT_DESIGN.md's "Fixed
  * header-chain length, K = 6"), not something this function can route
- * around; a caller whose tx doesn't align yet must wait for the
- * checkpoint to advance (see scripts/refresh-btc-checkpoint.ts) or for
- * more confirmations.
+ * around; a caller whose tx doesn't align yet must wait for the checkpoint
+ * to advance (btc-checkpoint-relay-worker/ does this automatically now —
+ * see contract/scripts/initialize-btc-checkpoint.ts for the one-time
+ * genesis bootstrap it depends on) or for more confirmations.
  */
 export async function assembleDepositProofInputs(txid: string, checkpointHeight: number): Promise<BtcDepositCircuitInputs> {
   const txInfo = await mempoolGetJson<MempoolTx>(`/tx/${txid}`);

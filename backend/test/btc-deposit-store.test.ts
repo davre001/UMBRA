@@ -65,4 +65,60 @@ describe("btc-deposit / store", () => {
     expect(store.getRecord(record.id)?.status).toBe("minted");
     expect(store.getRecord(record.id)?.mintTxHash).toBe("0xtxhash");
   });
+
+  it("hasRecord reflects whether a txid has ever been submitted", async () => {
+    const store = await import("../src/btc-deposit/store");
+    const txid = "ff".repeat(32);
+    expect(store.hasRecord(txid)).toBe(false);
+    store.createRecord({ txid, checkpointHeight: 100, recipient: RECIPIENT, amountSats: "250000" });
+    expect(store.hasRecord(txid)).toBe(true);
+  });
+
+  it("refreshCheckpointHeight updates an awaiting_proof record without re-fetching the tx, and no-ops for an unknown txid or an unchanged height", async () => {
+    const store = await import("../src/btc-deposit/store");
+    const txid = "10".repeat(32);
+    const record = store.createRecord({ txid, checkpointHeight: 100, recipient: RECIPIENT, amountSats: "250000" });
+
+    store.refreshCheckpointHeight("unknown-txid", 999);
+    expect(store.getRecord(record.id)?.checkpointHeight).toBe(100);
+
+    store.refreshCheckpointHeight(txid, 100); // unchanged — still a no-op, just via the equality branch instead of the missing-record one
+    expect(store.getRecord(record.id)?.checkpointHeight).toBe(100);
+
+    store.refreshCheckpointHeight(txid, 150);
+    expect(store.getRecord(record.id)?.checkpointHeight).toBe(150);
+  });
+
+  it("refreshCheckpointHeight is a no-op once a record is proven (terminal)", async () => {
+    const store = await import("../src/btc-deposit/store");
+    const txid = "11".repeat(32);
+    const record = store.createRecord({ txid, checkpointHeight: 100, recipient: RECIPIENT, amountSats: "250000" });
+    store.markProven(record.id, "0xproof", ["0x1", "0x2", "0x3", "0x4"]);
+    store.refreshCheckpointHeight(txid, 200);
+    expect(store.getRecord(record.id)?.checkpointHeight).toBe(100);
+  });
+
+  it("markFailed sets status and failureReason", async () => {
+    const store = await import("../src/btc-deposit/store");
+    const txid = "12".repeat(32);
+    const record = store.createRecord({ txid, checkpointHeight: 100, recipient: RECIPIENT, amountSats: "250000" });
+    const failed = store.markFailed(record.id, "checkpoint never caught up");
+    expect(failed?.status).toBe("failed");
+    expect(failed?.failureReason).toBe("checkpoint never caught up");
+    expect(store.markFailed("no-such-id", "x")).toBeUndefined();
+  });
+
+  it("listAwaitingProof only returns records still awaiting proof", async () => {
+    const store = await import("../src/btc-deposit/store");
+    const a = store.createRecord({ txid: "13".repeat(32), checkpointHeight: 100, recipient: RECIPIENT, amountSats: "1" });
+    const b = store.createRecord({ txid: "14".repeat(32), checkpointHeight: 100, recipient: RECIPIENT, amountSats: "2" });
+    store.markProven(b.id, "0xproof", ["0x1", "0x2", "0x3", "0x4"]);
+    expect(store.listAwaitingProof().map((r) => r.id)).toEqual([a.id]);
+  });
+
+  it("markProven/markMinted/markFailed return undefined for an unknown id", async () => {
+    const store = await import("../src/btc-deposit/store");
+    expect(store.markProven("no-such-id", "0xproof", ["0x1", "0x2", "0x3", "0x4"])).toBeUndefined();
+    expect(store.markMinted("no-such-id", "0xtx")).toBeUndefined();
+  });
 });

@@ -128,22 +128,27 @@ From there `WrappedBTC` is ordinary allowlisted collateral — `shield`,
 `pay`, `placeOrder`/`matchOrders`, and `withdraw` all treat it exactly like
 FXRP or USDT0, no special-casing.
 
-Three admin-gated registries make this work, all on `ShieldedVault`:
+Three registries make this work, all on `ShieldedVault`:
 
-- `checkpoints[sourceChainId]` — a Poseidon2 commitment to one trusted,
-  recent Bitcoin header (`setCheckpoint`, `DEFAULT_ADMIN_ROLE`-gated). The
-  circuit proves a header chain extends forward from this checkpoint by
-  exactly `K = 6` blocks to the deposit's confirming block — see
+- `checkpoints[sourceChainId]` — a Poseidon2 commitment to a trusted Bitcoin
+  header. Only the genesis value is admin-set (`executeInitializeCheckpoint`,
+  timelocked + write-once); every advance after that is permissionless —
+  `extendCheckpoint` accepts any caller's proof that the new checkpoint
+  extends the current one by exactly `K = 6` real, validly-mined, linked
+  headers (`circuits/noir/checkpoint_relay`). `btc-checkpoint-relay-worker/`
+  runs this automatically, pacing real signet block production — see
   `circuits/BTC_DEPOSIT_DESIGN.md`'s "Known simplifications" for the full
-  trust model and why this currently needs a manual refresh
-  (`scripts/refresh-btc-checkpoint.ts`) per deposit height.
+  trust model and `docs/LIMITATIONS.md` #1 for what this does and doesn't
+  close.
 - `trustedVerifiers[address]` — which verifier contracts `depositExternal`
   will accept a proof from (shared allowlist mechanism with the rest of
-  this repo's verifiers).
+  this repo's verifiers). Timelocked (`queueSetTrustedVerifier` +
+  `executeSetTrustedVerifier`, `ADMIN_TIMELOCK_DELAY` apart).
 - `externalDepositToken[sourceChainId]` — which ERC20 a given source
   chain's deposits mint (`WrappedBTC` for `"BTC_SIGNET"` today;
   chain-namespaced so a future non-Bitcoin external deposit source doesn't
-  need a storage migration).
+  need a storage migration). Also timelocked
+  (`queueSetExternalDepositToken` + `executeSetExternalDepositToken`).
 
 `isSpentNullifier` (shared with the note-spending circuits) prevents the
 same Bitcoin transaction from ever minting twice.

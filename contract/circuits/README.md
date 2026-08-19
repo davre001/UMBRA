@@ -32,6 +32,7 @@ circuits/noir/
   cancel_order/   spend an order commitment, create a refund note
   match_orders/   spend two order commitments, create the two matched notes
   btc_deposit/    prove a real signet Bitcoin payment, mint public WrappedBTC — see BTC_DEPOSIT_DESIGN.md
+  checkpoint_relay/ prove a real K=6-header checkpoint extension — permissionless ShieldedVault.extendCheckpoint, see BTC_DEPOSIT_DESIGN.md
 ```
 
 Each action circuit depends on `umbra_lib` (`{ path = "../lib" }`) and the
@@ -48,10 +49,24 @@ server-side rather than in-browser (see that doc's "Proving location"
 section), and its own worker package (`btc-deposit-worker/`) runs it
 independently of `matcher-worker/`'s EventBridge cadence.
 
+`checkpoint_relay` shares `btc_deposit`'s header/PoW/checkpoint math
+(`verify_header_chain`, `verify_pow`, `checkpoint_commitment`) but proves
+only that half of the statement, not the tx-inclusion/OP_RETURN-parsing
+half — its `main()` proves a K=6-header extension from one checkpoint
+commitment to the next, nothing else. Deliberately **not** a shared-lib
+dependency on `btc_deposit`'s own `bitcoin.nr`: Noir `bin` packages (both of
+these are) can't be depended on by another package, and hoisting the shared
+logic into `umbra_lib` would touch `btc_deposit`'s module structure closely
+enough to risk shifting its already-deployed verifier's VK — see
+`checkpoint_relay/src/bitcoin_headers.nr`'s own header comment for the full
+tradeoff. Its own worker package (`btc-checkpoint-relay-worker/`) paces real
+signet block production (~10min/block), independent of both
+`btc-deposit-worker/`'s and `matcher-worker/`'s own cadences.
+
 ## Compiling, proving, generating the Solidity verifier — per circuit
 
 ```bash
-cd circuits/noir/withdraw   # or pay, place_order, cancel_order, match_orders
+cd circuits/noir/withdraw   # or pay, place_order, cancel_order, match_orders, btc_deposit, checkpoint_relay
 nargo compile
 nargo execute witness       # needs Prover.toml with real input values
 

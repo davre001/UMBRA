@@ -78,6 +78,15 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     IUltraHonkVerifier public immutable cancelOrderVerifier;
     IUltraHonkVerifier public immutable matchOrdersVerifier;
 
+    /// @notice Verifies a `checkpoint_relay` proof for `extendCheckpoint` —
+    ///         one fixed circuit/verifier, immutable like the five action
+    ///         verifiers above (unlike `trustedVerifiers`, this isn't a
+    ///         per-source-chain registry; a future second source chain would
+    ///         need its own relay circuit and its own extend-style
+    ///         entrypoint, out of scope here). See extendCheckpoint's own
+    ///         NatSpec.
+    IUltraHonkVerifier public immutable checkpointRelayVerifier;
+
     /// @notice The one assetId (if any) that `shield`/`withdraw` treat as
     ///         native C2FLR instead of a plain ERC20 — set once at deploy
     ///         time, matching this project's existing "assetId 0 = the FLR
@@ -96,7 +105,8 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     ///         fixed immutable like every other action's verifier, so a
     ///         future chain's deposit circuit (e.g. Ethereum) can register
     ///         its own verifier without a new entrypoint. See
-    ///         circuits/BTC_DEPOSIT_DESIGN.md's Phase 5 section.
+    ///         circuits/BTC_DEPOSIT_DESIGN.md's Phase 5 section. Writes are
+    ///         timelocked — see queueSetTrustedVerifier/executeSetTrustedVerifier.
     mapping(address => bool) public trustedVerifiers;
 
     /// @notice Trusted checkpoint per external chain — sourceChainId is an
@@ -107,6 +117,12 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     ///         day one, not a single hardcoded BTC checkpoint variable —
     ///         the entire cost of staying generalized to future chains,
     ///         and expensive to retrofit as a storage migration later.
+    ///         Only ever written by two paths: `executeInitializeCheckpoint`
+    ///         (admin, timelocked, write-once — the one trusted genesis
+    ///         value) and `extendCheckpoint` (permissionless, proof-gated,
+    ///         every call after genesis). There is no admin path to rotate
+    ///         or overwrite an already-initialized checkpoint to an
+    ///         arbitrary value — see extendCheckpoint's own NatSpec for why.
     mapping(bytes32 => bytes32) public checkpoints;
 
     /// @notice The wrapped-collateral token `depositExternal` mints into for
@@ -153,6 +169,9 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     event VerifierTrustUpdated(address indexed verifier, bool trusted);
     event CheckpointUpdated(bytes32 indexed sourceChainId, bytes32 checkpointRoot);
     event ExternalDepositTokenUpdated(bytes32 indexed sourceChainId, address indexed token);
+    event AdminActionQueued(bytes32 indexed proposalId, string action, uint256 executableAt);
+    event AdminActionCancelled(bytes32 indexed proposalId, string action);
+    event AdminActionExecuted(bytes32 indexed proposalId, string action);
     event ExternalDeposited(
         bytes32 indexed sourceChainId, bytes32 indexed nullifier, address indexed recipient, uint256 amount
     );
@@ -175,6 +194,11 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     error UnknownVerifier(address verifier);
     error StaleCheckpoint(bytes32 sourceChainId, bytes32 provided, bytes32 expected);
     error NoDepositToken(bytes32 sourceChainId);
+    error AdminActionAlreadyQueued(bytes32 proposalId);
+    error AdminActionNotQueued(bytes32 proposalId);
+    error AdminActionNotReady(bytes32 proposalId, uint256 executableAt);
+    error CheckpointAlreadyInitialized(bytes32 sourceChainId);
+    error CheckpointNotInitialized(bytes32 sourceChainId);
 
     constructor(
         address hasherAddress,
@@ -183,6 +207,7 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
         address placeOrderVerifierAddress,
         address cancelOrderVerifierAddress,
         address matchOrdersVerifierAddress,
+        address checkpointRelayVerifierAddress,
         address admin,
         uint256 nativeAssetIdValue
     ) MerkleTreeWithHistory(hasherAddress) {
@@ -191,6 +216,7 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
         placeOrderVerifier = IUltraHonkVerifier(placeOrderVerifierAddress);
         cancelOrderVerifier = IUltraHonkVerifier(cancelOrderVerifierAddress);
         matchOrdersVerifier = IUltraHonkVerifier(matchOrdersVerifierAddress);
+        checkpointRelayVerifier = IUltraHonkVerifier(checkpointRelayVerifierAddress);
         nativeAssetId = nativeAssetIdValue;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
     }
@@ -227,8 +253,68 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
         emit ExternalSourceAssetUpdated(assetId, isExternal);
     }
 
-    /// @notice Trusts (or revokes trust in) `verifier` for `depositExternal`.
-    ///         Operational trust assumption: the admin must only trust a
+    // ---------------------------------------------------------------------
+    // Timelocked admin actions
+    // ---------------------------------------------------------------------
+
+    /// @notice Delay between queuing and executing setTrustedVerifier,
+    ///         setExternalDepositToken, and initializeCheckpoint — the admin
+    ///         actions that can mint arbitrary collateral if abused (a
+    ///         compromised admin key trusting a rubber-stamp verifier, or
+    ///         re-pointing which token a source chain mints into). A queued
+    ///         change is publicly visible and challengeable for the full
+    ///         delay before it can take effect. setCheckpoint's ongoing
+    ///         updates are deliberately NOT gated this way — a real BTC
+    ///         checkpoint used to need re-registering once per deposit
+    ///         (the confirming block must land at exactly checkpointHeight +
+    ///         K), so a 48h admin delay would have made deposits
+    ///         unusable rather than just safer. extendCheckpoint below
+    ///         replaces that admin action entirely with a permissionless,
+    ///         proof-gated one instead of delaying it.
+    uint256 public constant ADMIN_TIMELOCK_DELAY = 48 hours;
+
+    /// @notice proposalId (keccak256 of the action name + its exact args) =>
+    ///         the timestamp it was queued at; 0 if never queued, cancelled,
+    ///         or already executed. Cancel/execute must re-supply the same
+    ///         args used to queue — standard timelock UX (same as Compound's
+    ///         Timelock / OZ's TimelockController): only the hash needs to
+    ///         persist in storage, not the full calldata.
+    mapping(bytes32 => uint256) public queuedAt;
+
+    function _queue(bytes32 proposalId, string memory action) internal {
+        if (queuedAt[proposalId] != 0) revert AdminActionAlreadyQueued(proposalId);
+        queuedAt[proposalId] = block.timestamp;
+        emit AdminActionQueued(proposalId, action, block.timestamp + ADMIN_TIMELOCK_DELAY);
+    }
+
+    function _cancel(bytes32 proposalId, string memory action) internal {
+        if (queuedAt[proposalId] == 0) revert AdminActionNotQueued(proposalId);
+        delete queuedAt[proposalId];
+        emit AdminActionCancelled(proposalId, action);
+    }
+
+    function _consume(bytes32 proposalId, string memory action) internal {
+        uint256 queuedTime = queuedAt[proposalId];
+        if (queuedTime == 0) revert AdminActionNotQueued(proposalId);
+        uint256 executableAt = queuedTime + ADMIN_TIMELOCK_DELAY;
+        if (block.timestamp < executableAt) revert AdminActionNotReady(proposalId, executableAt);
+        delete queuedAt[proposalId];
+        emit AdminActionExecuted(proposalId, action);
+    }
+
+    /// @notice Queues trusting (or revoking trust in) `verifier` for
+    ///         `depositExternal` — takes effect only after
+    ///         `executeSetTrustedVerifier` is called at least
+    ///         `ADMIN_TIMELOCK_DELAY` later with the identical args.
+    function queueSetTrustedVerifier(address verifier, bool trusted) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _queue(keccak256(abi.encode("setTrustedVerifier", verifier, trusted)), "setTrustedVerifier");
+    }
+
+    function cancelSetTrustedVerifier(address verifier, bool trusted) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _cancel(keccak256(abi.encode("setTrustedVerifier", verifier, trusted)), "setTrustedVerifier");
+    }
+
+    /// @notice Operational trust assumption: the admin must only trust a
     ///         verifier alongside a correctly-matched `checkpoints[sourceChainId]`
     ///         registration for that same circuit's real source chain —
     ///         `depositExternal` itself does not cryptographically bind a
@@ -237,29 +323,118 @@ contract ShieldedVault is AccessControl, ReentrancyGuard, MerkleTreeWithHistory 
     ///         the real work (a checkpoint commitment is a Poseidon2 hash
     ///         of real chain-specific header data — collisions across
     ///         unrelated chains' checkpoints aren't a practical concern).
-    function setTrustedVerifier(address verifier, bool trusted) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function executeSetTrustedVerifier(address verifier, bool trusted) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _consume(keccak256(abi.encode("setTrustedVerifier", verifier, trusted)), "setTrustedVerifier");
         trustedVerifiers[verifier] = trusted;
         emit VerifierTrustUpdated(verifier, trusted);
     }
 
-    /// @notice Registers (or rotates) the trusted checkpoint for `sourceChainId`.
-    ///         `checkpointRoot` must be that source's Poseidon2 checkpoint
-    ///         COMMITMENT (e.g. `bitcoin::checkpoint_commitment` for BTC),
-    ///         not a raw checkpoint hash — see `ExternalDeposit`'s own doc.
-    function setCheckpoint(bytes32 sourceChainId, bytes32 checkpointRoot) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        checkpoints[sourceChainId] = checkpointRoot;
-        emit CheckpointUpdated(sourceChainId, checkpointRoot);
+    /// @notice Queues registering the wrapped-collateral token
+    ///         `depositExternal` mints into for `sourceChainId` — takes
+    ///         effect only after `executeSetExternalDepositToken` is called
+    ///         at least `ADMIN_TIMELOCK_DELAY` later with the identical args.
+    function queueSetExternalDepositToken(bytes32 sourceChainId, address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _queue(keccak256(abi.encode("setExternalDepositToken", sourceChainId, token)), "setExternalDepositToken");
     }
 
-    /// @notice Registers the wrapped-collateral token `depositExternal`
-    ///         mints into for `sourceChainId`. The vault must separately
-    ///         hold MINTER_ROLE on that token (e.g. WrappedBTC), and the
-    ///         token must separately be allowlisted via `setAsset` against
-    ///         the matching circuit assetId for `shield`/`withdraw`/`pay`
-    ///         to treat it as spendable collateral.
-    function setExternalDepositToken(bytes32 sourceChainId, address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function cancelSetExternalDepositToken(bytes32 sourceChainId, address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _cancel(keccak256(abi.encode("setExternalDepositToken", sourceChainId, token)), "setExternalDepositToken");
+    }
+
+    /// @notice The vault must separately hold MINTER_ROLE on `token` (e.g.
+    ///         WrappedBTC), and `token` must separately be allowlisted via
+    ///         `setAsset` against the matching circuit assetId for
+    ///         `shield`/`withdraw`/`pay` to treat it as spendable collateral.
+    function executeSetExternalDepositToken(bytes32 sourceChainId, address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _consume(keccak256(abi.encode("setExternalDepositToken", sourceChainId, token)), "setExternalDepositToken");
         externalDepositToken[sourceChainId] = token;
         emit ExternalDepositTokenUpdated(sourceChainId, token);
+    }
+
+    /// @notice Queues the one-time genesis checkpoint for `sourceChainId` —
+    ///         takes effect only after `executeInitializeCheckpoint` is
+    ///         called at least `ADMIN_TIMELOCK_DELAY` later with the
+    ///         identical args.
+    function queueInitializeCheckpoint(bytes32 sourceChainId, bytes32 checkpointCommitment)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        _queue(keccak256(abi.encode("initializeCheckpoint", sourceChainId, checkpointCommitment)), "initializeCheckpoint");
+    }
+
+    function cancelInitializeCheckpoint(bytes32 sourceChainId, bytes32 checkpointCommitment)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        _cancel(keccak256(abi.encode("initializeCheckpoint", sourceChainId, checkpointCommitment)), "initializeCheckpoint");
+    }
+
+    /// @notice The one remaining admin-trusted value anywhere in the
+    ///         checkpoint system: the genesis anchor a real deployer picks
+    ///         (a real, deeply-buried signet block) for `sourceChainId`.
+    ///         Every checkpoint after this one must instead be a
+    ///         permissionless, proven extension — see `extendCheckpoint`.
+    ///         Write-once: reverts if `sourceChainId` already has a
+    ///         checkpoint registered, so this can only bootstrap a new
+    ///         source chain, never rotate or override an existing one (that
+    ///         would reintroduce exactly the "admin fabricates a checkpoint"
+    ///         risk this redesign removes). `checkpointCommitment` must be
+    ///         that source's Poseidon2 checkpoint COMMITMENT (e.g.
+    ///         `bitcoin::checkpoint_commitment` for BTC), not a raw
+    ///         checkpoint hash — see `ExternalDeposit`'s own doc.
+    function executeInitializeCheckpoint(bytes32 sourceChainId, bytes32 checkpointCommitment)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        if (checkpoints[sourceChainId] != bytes32(0)) revert CheckpointAlreadyInitialized(sourceChainId);
+        _consume(keccak256(abi.encode("initializeCheckpoint", sourceChainId, checkpointCommitment)), "initializeCheckpoint");
+        checkpoints[sourceChainId] = checkpointCommitment;
+        emit CheckpointUpdated(sourceChainId, checkpointCommitment);
+    }
+
+    // ---------------------------------------------------------------------
+    // Permissionless checkpoint relay (NOT an admin action — no role check,
+    // no timelock; see the function's own NatSpec for why)
+    // ---------------------------------------------------------------------
+
+    /// @notice Permissionlessly advances `checkpoints[sourceChainId]` by
+    ///         exactly K real, validly-mined, correctly-linked Bitcoin
+    ///         headers (see circuits/noir/checkpoint_relay) — the proof
+    ///         must show `newCheckpointCommitment` extends whatever is
+    ///         CURRENTLY on-chain (`currentCommitment`, read live from
+    ///         storage, not admin-supplied), so nobody — admin included —
+    ///         can set an arbitrary checkpoint after genesis. No role check
+    ///         and no timelock: unlike the admin setters above, there's no
+    ///         trusted party's action to delay here — the Noir proof itself
+    ///         is the entire authorization, exactly like every other
+    ///         proof-gated action in this contract (see the contract-level
+    ///         NatSpec's "no trusted role for any of them" note). Anyone can
+    ///         call this and anyone benefits (it unblocks proving deposits
+    ///         nearer the real chain tip), same as anyone being able to
+    ///         relay a signed meta-transaction.
+    ///
+    ///         v1 scope: strictly linear extension only. A submission must
+    ///         build on the exact current checkpoint — there is no
+    ///         cumulative-chainwork comparison across competing forks (the
+    ///         BTC-Relay "most work wins" pattern). This closes the
+    ///         "compromised admin fabricates a checkpoint from thin air"
+    ///         attack completely, but does not by itself give this bridge
+    ///         full Bitcoin-mainnet-grade fork resistance — see
+    ///         docs/LIMITATIONS.md for what this does and doesn't close,
+    ///         especially on signet where PoW is intentionally cheap.
+    function extendCheckpoint(bytes32 sourceChainId, bytes calldata proof, bytes32 newCheckpointCommitment)
+        external
+    {
+        bytes32 currentCommitment = checkpoints[sourceChainId];
+        if (currentCommitment == bytes32(0)) revert CheckpointNotInitialized(sourceChainId);
+
+        bytes32[] memory publicInputs = new bytes32[](2);
+        publicInputs[0] = currentCommitment;
+        publicInputs[1] = newCheckpointCommitment;
+        if (!checkpointRelayVerifier.verify(proof, publicInputs)) revert InvalidProof();
+
+        checkpoints[sourceChainId] = newCheckpointCommitment;
+        emit CheckpointUpdated(sourceChainId, newCheckpointCommitment);
     }
 
     // ---------------------------------------------------------------------

@@ -12,13 +12,20 @@
     "CancelOrderHonkVerifier": "0xcBa1edd6b9D9f799BF172C14803CB14b89715Dd7",
     "MatchOrdersHonkVerifier": "0x22A3B97BA38013BA44B91a9baE72094A751a318A",
     "BtcDepositHonkVerifier": "0xfC5561cbec08b9674D3EE4cf5943b83eA62774EA",
+    "CheckpointRelayHonkVerifier": "0xf8A91aB54d1664aC7e3cDbfb3Fb0D2E13eb09980",
     "WrappedBTC": "0x0E8012D34cCcE7252b680cE96b36f514C5D2Bd04",
-    "ShieldedVault": "0x13643D75088cfaB4737E8b6c85813e95bfaB450B",
+    "ShieldedVault": "0xa289AF1069a8ce415434ac329B86578cF9b9c15f",
     "ComplianceRegistry": "0xC9192Ecaf662c977B28c614e49F558AAAB832577",
     "StealthAnnouncer": "0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1",
     "OwnerKeyRegistry": "0x48C77021624f7b4baC092570CDD56EB163eC3e71",
     "BatchWithdrawer": "0x4E90ECc46d47FF8B8a13F5396931838b256A3fC1",
     "PrivacyKeyRegistry": "0x8107172F8078c965bC9F334fD0bFefB2cFFAe275"
+  },
+  "admin": {
+    "role": "DEFAULT_ADMIN_ROLE",
+    "holder": "0x740383dB548942f0a280b10345Eaf0e3054D9F8e",
+    "holderType": "Safe (2-of-3)",
+    "note": "See deployments/coston2-safe.json for the Safe's own owners/threshold/contracts. The deployer key (0x2d671A0D877B206fcd7A103335ee8173f50A1d06) renounced this role after the Safe was verified working on this exact vault (a real setComplianceRegistry call executed 2-of-3). This ShieldedVault has the ADMIN_TIMELOCK_DELAY (48h) redesign live — confirmed against its own on-chain bytecode — so setTrustedVerifier/setExternalDepositToken/checkpoint updates now require a queue step, a public 48h wait, then a separate execute step, in addition to needing 2-of-3 Safe signatures. See docs/LIMITATIONS.md #6."
   },
   "assets": {
     "C2FLR": { "assetId": 0, "native": true, "decimals": 18 },
@@ -26,5 +33,5 @@
     "USDT0": { "assetId": 2, "token": "0xC1A5B41512496B80903D1f32d6dEa3a73212E71F", "decimals": 6 },
     "BTC": { "assetId": 999, "token": "0x0E8012D34cCcE7252b680cE96b36f514C5D2Bd04", "decimals": 8 }
   },
-  "note": "Redeployed for the public-WrappedBTC rebuild: btc_deposit's circuit now binds a real EVM recipient+amount (not a private note commitment), so depositExternal's ExternalDeposit struct changed — an ABI break, hence a fresh ShieldedVault. BTC (assetId 999) is now ordinary allowlisted collateral backed by real WrappedBTC (deposits mint directly to the recipient's public balance via depositExternal; shield/withdraw/pay/dark-pool all work on it exactly like FXRP/USDT0) — it is no longer registered via setExternalSourceAsset. Reuses all 5 unchanged verifiers plus Poseidon2/ComplianceRegistry/StealthAnnouncer/OwnerKeyRegistry/BatchWithdrawer/PrivacyKeyRegistry; only ShieldedVault, BtcDepositHonkVerifier, and WrappedBTC are new (see contract/scripts/redeploy-vault-wrapped-btc.ts). checkpoints[BTC_SIGNET_SOURCE_CHAIN_ID] registered via scripts/refresh-btc-checkpoint.ts at signet height 317248 and synced to the backend. Earlier addresses in this file's history (including the prior private-note BTC vault) are stale — any notes held there are no longer reachable."
+  "note": "Redeployed for the admin-timelock + permissionless-checkpoint-relay change (see contract/scripts/redeploy-vault-timelock-checkpoint-relay.ts): ShieldedVault's constructor gained a 7th verifier arg (checkpointRelayVerifier), an ABI break, hence a fresh ShieldedVault. setTrustedVerifier/setExternalDepositToken are now queue-then-execute (ADMIN_TIMELOCK_DELAY, 48h); setCheckpoint is gone, replaced by a one-time timelocked initializeCheckpoint genesis plus a permissionless proof-gated extendCheckpoint for every update after that (see circuits/noir/checkpoint_relay and btc-checkpoint-relay-worker/). Reuses all 6 unchanged verifiers plus Poseidon2/ComplianceRegistry/WrappedBTC/StealthAnnouncer/OwnerKeyRegistry/BatchWithdrawer/PrivacyKeyRegistry; only ShieldedVault and CheckpointRelayHonkVerifier are new. queueSetTrustedVerifier(BtcDepositHonkVerifier, true) and queueSetExternalDepositToken(BTC_SIGNET_SOURCE_CHAIN_ID, WrappedBTC) were queued at redeploy time — their execute calls, plus contract/scripts/initialize-btc-checkpoint.ts's own genesis bootstrap, are still pending as of this deploy; BTC deposits stay unavailable on this vault until all three have executed. DEFAULT_ADMIN_ROLE was handed to the same 2-of-3 Safe (see the admin field above) shortly after deploy, in the same session. Earlier ShieldedVault addresses in this file's history (including the prior private-note BTC vault and the pre-timelock public-WrappedBTC vault) are stale — any notes held there are no longer reachable from this vault."
 }

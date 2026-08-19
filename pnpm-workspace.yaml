@@ -3,6 +3,7 @@ packages:
   - "frontend"
   - "contract"
   - "btc-deposit-worker"
+  - "btc-checkpoint-relay-worker"
   - "matcher-worker"
   - "docs"
 
