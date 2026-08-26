@@ -1,8 +1,8 @@
 import { publicClient, CONTRACTS, DEPLOY_BLOCK } from "../shared/chain";
 import { SHIELDED_VAULT_ABI } from "../shared/vaultAbi";
 import { logger } from "../shared/logger";
-import { buildAndSignWithdrawal, InsufficientFundsError } from "./bitcoin-tx";
-import { broadcastTx } from "./mempool";
+import { buildWithdrawalPsbt, InsufficientFundsError } from "./bitcoin-tx";
+import { assertWithinRateCap, RateCapPermanentlyExceededError, RateCapTemporarilyExceededError } from "./rate-limit";
 import * as store from "./store";
 import type { BtcWithdrawalRequest } from "./types";
 
@@ -40,32 +40,46 @@ function destinationToHash160(destination: `0x${string}`): string {
 }
 
 /**
- * Attempts to fulfill a single stored record (already upserted as
- * `pending` by the caller). Returns true iff this call is the one that
- * broadcast it. On InsufficientFundsError, leaves the record `pending` —
- * the caller MUST be able to find it again on a later poll independent of
+ * Attempts to stage a real spending PSBT for a single stored `pending`
+ * record against the 2-of-3 reserve (see reserve.ts) — this backend holds
+ * no reserve private key, so staging the PSBT is as far as it can take a
+ * withdrawal alone; scripts/sign-btc-withdrawal.ts's own signers finish
+ * the job from here. Returns true iff this call is the one that staged
+ * it (moved `pending` -> `awaiting_signatures`). On InsufficientFundsError
+ * or RateCapTemporarilyExceededError, leaves the record `pending` — the
+ * caller MUST be able to find it again on a later poll independent of
  * `lastProcessedBlock`/block-range log scanning, since that range only
- * ever moves forward and would otherwise never re-surface this event (see
+ * ever looks forward and would otherwise never re-surface this event (see
  * `pollOnce`'s own retry-via-`listPending` pass, which is what actually
  * makes this comment true — a prior version of this file left the record
  * `pending` with an identical claim but nothing ever revisited it).
+ * RateCapPermanentlyExceededError is different — a single withdrawal
+ * larger than a configured cap can never fit no matter how long it waits,
+ * so that one gets the same permanent `markFailed` treatment as any other
+ * unexpected error, not an endless silent retry loop.
  */
 export async function attemptFulfillment(record: BtcWithdrawalRequest): Promise<boolean> {
-  if (record.status === "broadcast") return false;
+  if (record.status === "awaiting_signatures" || record.status === "broadcast") return false;
   try {
-    logger.info(`[btc-withdrawal] fulfilling ${record.nullifierHash}: ${record.amountSats} sats -> ${record.destinationHash160}`);
-    const { rawHex, txid, feeSats } = await buildAndSignWithdrawal(record.destinationHash160, BigInt(record.amountSats));
-    const broadcastTxid = await broadcastTx(rawHex);
-    if (broadcastTxid !== txid) {
-      logger.warn(`[btc-withdrawal] ${record.nullifierHash}: locally-computed txid ${txid} != broadcast-returned ${broadcastTxid}, trusting the broadcast response`);
-    }
-    logger.info(`[btc-withdrawal] ${record.nullifierHash}: broadcast ${broadcastTxid} (fee ${feeSats} sats)`);
-    await store.markBroadcast(record.nullifierHash, broadcastTxid);
+    assertWithinRateCap(BigInt(record.amountSats));
+    logger.info(`[btc-withdrawal] staging ${record.nullifierHash}: ${record.amountSats} sats -> ${record.destinationHash160}`);
+    const { psbt, feeSats } = await buildWithdrawalPsbt(record.destinationHash160, BigInt(record.amountSats));
+    await store.markAwaitingSignatures(record.nullifierHash, psbt);
+    logger.info(`[btc-withdrawal] ${record.nullifierHash}: PSBT staged (fee ~${feeSats} sats) — awaiting reserve signatures`);
     return true;
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     if (err instanceof InsufficientFundsError) {
-      logger.error(`[btc-withdrawal] ${record.nullifierHash}: insufficient custodian funds — will retry next poll: ${reason}`);
+      logger.error(`[btc-withdrawal] ${record.nullifierHash}: insufficient reserve funds — will retry next poll: ${reason}`);
+      return false;
+    }
+    if (err instanceof RateCapTemporarilyExceededError) {
+      logger.warn(`[btc-withdrawal] ${record.nullifierHash}: rate cap reached — will retry next poll: ${reason}`);
+      return false;
+    }
+    if (err instanceof RateCapPermanentlyExceededError) {
+      logger.error(`[btc-withdrawal] ${record.nullifierHash}: exceeds configured rate cap on its own, cannot be fulfilled: ${reason}`);
+      await store.markFailed(record.nullifierHash, reason);
       return false;
     }
     await store.markFailed(record.nullifierHash, reason);
@@ -76,8 +90,8 @@ export async function attemptFulfillment(record: BtcWithdrawalRequest): Promise<
 async function fulfillOne(log: ExternalWithdrawalRequestedLog): Promise<boolean> {
   const nullifierHash = log.args.nullifierHash.toString();
   const existing = store.getRecord(nullifierHash);
-  if (existing?.status === "broadcast") {
-    logger.debug(`[btc-withdrawal] ${nullifierHash}: already broadcast (${existing.payoutTxid}), skipping`);
+  if (existing?.status === "awaiting_signatures" || existing?.status === "broadcast") {
+    logger.debug(`[btc-withdrawal] ${nullifierHash}: already ${existing.status}, skipping`);
     return false;
   }
 
@@ -101,29 +115,33 @@ async function fulfillOne(log: ExternalWithdrawalRequestedLog): Promise<boolean>
  * which by construction only ever looks forward and would otherwise never
  * revisit a block once `lastProcessedBlock` moves past it; then (2) scans
  * for brand-new ExternalWithdrawalRequested events (assetId == BTC_ASSET_ID)
- * since the last processed block and fulfills each. A single failure
- * doesn't stop the rest — see attemptFulfillment's own error handling.
+ * since the last processed block and stages each. A single failure doesn't
+ * stop the rest — see attemptFulfillment's own error handling. `staged`
+ * counts PSBTs newly moved to `awaiting_signatures` this pass, NOT
+ * completed payouts — actually finishing one needs
+ * scripts/sign-btc-withdrawal.ts's signers, which this poll loop never
+ * runs itself (this backend holds no reserve private key).
  */
-export async function pollOnce(): Promise<{ scanned: number; fulfilled: number }> {
-  let fulfilled = 0;
+export async function pollOnce(): Promise<{ scanned: number; staged: number }> {
+  let staged = 0;
 
   for (const record of store.listPending()) {
-    if (await attemptFulfillment(record)) fulfilled += 1;
+    if (await attemptFulfillment(record)) staged += 1;
   }
 
   const vaultAddress = CONTRACTS.ShieldedVault as `0x${string}`;
   const fromBlock = (store.getLastProcessedBlock() ?? DEPLOY_BLOCK - BigInt(1)) + BigInt(1);
   const toBlock = await publicClient.getBlockNumber();
-  if (fromBlock > toBlock) return { scanned: 0, fulfilled };
+  if (fromBlock > toBlock) return { scanned: 0, staged };
 
   const events = await fetchNewEvents(vaultAddress, fromBlock, toBlock);
   const btcEvents = events.filter((e) => e.args.assetId === BTC_ASSET_ID);
   logger.debug(`[btc-withdrawal] scanned blocks ${fromBlock}-${toBlock}: ${events.length} withdrawal event(s), ${btcEvents.length} for BTC`);
 
   for (const log of btcEvents) {
-    if (await fulfillOne(log)) fulfilled += 1;
+    if (await fulfillOne(log)) staged += 1;
   }
 
   await store.setLastProcessedBlock(toBlock);
-  return { scanned: btcEvents.length, fulfilled };
+  return { scanned: btcEvents.length, staged };
 }

@@ -32,10 +32,24 @@
 > reaches it (a real bug, found and fixed live: a record's
 > `checkpointHeight` is frozen at registration time, and the watcher's own
 > "already known, skip" fast path was — before the fix — also skipping the
-> one thing that could unstick it after a refresh). One genuine gap
-> remains, disclosed rather than fixed: the checkpoint refresh itself
-> (`scripts/refresh-btc-checkpoint.ts`) is still a manual, admin-run step
-> per deposit height, not yet automated — see the root README's Roadmap.
+> one thing that could unstick it after a refresh).
+>
+> **Since that paragraph was written, the "manual checkpoint refresh" gap it
+> disclosed is closed.** `setCheckpoint` no longer exists.
+> `ShieldedVault.executeInitializeCheckpoint` (admin, timelocked, write-once)
+> registers only the one-time genesis anchor; every advance after that is
+> `extendCheckpoint` — permissionless, gated by a real `checkpoint_relay`
+> Noir proof (see `circuits/noir/checkpoint_relay`) that the new checkpoint
+> extends the current one by exactly `K = 6` validly-mined, correctly-linked
+> headers. `btc-checkpoint-relay-worker/` runs this automatically. This also
+> closed a security gap beyond just the manual-step annoyance: previously an
+> admin key could set `checkpoints[sourceChainId]` to any value at all
+> (trivially fakeable on signet's near-zero difficulty); now every value
+> after genesis is a provably real chain extension. `setTrustedVerifier` and
+> `setExternalDepositToken` (below) are similarly no longer instant —
+> both require `queueX` then `executeX`, `ADMIN_TIMELOCK_DELAY` (48h) apart.
+> See `docs/LIMITATIONS.md` #1 and #6 for what remains disclosed (genesis
+> trust, no cross-fork chainwork comparison, single-EOA admin key).
 
 This is a **new** design-doc convention, specific to `btc_deposit` — it is
 not a continuation of `DESIGN.md`'s existing structure (that file has one
@@ -47,8 +61,9 @@ history).
 ## Status: Phases 0-5 complete, verified on-chain
 
 `ShieldedVault.depositExternal` — the `ExternalDeposit` struct, chain-tagged
-`checkpoints`/`trustedVerifiers` registries, and admin setters
-(`setTrustedVerifier`, `setCheckpoint`) — is implemented and tested in
+`checkpoints`/`trustedVerifiers` registries, and their gated setters
+(`executeSetTrustedVerifier`, `executeInitializeCheckpoint`/`extendCheckpoint`
+— see the superseding banner above) — is implemented and tested in
 `test/ShieldedVault.test.ts`: a real `btc_deposit` UltraHonk proof (real
 sha256d header PoW, real Merkle-inclusion math, real Poseidon2
 commitment/nullifier — see `fixtures/proof`/`fixtures/public_inputs`)
@@ -203,6 +218,16 @@ than pure cryptography. A collateralized-agent model (the direction
 Flare's own FAssets system takes) is the real fix for this, and remains
 out of scope here.
 
+A related but distinct risk: `BTC_CUSTODIAN_WIF` leaking outright (theft,
+not withholding). `backend/src/btc-withdrawal/rate-limit.ts`'s optional
+`BTC_WITHDRAWAL_MAX_SATS_PER_HOUR`/`BTC_WITHDRAWAL_MAX_SATS_PER_DAY` caps
+bound how much a leaked key can pay out before someone notices and rotates
+it — same visible-not-impossible philosophy as the solvency counter above,
+applied to theft speed instead of withholding. Still a single hot key
+either way; an M-of-N/threshold custodian scheme remains the real fix and
+is also out of scope here — see `docs/THREAT_MODEL.md`'s own writeup for
+both.
+
 ## Public-input interface — one Field per `pub` value, not one per Noir type
 
 `main()`'s public interface went through one real correction worth
@@ -294,6 +319,16 @@ gets registered as the trusted checkpoint (initially, this project's own
 deployer) is trusted not to register a checkpoint from a forged or
 minority-fork chain. Rotating/updating the checkpoint is an on-chain admin
 action, not something this circuit itself proves.
+
+> **Amendment**: the "rotating/updating is an admin action" sentence above
+> described v1 as originally shipped. As of the timelock/checkpoint-relay
+> redesign (see the top-of-file superseding banner), that's true only for
+> the one-time genesis value — every checkpoint update after genesis is
+> `extendCheckpoint`, permissionless and gated by a real proof of this same
+> circuit's own header-chain logic (`circuits/noir/checkpoint_relay`), not
+> an admin write. The genesis-trust sentence just above it still holds
+> exactly as written — that trust assumption doesn't go away, it just no
+> longer needs re-exercising on every deposit.
 
 **Fixed header-chain length, K = 6.** The circuit takes exactly 6 headers
 as a private witness (roughly an hour of signet blocks). A payment whose

@@ -2,7 +2,7 @@
   "chainId": 114,
   "rpcUrl": "https://flare-testnet.drpc.org",
   "deployBlock": 33927500,
-  "vault": "0x13643D75088cfaB4737E8b6c85813e95bfaB450B",
+  "vault": "0xa289AF1069a8ce415434ac329B86578cF9b9c15f",
   "compliance": "0xC9192Ecaf662c977B28c614e49F558AAAB832577",
   "ownerKeyRegistry": "0x48C77021624f7b4baC092570CDD56EB163eC3e71",
   "stealthAnnouncer": "0xdA0B6371734C2Fa3D1C46c367f9bFCd0586C6ba1",

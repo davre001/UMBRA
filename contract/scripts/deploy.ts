@@ -65,6 +65,11 @@ async function main() {
   const cancelOrderVerifier = await deployHonkVerifier("CancelOrderHonkVerifier", "CancelOrderRelationsLib", "CancelOrderZKTranscriptLib");
   const matchOrdersVerifier = await deployHonkVerifier("MatchOrdersHonkVerifier", "MatchOrdersRelationsLib", "MatchOrdersZKTranscriptLib");
   const btcDepositVerifier = await deployHonkVerifier("BtcDepositHonkVerifier", "BtcDepositRelationsLib", "BtcDepositZKTranscriptLib");
+  const checkpointRelayVerifier = await deployHonkVerifier(
+    "CheckpointRelayHonkVerifier",
+    "CheckpointRelayRelationsLib",
+    "CheckpointRelayZKTranscriptLib"
+  );
 
   const Vault = await ethers.getContractFactory("ShieldedVault");
   const vault = await Vault.deploy(
@@ -74,6 +79,7 @@ async function main() {
     await placeOrderVerifier.getAddress(),
     await cancelOrderVerifier.getAddress(),
     await matchOrdersVerifier.getAddress(),
+    await checkpointRelayVerifier.getAddress(),
     deployer.address,
     NATIVE_ASSET_ID
   );
@@ -103,20 +109,26 @@ async function main() {
   await (await vault.setComplianceRegistry(await compliance.getAddress())).wait();
   await (await compliance.grantRole(await compliance.ATTESTER_ROLE(), attesterAddress)).wait();
 
-  // depositExternal (BTC) — trust the verifier now; the checkpoint itself
-  // (checkpoints[BTC_SIGNET_SOURCE_CHAIN_ID]) is deliberately NOT set here.
-  // It needs a real, currently-recent signet header's checkpoint_commitment
-  // (bitcoin::checkpoint_commitment — see circuits/BTC_DEPOSIT_DESIGN.md),
-  // which only makes sense to fetch/compute at the time BTC deposits go
-  // live, not baked into this deploy script as a stale value. Register it
-  // separately via vault.setCheckpoint(sourceChainId, checkpointRoot) once
-  // Phase 6's data-sourcing tooling exists.
+  // depositExternal (BTC) — queue trusting the verifier; setTrustedVerifier
+  // is timelocked (ADMIN_TIMELOCK_DELAY, currently 48h — see
+  // ShieldedVault.sol's own NatSpec), so `executeSetTrustedVerifier` must be
+  // run separately once that delay has elapsed. checkpoints[BTC_SIGNET_SOURCE_CHAIN_ID]
+  // is deliberately NOT set here either — it needs a real, currently-recent
+  // signet header's checkpoint_commitment (bitcoin::checkpoint_commitment —
+  // see circuits/BTC_DEPOSIT_DESIGN.md), which only makes sense to
+  // fetch/compute at the time BTC deposits go live, not baked into this
+  // deploy script as a stale value. Register it separately via
+  // scripts/initialize-btc-checkpoint.ts's queue/execute pair — a one-time
+  // genesis bootstrap; every checkpoint update after that is permissionless
+  // (see extendCheckpoint's own NatSpec) and needs no admin/timelock step at
+  // all.
   const BTC_SIGNET_SOURCE_CHAIN_ID = ethers.keccak256(ethers.toUtf8Bytes("BTC_SIGNET"));
   const BTC_ASSET_ID = 999; // must match contract/circuits/noir/btc_deposit/src/bitcoin.nr's BTC_ASSET_ID exactly
-  await (await vault.setTrustedVerifier(await btcDepositVerifier.getAddress(), true)).wait();
-  console.log(`Trusted BtcDepositHonkVerifier for depositExternal (sourceChainId ${BTC_SIGNET_SOURCE_CHAIN_ID}).`);
-  console.log("NOTE: checkpoints[BTC_SIGNET_SOURCE_CHAIN_ID] is still unset — BTC deposits will revert with");
-  console.log("StaleCheckpoint until vault.setCheckpoint(...) is called with a real signet checkpoint commitment.");
+  await (await vault.queueSetTrustedVerifier(await btcDepositVerifier.getAddress(), true)).wait();
+  console.log(`Queued trusting BtcDepositHonkVerifier for depositExternal (sourceChainId ${BTC_SIGNET_SOURCE_CHAIN_ID}).`);
+  console.log("Run vault.executeSetTrustedVerifier(btcDepositVerifierAddress, true) with the SAME args after");
+  console.log("ADMIN_TIMELOCK_DELAY has elapsed — BTC deposits stay unavailable until that executes AND");
+  console.log("scripts/initialize-btc-checkpoint.ts's own queue/execute pair has registered a real checkpoint.");
 
   // Enforced, not just a documentation convention: withdraw() reverts
   // unconditionally for this assetId from here on — no real EVM-side
@@ -148,6 +160,7 @@ async function main() {
     CancelOrderHonkVerifier: await cancelOrderVerifier.getAddress(),
     MatchOrdersHonkVerifier: await matchOrdersVerifier.getAddress(),
     BtcDepositHonkVerifier: await btcDepositVerifier.getAddress(),
+    CheckpointRelayHonkVerifier: await checkpointRelayVerifier.getAddress(),
     ShieldedVault: await vault.getAddress(),
     ComplianceRegistry: await compliance.getAddress(),
     StealthAnnouncer: await announcer.getAddress(),

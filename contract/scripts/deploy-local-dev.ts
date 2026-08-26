@@ -40,6 +40,11 @@ async function main() {
   const placeOrderVerifier = await deployHonkVerifier("PlaceOrderHonkVerifier", "PlaceOrderRelationsLib", "PlaceOrderZKTranscriptLib");
   const cancelOrderVerifier = await deployHonkVerifier("CancelOrderHonkVerifier", "CancelOrderRelationsLib", "CancelOrderZKTranscriptLib");
   const matchOrdersVerifier = await deployHonkVerifier("MatchOrdersHonkVerifier", "MatchOrdersRelationsLib", "MatchOrdersZKTranscriptLib");
+  const checkpointRelayVerifier = await deployHonkVerifier(
+    "CheckpointRelayHonkVerifier",
+    "CheckpointRelayRelationsLib",
+    "CheckpointRelayZKTranscriptLib"
+  );
 
   const NATIVE_ASSET_ID = 0;
   const Vault = await ethers.getContractFactory("ShieldedVault");
@@ -50,6 +55,7 @@ async function main() {
     await placeOrderVerifier.getAddress(),
     await cancelOrderVerifier.getAddress(),
     await matchOrdersVerifier.getAddress(),
+    await checkpointRelayVerifier.getAddress(),
     deployer.address,
     NATIVE_ASSET_ID
   );

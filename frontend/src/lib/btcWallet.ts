@@ -53,8 +53,9 @@ export function getSignetAddress(keyPair: ECPairInterface): string {
   return address;
 }
 
-// Same dual-source fallback pattern contract/scripts/refresh-btc-checkpoint.ts
-// uses — mempool.space proved unreachable from Render's own network this
+// Same dual-source fallback pattern contract/scripts/initialize-btc-checkpoint.ts
+// and btc-checkpoint-relay-worker/src/headers.ts both use — mempool.space
+// proved unreachable from Render's own network this
 // session (a server-side hosting issue, not expected to affect a real
 // user's browser, but the fallback costs nothing and the CORS-friendliness
 // of both is why client-side signet calls are viable here at all).

@@ -10,6 +10,7 @@ function order(overrides: Partial<OrderIntent>): OrderIntent {
     spendingKey: "1",
     orderBlinding: "1",
     amountIn: "1000",
+    originalAmountIn: "1000",
     assetIn: 0,
     assetOut: 1,
     minAmountOut: "1",

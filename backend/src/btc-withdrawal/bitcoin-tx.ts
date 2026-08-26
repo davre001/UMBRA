@@ -1,29 +1,35 @@
 import * as bitcoin from "bitcoinjs-lib";
-import { getCustodianAddress, getKeyPairForSigning, SIGNET_NETWORK } from "./wallet";
+import { SIGNET_NETWORK } from "./wallet";
+import { getReserveInfo, RESERVE_THRESHOLD } from "./reserve";
 import { fetchFeeRateSatsPerVbyte, fetchUtxos, type Utxo } from "./mempool";
 
-// Rough, standard P2WPKH-only vsize estimate (input/output counts affect
-// this — recomputed per candidate selection below, not a single constant).
-// These per-item costs are the commonly-cited approximate SegWit P2WPKH
-// weights (input ~68 vbytes incl. witness discount, output ~31 vbytes,
-// ~10.5 vbytes of fixed overhead) — adequate for fee *estimation* on a
-// low-value signet payout, not a byte-exact accounting.
+// Rough, standard vsize estimates — recomputed per candidate selection
+// below, not a single constant, since the real fee depends on how many
+// inputs end up selected. Adequate for fee *estimation* on a low-value
+// signet payout, not byte-exact accounting.
 const BASE_VBYTES = 10.5;
-const INPUT_VBYTES = 68;
-const OUTPUT_VBYTES = 31;
+// A 2-of-3 P2WSH input's real weight: ~41 non-witness vbytes (36-byte
+// outpoint + empty scriptSig + 4-byte sequence — P2WSH has no scriptSig,
+// unlike legacy P2SH) plus witness data (OP_0 multisig-bug dummy + 2
+// signatures ~72 bytes each + the 105-byte redeem script itself),
+// discounted 4x for being witness data (~253 bytes / 4 ≈ 63 vbytes).
+// Rounded up for headroom, not shaved tight.
+const RESERVE_INPUT_VBYTES = 110;
+const P2WPKH_OUTPUT_VBYTES = 31;
+const P2WSH_OUTPUT_VBYTES = 43;
 
-function estimateVsize(inputCount: number, outputCount: number): number {
-  return Math.ceil(BASE_VBYTES + inputCount * INPUT_VBYTES + outputCount * OUTPUT_VBYTES);
+function estimateVsize(inputCount: number, outputVbytes: number[]): number {
+  return Math.ceil(BASE_VBYTES + inputCount * RESERVE_INPUT_VBYTES + outputVbytes.reduce((a, b) => a + b, 0));
 }
 
 export class InsufficientFundsError extends Error {}
 
 /**
- * Selects UTXOs (largest-first — simplest correct strategy, not
+ * Selects reserve UTXOs (largest-first — simplest correct strategy, not
  * fee-optimized) covering `amountSats` plus the fee for the resulting
  * transaction, computed iteratively since the fee itself depends on how
- * many inputs end up selected. Two outputs are always assumed (payment +
- * change) for the fee estimate; `buildAndSignWithdrawal` below drops the
+ * many inputs end up selected. Two outputs (payment + reserve change) are
+ * always assumed for the estimate; `buildWithdrawalPsbt` below drops the
  * change output if it would be dust, which only ever makes the real fee
  * lower than this estimate, never higher.
  */
@@ -34,28 +40,29 @@ function selectUtxos(utxos: Utxo[], amountSats: bigint, feeRate: number): { sele
   for (const utxo of confirmed) {
     selected.push(utxo);
     total += BigInt(utxo.value);
-    const fee = BigInt(Math.ceil(estimateVsize(selected.length, 2) * feeRate));
+    const fee = BigInt(Math.ceil(estimateVsize(selected.length, [P2WPKH_OUTPUT_VBYTES, P2WSH_OUTPUT_VBYTES]) * feeRate));
     if (total >= amountSats + fee) return { selected, fee };
   }
   throw new InsufficientFundsError(
-    `Custodian has ${total} confirmed sats across ${confirmed.length} UTXO(s), needs ~${amountSats} + fee`
+    `Reserve has ${total} confirmed sats across ${confirmed.length} UTXO(s), needs ~${amountSats} + fee`
   );
 }
 
 /**
- * Builds and signs a real P2WPKH transaction paying `amountSats` to the
- * P2WPKH address derived from `destinationHash160`, from the custodian's
- * own UTXOs, with change (if not dust) back to the custodian. Returns the
- * raw signed hex and its txid — does NOT broadcast (see mempool.ts's
- * broadcastTx, called separately so a caller can log/record before
- * committing to the network call).
+ * Builds an UNSIGNED PSBT paying `amountSats` to the P2WPKH address
+ * derived from `destinationHash160`, spending the 2-of-3 reserve's own
+ * UTXOs (see reserve.ts), with change (if not dust) back to the reserve.
+ * Returns the PSBT base64-encoded, ready for scripts/sign-btc-withdrawal.ts's
+ * signers to add their signatures to — this backend holds no reserve
+ * private key, so it can build the spending request but can never
+ * complete it alone.
  */
-export async function buildAndSignWithdrawal(
+export async function buildWithdrawalPsbt(
   destinationHash160: string,
   amountSats: bigint
-): Promise<{ rawHex: string; txid: string; feeSats: bigint }> {
-  const custodianAddress = getCustodianAddress();
-  const utxos = await fetchUtxos(custodianAddress);
+): Promise<{ psbt: string; feeSats: bigint }> {
+  const reserve = getReserveInfo();
+  const utxos = await fetchUtxos(reserve.address);
   const feeRate = await fetchFeeRateSatsPerVbyte();
   const { selected, fee } = selectUtxos(utxos, amountSats, feeRate);
 
@@ -65,7 +72,6 @@ export async function buildAndSignWithdrawal(
   });
   if (!destination.address) throw new Error(`Could not derive a signet address from hash160 ${destinationHash160}`);
 
-  const custodianScript = bitcoin.payments.p2wpkh({ address: custodianAddress, network: SIGNET_NETWORK }).output!;
   const totalIn = selected.reduce((sum, u) => sum + BigInt(u.value), BigInt(0));
   const changeSats = totalIn - amountSats - fee;
 
@@ -74,24 +80,38 @@ export async function buildAndSignWithdrawal(
     psbt.addInput({
       hash: utxo.txid,
       index: utxo.vout,
-      witnessUtxo: { script: custodianScript, value: BigInt(utxo.value) },
+      witnessUtxo: { script: reserve.output, value: BigInt(utxo.value) },
+      // Required for a P2WSH spend: signers need the actual redeem script
+      // to know what they're signing over and to build the final witness
+      // stack, since witnessUtxo alone only commits to the script *hash*.
+      witnessScript: reserve.redeemOutput,
     });
   }
   psbt.addOutput({ address: destination.address, value: amountSats });
   // 546 sats is Bitcoin's standard dust threshold for a P2WPKH output —
-  // below that, the change isn't worth its own future spending cost and is
-  // folded into the fee instead (a slightly higher real fee than estimated
-  // above, never a shortfall).
+  // reused here as a conservative floor for the P2WSH change output too
+  // (P2WSH's own real dust threshold is slightly higher, so this never
+  // creates an actually-dust change output, only occasionally folds a
+  // marginal amount into the fee that a tighter threshold wouldn't have).
   if (changeSats > BigInt(546)) {
-    psbt.addOutput({ address: custodianAddress, value: changeSats });
+    psbt.addOutput({ address: reserve.address, value: changeSats });
   }
 
-  const keyPair = getKeyPairForSigning();
-  for (let i = 0; i < selected.length; i++) {
-    psbt.signInput(i, keyPair);
+  return { psbt: psbt.toBase64(), feeSats: fee };
+}
+
+/** True once every input of `psbt` has at least RESERVE_THRESHOLD partial signatures — the point at which finalizing + broadcasting becomes possible. */
+export function hasEnoughSignatures(psbt: bitcoin.Psbt): boolean {
+  return psbt.data.inputs.every((input) => (input.partialSig?.length ?? 0) >= RESERVE_THRESHOLD);
+}
+
+/** Finalizes a fully-signed PSBT and extracts the final raw transaction hex + txid — does NOT broadcast (see mempool.ts's broadcastTx, called separately). */
+export function finalizeWithdrawalPsbt(psbtBase64: string): { rawHex: string; txid: string } {
+  const psbt = bitcoin.Psbt.fromBase64(psbtBase64, { network: SIGNET_NETWORK });
+  if (!hasEnoughSignatures(psbt)) {
+    throw new Error(`PSBT does not yet have >= ${RESERVE_THRESHOLD} signatures on every input`);
   }
   psbt.finalizeAllInputs();
-
   const tx = psbt.extractTransaction();
-  return { rawHex: tx.toHex(), txid: tx.getId(), feeSats: fee };
+  return { rawHex: tx.toHex(), txid: tx.getId() };
 }

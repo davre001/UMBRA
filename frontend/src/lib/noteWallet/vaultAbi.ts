@@ -33,6 +33,11 @@ export const SHIELDED_VAULT_ABI = [
       },
       {
         "internalType": "address",
+        "name": "checkpointRelayVerifierAddress",
+        "type": "address"
+      },
+      {
+        "internalType": "address",
         "name": "admin",
         "type": "address"
       },
@@ -69,12 +74,72 @@ export const SHIELDED_VAULT_ABI = [
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "proposalId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "AdminActionAlreadyQueued",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "proposalId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "AdminActionNotQueued",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "proposalId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "uint256",
+        "name": "executableAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "AdminActionNotReady",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "uint256",
         "name": "assetId",
         "type": "uint256"
       }
     ],
     "name": "AssetNotAllowed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "CheckpointAlreadyInitialized",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      }
+    ],
+    "name": "CheckpointNotInitialized",
     "type": "error"
   },
   {
@@ -194,6 +259,69 @@ export const SHIELDED_VAULT_ABI = [
     ],
     "name": "UnknownVerifier",
     "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "proposalId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "action",
+        "type": "string"
+      }
+    ],
+    "name": "AdminActionCancelled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "proposalId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "action",
+        "type": "string"
+      }
+    ],
+    "name": "AdminActionExecuted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "proposalId",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "action",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "executableAt",
+        "type": "uint256"
+      }
+    ],
+    "name": "AdminActionQueued",
+    "type": "event"
   },
   {
     "anonymous": false,
@@ -658,6 +786,19 @@ export const SHIELDED_VAULT_ABI = [
   },
   {
     "inputs": [],
+    "name": "ADMIN_TIMELOCK_DELAY",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "DEFAULT_ADMIN_ROLE",
     "outputs": [
       {
@@ -730,6 +871,24 @@ export const SHIELDED_VAULT_ABI = [
   {
     "inputs": [
       {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "checkpointCommitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "cancelInitializeCheckpoint",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
         "internalType": "bytes",
         "name": "proof",
         "type": "bytes"
@@ -758,6 +917,55 @@ export const SHIELDED_VAULT_ABI = [
   {
     "inputs": [],
     "name": "cancelOrderVerifier",
+    "outputs": [
+      {
+        "internalType": "contract IUltraHonkVerifier",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "cancelSetExternalDepositToken",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "verifier",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "trusted",
+        "type": "bool"
+      }
+    ],
+    "name": "cancelSetTrustedVerifier",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "checkpointRelayVerifier",
     "outputs": [
       {
         "internalType": "contract IUltraHonkVerifier",
@@ -859,6 +1067,83 @@ export const SHIELDED_VAULT_ABI = [
       }
     ],
     "name": "depositExternal",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "checkpointCommitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "executeInitializeCheckpoint",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "executeSetExternalDepositToken",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "verifier",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "trusted",
+        "type": "bool"
+      }
+    ],
+    "name": "executeSetTrustedVerifier",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes",
+        "name": "proof",
+        "type": "bytes"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "newCheckpointCommitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "extendCheckpoint",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1229,6 +1514,79 @@ export const SHIELDED_VAULT_ABI = [
     "inputs": [
       {
         "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "checkpointCommitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "queueInitializeCheckpoint",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "sourceChainId",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      }
+    ],
+    "name": "queueSetExternalDepositToken",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "verifier",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "trusted",
+        "type": "bool"
+      }
+    ],
+    "name": "queueSetTrustedVerifier",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "name": "queuedAt",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
         "name": "role",
         "type": "bytes32"
       },
@@ -1287,48 +1645,12 @@ export const SHIELDED_VAULT_ABI = [
   {
     "inputs": [
       {
-        "internalType": "bytes32",
-        "name": "sourceChainId",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "checkpointRoot",
-        "type": "bytes32"
-      }
-    ],
-    "name": "setCheckpoint",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
         "internalType": "address",
         "name": "registry",
         "type": "address"
       }
     ],
     "name": "setComplianceRegistry",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "bytes32",
-        "name": "sourceChainId",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "address",
-        "name": "token",
-        "type": "address"
-      }
-    ],
-    "name": "setExternalDepositToken",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -1347,24 +1669,6 @@ export const SHIELDED_VAULT_ABI = [
       }
     ],
     "name": "setExternalSourceAsset",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "verifier",
-        "type": "address"
-      },
-      {
-        "internalType": "bool",
-        "name": "trusted",
-        "type": "bool"
-      }
-    ],
-    "name": "setTrustedVerifier",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

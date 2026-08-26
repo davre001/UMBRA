@@ -62,6 +62,7 @@ describe("BatchWithdrawer (real Noir/UltraHonk circuit)", function () {
     const placeOrderVerifier = await deployHonkVerifier("PlaceOrderHonkVerifier", "PlaceOrderRelationsLib", "PlaceOrderZKTranscriptLib");
     const cancelOrderVerifier = await deployHonkVerifier("CancelOrderHonkVerifier", "CancelOrderRelationsLib", "CancelOrderZKTranscriptLib");
     const matchOrdersVerifier = await deployHonkVerifier("MatchOrdersHonkVerifier", "MatchOrdersRelationsLib", "MatchOrdersZKTranscriptLib");
+    const checkpointRelayVerifier = await deployHonkVerifier("CheckpointRelayHonkVerifier", "CheckpointRelayRelationsLib", "CheckpointRelayZKTranscriptLib");
 
     const Vault = await ethers.getContractFactory("ShieldedVault");
     vault = await Vault.deploy(
@@ -71,6 +72,7 @@ describe("BatchWithdrawer (real Noir/UltraHonk circuit)", function () {
       await placeOrderVerifier.getAddress(),
       await cancelOrderVerifier.getAddress(),
       await matchOrdersVerifier.getAddress(),
+      await checkpointRelayVerifier.getAddress(),
       admin.address,
       WITHDRAW_ASSET_ID
     );

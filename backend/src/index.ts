@@ -5,6 +5,7 @@ import { logger } from "./shared/logger";
 import { hydrateFromStore } from "./dark-engine/matcher";
 import { pollOnce as pollBtcWithdrawals } from "./btc-withdrawal/watcher";
 import { hydrate as hydrateBtcWithdrawals } from "./btc-withdrawal/store";
+import { pollOnce as pollBtcSweep } from "./btc-withdrawal/sweep";
 import { pollOnce as pollBtcDepositMints } from "./btc-deposit/minter";
 import { pollOnce as pollBtcDepositWatcher } from "./btc-deposit/depositWatcher";
 
@@ -56,6 +57,46 @@ async function startBtcWithdrawalWatcher(): Promise<void> {
       await pollBtcWithdrawals();
     } catch (err) {
       logger.error(`[btc-withdrawal] poll cycle failed: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      running = false;
+    }
+  };
+  tick();
+  setInterval(tick, intervalMs);
+}
+
+/**
+ * Starts the hot-wallet-to-reserve sweep loop (see btc-withdrawal/sweep.ts's
+ * own doc) — gated on BOTH BTC_CUSTODIAN_WIF (needs the hot key to sign the
+ * sweep) and all three BTC_RESERVE_PUBKEY_* (needs a real reserve address
+ * to sweep to); missing either means this can't do anything useful.
+ * Deliberately independent of startBtcWithdrawalWatcher — a deployment
+ * could plausibly want deposits swept without (yet) funding withdrawals
+ * from the reserve, or vice versa during a migration window.
+ */
+function startBtcSweepLoop(): void {
+  if (!process.env.BTC_CUSTODIAN_WIF) {
+    logger.info("[btc-sweep] BTC_CUSTODIAN_WIF not set — sweep loop not started");
+    return;
+  }
+  if (!process.env.BTC_RESERVE_PUBKEY_1 || !process.env.BTC_RESERVE_PUBKEY_2 || !process.env.BTC_RESERVE_PUBKEY_3) {
+    logger.info("[btc-sweep] BTC_RESERVE_PUBKEY_1/2/3 not fully set — sweep loop not started");
+    return;
+  }
+  const intervalMs = Number(process.env.BTC_SWEEP_POLL_INTERVAL_MS ?? 1_800_000);
+  logger.info(`[btc-sweep] starting sweep loop, polling every ${intervalMs}ms`);
+  let running = false;
+  const tick = async () => {
+    if (running) {
+      logger.warn("[btc-sweep] previous poll cycle still running — skipping this tick");
+      return;
+    }
+    running = true;
+    try {
+      const { swept, txid, sweptSats } = await pollBtcSweep();
+      if (swept) logger.info(`[btc-sweep] tick swept ${sweptSats} sats: ${txid}`);
+    } catch (err) {
+      logger.error(`[btc-sweep] poll cycle failed: ${err instanceof Error ? err.message : err}`);
     } finally {
       running = false;
     }
@@ -148,6 +189,7 @@ hydrateFromStore()
       });
       startBtcDepositMinter();
       startBtcDepositWatcher();
+      startBtcSweepLoop();
     });
   })
   .catch((err) => {

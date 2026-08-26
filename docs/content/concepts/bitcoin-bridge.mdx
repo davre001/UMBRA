@@ -53,20 +53,33 @@ proof's checkpoint commitment matches what is currently registered
 on-chain, checks the payment nullifier has not been used before, then
 mints.
 
-> **Checkpoint trust:** The circuit does not validate Bitcoin full history back to genesis — it trusts one recent, admin-registered header as its root of trust, the same model BTC Relay and SPV clients use, and proves only that a 6-header chain (K = 6, roughly an hour of signet blocks) correctly extends forward from it to the deposit confirming block. Whoever controls what gets registered as the checkpoint is trusted not to register one from a forged or minority-fork chain.
+> **Checkpoint trust:** The circuit does not validate Bitcoin full history back to genesis — it trusts one recent header, registered on-chain **once** as a genesis anchor, the same model BTC Relay and SPV clients use, and proves only that a 6-header chain (K = 6, roughly an hour of signet blocks) correctly extends forward from it to the deposit confirming block. That one genesis value — and every other one-time bridge-config action (trusting the deposit verifier, registering `WrappedBTC`) — is held by a real 2-of-3 Safe multisig behind a 48h public timelock, not a single admin key; see the [Threat Model](https://github.com/davre001/UMBRA/blob/main/docs/THREAT_MODEL.md). Every checkpoint advance *after* genesis is a different, much weaker trust story below.
 
-## No manual claim — but one manual step remains
+## No manual claim, and no manual checkpoint step either
 
 The deposit side needs no clicks from you: the Faucet page BTC card auto-derives your signet address on wallet connect, then auto-builds, signs, and broadcasts the deposit transaction itself the moment your funding confirms. A backend watcher independently scans the vault Bitcoin address and self-registers any deposit whose browser closed before it could report itself.
 
-> **Honest current limitation:** A deposit can only be proven once the on-chain checkpoint is refreshed to align with its exact confirming block height. That refresh is currently a manual, admin-run script, not an automated poll loop — so a real deposit can sit fully confirmed but unminted until an admin runs it.
+Advancing the checkpoint past genesis is **permissionless**, not an admin action: `extendCheckpoint` accepts a real Noir proof (a second circuit, `checkpoint_relay`) that a submitted new checkpoint is a valid 6-header extension of the current one, and anyone can call it — no role check, no timelock, since there's no admin trust to delay. A dedicated worker (`btc-checkpoint-relay-worker`) does this automatically on a schedule paced to real signet block production, so a fully-confirmed deposit unblocks itself within roughly one signet block rather than waiting on a human to run a script.
 
-## Withdrawal is custodial, and says so
+> **Honest current limitation:** `extendCheckpoint` only accepts strictly linear extension of the current on-chain checkpoint — there's no cumulative-chainwork comparison across competing forks (the BTC-Relay "most work wins" pattern). On signet specifically, where proof-of-work is intentionally cheap, a determined actor could still attempt to race the honest chain with their own low-effort but individually-valid-proof fork. See `docs/LIMITATIONS.md` #1 for the full disclosure.
 
-Paying real BTC back out is fulfilled by a custodian-held signet wallet —
+## Withdrawal funds from a 2-of-3 reserve, not one custodian key
+
 `withdraw()` for `WrappedBTC` emits an event instead of moving funds
-itself, and a backend relayer signs and broadcasts the real Bitcoin payout.
-Nothing cryptographic stops that custodian key from simply not paying out
-an already-nullified withdrawal; a public solvency endpoint (custodian
-balance vs. outstanding obligations) makes that risk checkable, not
-eliminated.
+itself, and a backend relayer fulfills it on real signet — but that
+relayer never holds the key that can complete a payout alone. Real signet
+deposit inflow lands in a hot wallet, which is periodically swept in full
+into a real 2-of-3 P2WSH Bitcoin reserve; every payout is built as an
+unsigned PSBT that needs 2 of 3 independently-held signers to sign before
+it broadcasts. A leaked hot-wallet key is now bounded to "whatever's
+arrived since the last sweep," not the bridge's whole balance, and an
+attacker who somehow got 2-of-3 signer keys is still bounded by an
+optional configurable payout rate cap.
+
+A public solvency endpoint (custodian + reserve balance vs. outstanding
+obligations, plus how many withdrawals are stuck past a configurable age
+threshold) makes both the reserve's real coverage and any stalled
+withdrawal independently checkable. What this does **not** yet do:
+automatically reclaim a withdrawal back to the requester if the reserve
+signers are simply unavailable — that's disclosed plainly, along with why,
+in `docs/LIMITATIONS.md` #7.

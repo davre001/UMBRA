@@ -1,0 +1,17 @@
+{
+  "network": "coston2",
+  "chainId": 114,
+  "safeAddress": "0x740383dB548942f0a280b10345Eaf0e3054D9F8e",
+  "owners": [
+    "0x2d671A0D877B206fcd7A103335ee8173f50A1d06",
+    "0x05702F23C5634Cb21e171dA9FF9F633cefA97281",
+    "0x20EeC8f3876C116068d80EcB850Fba2A9BB16658"
+  ],
+  "threshold": 2,
+  "contracts": {
+    "SafeL2": "0x498A055D9f97635D08f931BEA3f047ceC7E9ecd1",
+    "SafeProxyFactory": "0x6B1D2296431A9eabEeCe2fC18f4A234Bed8209D1",
+    "CompatibilityFallbackHandler": "0xF1861919b786A40429A44e3Ab09303C578FfbD51"
+  },
+  "note": "Not deployed via Safe's deterministic CREATE2 singleton-factory (see this script's own header comment for why) — this Safe's address is specific to this deployment, not the same as a canonical cross-chain Safe address. app.safe.global will not recognize it (no Transaction Service indexing Coston2); interact via scripts/execute-safe-tx.ts instead."
+}

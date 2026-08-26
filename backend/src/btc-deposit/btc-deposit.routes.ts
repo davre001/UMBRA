@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { logger } from "../shared/logger";
 import { assembleDepositProofInputs, mempoolGet, parseDepositTx, stripWitness, SIGNET_API_BASES } from "./mempool";
 import { getCurrentCheckpointHeight, setCurrentCheckpointHeight } from "./checkpoint";
+import { submitExtendCheckpoint } from "./checkpoint-relay";
 import * as store from "./store";
 
 export const btcDepositRouter = Router();
@@ -25,7 +26,7 @@ btcDepositRouter.get("/checkpoint", (_req, res) => {
   res.json({ checkpointHeight: getCurrentCheckpointHeight() ?? null });
 });
 
-/** Called by scripts/refresh-btc-checkpoint.ts right after it registers a new checkpoint on-chain — keeps this backend's tracked height in sync with what's actually live (see checkpoint.ts's own doc for why this can't be inferred). */
+/** Called right after something registers a new checkpoint on-chain — contract/scripts/initialize-btc-checkpoint.ts for the one-time genesis, btc-checkpoint-relay-worker/ for every extendCheckpoint advance after that — keeps this backend's tracked height in sync with what's actually live (see checkpoint.ts's own doc for why this can't be inferred). */
 btcDepositRouter.post("/checkpoint", (req, res) => {
   if (!requireBtcDepositSecret(req, res)) return;
   const { height } = req.body ?? {};
@@ -35,6 +36,40 @@ btcDepositRouter.post("/checkpoint", (req, res) => {
   }
   setCurrentCheckpointHeight(height);
   res.json({ checkpointHeight: height });
+});
+
+/**
+ * Submits a real `checkpoint_relay` proof (see
+ * `contract/circuits/noir/checkpoint_relay`) and, if it verifies on-chain,
+ * advances `checkpoints[BTC_SIGNET_SOURCE_CHAIN_ID]` — `btc-checkpoint-relay-worker/`'s
+ * own poll loop calls this once it's built a proof extending the currently
+ * on-chain checkpoint by K real signet headers. Secret-gated purely to keep
+ * this off public traffic and avoid random wasted gas from malformed
+ * requests, not because the underlying `extendCheckpoint` call itself needs
+ * any special permission — anyone could call it directly (see that
+ * function's own NatSpec).
+ */
+btcDepositRouter.post("/checkpoint/extend", async (req, res, next) => {
+  if (!requireBtcDepositSecret(req, res)) return;
+  try {
+    const { proof, newCheckpointCommitment, newHeight } = req.body ?? {};
+    if (typeof proof !== "string" || !proof.startsWith("0x")) {
+      res.status(400).json({ error: "Expected { proof: '0x...', newCheckpointCommitment: '0x...', newHeight: <non-negative integer> }" });
+      return;
+    }
+    if (typeof newCheckpointCommitment !== "string" || !newCheckpointCommitment.startsWith("0x")) {
+      res.status(400).json({ error: "Expected { proof: '0x...', newCheckpointCommitment: '0x...', newHeight: <non-negative integer> }" });
+      return;
+    }
+    if (typeof newHeight !== "number" || !Number.isInteger(newHeight) || newHeight < 0) {
+      res.status(400).json({ error: "Expected { proof: '0x...', newCheckpointCommitment: '0x...', newHeight: <non-negative integer> }" });
+      return;
+    }
+    const txHash = await submitExtendCheckpoint(proof as `0x${string}`, newCheckpointCommitment as `0x${string}`, newHeight);
+    res.json({ txHash, checkpointHeight: newHeight });
+  } catch (err) {
+    next(err);
+  }
 });
 
 /**

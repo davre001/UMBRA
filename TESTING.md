@@ -6,19 +6,19 @@ This document covers both the **Automated Developer/Auditor Verification Suite**
 
 ## 🔬 Automated Testing & Verification Suite
 
-Umbra includes **155 smart contract tests** (covering unit testing, property invariants, and negative ZK proof verification) and **59 backend integration tests**.
+Umbra includes **167 smart contract tests** (covering unit testing, property invariants, and negative ZK proof verification) and **158 backend integration tests**.
 
 ### Automated Test Matrix
 
 | Category | Command | Tests | Scope & Invariants Tested |
 | :--- | :--- | :--- | :--- |
-| **All Monorepo Tests** | `pnpm test` | **214 passing** | Contract suites + backend API integration suites |
-| **Smart Contracts** | `pnpm contracts:test` | **155 passing** | Core vault lifecycle, access-control bypasses, boundary conditions |
-| **Contract Coverage** | `pnpm contracts:coverage` | **91.75% lines** | `solidity-coverage` report (100% on all registries & forwarders) |
+| **All Monorepo Tests** | `pnpm test` | **325 passing** (2 skipped) | Contract suites + backend API integration suites |
+| **Smart Contracts** | `pnpm contracts:test` | **167 passing** | Core vault lifecycle, access-control bypasses, admin timelock queue/execute/cancel (all 3 gated setters), permissionless `extendCheckpoint`, boundary conditions |
+| **Contract Coverage** | `pnpm contracts:coverage` | **91.75% lines** (last measured pre-timelock/checkpoint-relay/Safe test work — a fresh run didn't finish in time to capture current numbers; re-run for current) | `solidity-coverage` report (100% on all registries & forwarders) |
 | **ZK Negative Tests** | `pnpm --filter umbra-contracts test test/Verifiers.negative.test.ts` | **78 passing** | Corrupted proofs, bit flips, truncation, 0x/0xFF payloads, field overflow |
-| **Invariant Fuzzing** | `pnpm --filter umbra-contracts test test/ShieldedVault.invariants.test.ts` | **6 passing** | Solvency conservation, strict double-spend prevention, compliance gate |
-| **Backend & SPV** | `pnpm backend:coverage` | **59 passing** | SegWit tx serialization, Merkle inclusion proofs, FTSOv2 price feeds |
-| **CI Verification** | `pnpm typecheck && pnpm lint && pnpm build` | All 6 pkgs | Full TypeScript check, ESLint, and Next.js / Hardhat compilation |
+| **Invariant Fuzzing** | `pnpm --filter umbra-contracts test test/ShieldedVault.invariants.test.ts` | **8 passing** | Solvency conservation, strict double-spend prevention, compliance gate |
+| **Backend & SPV** | `pnpm backend:coverage` | **158 passing** (2 skipped) | **82.5% overall line coverage** (up from 56.75%) — SegWit tx serialization, Merkle inclusion proofs, FTSOv2 price feeds, 2-of-3 BTC reserve derivation + sweep + PSBT sign/combine/finalize, overdue-withdrawal detection, plus real (not mocked) on-chain `StealthAnnouncer`/`extendCheckpoint` submission and revert paths and forced real-error branches — see root README's "On backend coverage specifically" note for what's deliberately still excluded and why |
+| **CI Verification** | `pnpm typecheck && pnpm lint && pnpm build` | All 7 pkgs | Full TypeScript check, ESLint, and Next.js / Hardhat compilation |
 
 ---
 
@@ -90,6 +90,15 @@ simulated. It's genuinely free (signet coins have zero value), but it's
 also genuinely slower than the other three assets, since it waits on real
 Bitcoin block times.
 
+> **Check before you start**: the BTC bridge was recently rebuilt (a
+> timelock on admin actions, a permissionless checkpoint relay, a 2-of-3
+> Bitcoin reserve for withdrawals) and the redeployed vault's one-time
+> bridge-config actions may still be sitting in their 48h public timelock
+> window rather than live yet — see the root [README's Status
+> section](./README.md#status) for current reality before assuming a stuck
+> deposit here is a bug. If deposits are down for this reason, every other
+> step in this guide (tokens, shielding, paying, swapping) is unaffected.
+
 1. On the **Faucet** page, find the BTC card. It auto-derives a signet
    deposit address for your connected wallet — no separate wallet or
    "Derive" step needed.
@@ -103,14 +112,16 @@ Bitcoin block times.
    the deposit transaction — no click needed. You'll see the card's status
    change to "Depositing…" on its own the next time the page polls (every
    few seconds) if you're watching, or you can just come back later.
-5. **Heads up — minting can be slow or need a nudge right now.** After the
-   deposit transaction itself confirms, it needs one more manual step
-   (an admin "checkpoint refresh") before it's actually provable — this is
-   a known, disclosed current limitation, not a bug (see the root
-   [README's Bitcoin bridge section](./README.md#bitcoin-bridge)). If your
-   BTC balance doesn't show up in Portfolio within an hour or so of the
-   deposit tx confirming, that's expected right now, not something you did
-   wrong.
+5. **Heads up — minting can still take a little while.** After the deposit
+   transaction itself confirms, the on-chain checkpoint needs to advance to
+   cover it before it's provable — this now happens automatically
+   (`btc-checkpoint-relay-worker`'s poll loop, no admin step), but still
+   paces real signet block production (~10 minutes/block), so there can be
+   a real wait. If your BTC balance doesn't show up in Portfolio within
+   roughly an hour of the deposit tx confirming, check whether
+   `btc-checkpoint-relay-worker` is actually running for this deployment
+   before assuming something's wrong — see the root [README's Bitcoin
+   bridge section](./README.md#bitcoin-bridge).
 6. If you ever close the tab partway through, that's safe — a backend
    watcher independently notices real deposits paid to the vault and
    registers them even if your browser never got the chance to.
@@ -172,6 +183,36 @@ public wallet address.
    All** instead — it withdraws every note for that asset in one click
    (each one is still its own transaction under the hood, so it may ask
    your wallet to approve more than once).
+
+### Step 4b — Withdraw BTC back to Bitcoin (dev/operator flow, optional)
+
+This one is **not yet a smooth one-click flow** — flagged honestly rather
+than hidden. Withdrawing WrappedBTC uses the same Withdraw tab as every
+other asset, but the destination field is EVM-address-shaped for every
+asset today, and there's no dedicated Bitcoin-address input yet (see
+`docs/LIMITATIONS.md` #8). To actually test it:
+
+1. Pick `BTC` as the asset and enter a small amount.
+2. For the destination, you need the raw 20-byte `hash160` of a real
+   signet P2WPKH address (not the bech32 `tb1q...` address itself) —
+   compute it with `bitcoinjs-lib` (`bitcoin.address.fromBech32(addr).data`)
+   or any Bitcoin address-decoding tool, then paste it in as
+   `0x<hash160 hex>`. It will pass the same-shaped `isAddress()` check the
+   field uses for every asset.
+3. Confirm the withdrawal — this emits `ExternalWithdrawalRequested`
+   on-chain, exactly like any other withdrawal, but nothing is paid out
+   from `ShieldedVault` itself.
+4. From here it's an off-chain fulfillment, not a frontend step: the
+   backend's `btc-withdrawal` watcher picks up the event, sweeps hot-wallet
+   funds into the 2-of-3 reserve if needed, and stages an unsigned PSBT.
+   Someone holding one of the 3 reserve signer keys then runs
+   `BTC_WITHDRAWAL_NULLIFIER_HASH=<hash> BTC_RESERVE_SIGNER_WIF=<key> npx
+   tsx backend/scripts/sign-btc-withdrawal.ts` — real payout needs 2 of the
+   3 signers to do this independently (no coordination between them
+   required). Check `GET /api/btc-withdrawal/solvency` for the reserve's
+   real balance and any overdue withdrawal.
+5. See [`docs/RUNBOOK_BTC_WITHDRAWAL.md`](./docs/RUNBOOK_BTC_WITHDRAWAL.md)
+   if a withdrawal seems stuck.
 
 ### Why this matters
 
@@ -256,6 +297,7 @@ my FXRP for USDT0").
 - [ ] Portfolio balance updates without reloading
 - [ ] Withdraw to a fresh address → gets screened automatically, succeeds
 - [ ] Withdraw shows Success on the explorer (matches what the app says)
+- [ ] (optional, dev/operator) Withdraw BTC → `ExternalWithdrawalRequested` fires, PSBT stages, 2-of-3 signers broadcast it
 - [ ] Register on Receive
 - [ ] Pay another wallet → they can see and claim it
 - [ ] Place and cancel a Swap order

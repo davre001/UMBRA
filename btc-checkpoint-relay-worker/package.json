@@ -1,0 +1,28 @@
+{
+  "name": "umbra-btc-checkpoint-relay-worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone checkpoint_relay proving worker — keeps ShieldedVault.checkpoints[BTC_SIGNET_SOURCE_CHAIN_ID] advancing with real, proven 6-header hops instead of an admin write (see contract/contracts/ShieldedVault.sol's extendCheckpoint). Deliberately NOT part of the backend/ deployment (same reasoning as btc-deposit-worker/, see its own README) and NOT btc-deposit-worker's own Lambda (different cadence — this paces real signet block production, not per-deposit demand). Run this wherever you have real compute for Noir/Barretenberg proving; it talks to a running backend over HTTP for everything, including submission — same reasoning as btc-deposit-worker/matcher-worker for never holding a gas key itself.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "echo \"btc-checkpoint-relay-worker build ok\"",
+    "sync-circuit": "node scripts/sync-circuit.js",
+    "package-lambda": "pnpm run build && pnpm run sync-circuit && node scripts/package-lambda.js",
+    "deploy-lambda": "bash scripts/deploy-lambda.sh"
+  },
+  "dependencies": {
+    "@aztec/bb.js": "5.0.0-nightly.20260522",
+    "@noir-lang/noir_js": "1.0.0-beta.22",
+    "@noir-lang/types": "1.0.0-beta.22",
+    "@zkpassport/poseidon2": "^0.6.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

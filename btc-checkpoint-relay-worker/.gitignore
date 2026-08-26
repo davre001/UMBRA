@@ -1,0 +1,8 @@
+/node_modules
+/dist
+/circuit
+/lambda-build
+/function.zip
+*.tsbuildinfo
+.env
+.env.local
