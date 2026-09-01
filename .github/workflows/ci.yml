@@ -81,6 +81,10 @@ jobs:
       - run: pnpm test
         env:
           BTC_VAULT_PUBKEY_HASH: 1ec150307106f13a434437f03f10efc0c8fa45f3
+          # CI-only dummy values — see backend-ci-cd.yml's own copy of this
+          # env block for why these two are needed.
+          BTC_DEPOSIT_INTERNAL_SECRET: ci-test-only-btc-deposit-secret
+          MATCHER_INTERNAL_SECRET: ci-test-only-matcher-secret
 
   contracts:
     name: Contracts Test
