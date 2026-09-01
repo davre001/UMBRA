@@ -63,6 +63,17 @@ jobs:
           # caught when CI (no backend/.env, correctly gitignored) failed a
           # test that only ever passed locally.
           BTC_VAULT_PUBKEY_HASH: 1ec150307106f13a434437f03f10efc0c8fa45f3
+          # CI-only dummy values, unrelated to the real secrets configured
+          # on the deployed Render service — btc-deposit-routes.test.ts and
+          # dark-engine-routes-gaps.test.ts only need *some* value present
+          # so the app's own auth gate has something to compare the test's
+          # request header against, all within the same CI process. Without
+          # these, both test files fail in CI (missing entirely, or the
+          # gate answering 503 "not configured" instead of 401 "missing
+          # header"), which fails the build job and — since deploy needs
+          # build — silently blocks every Render deploy from this workflow.
+          BTC_DEPOSIT_INTERNAL_SECRET: ci-test-only-btc-deposit-secret
+          MATCHER_INTERNAL_SECRET: ci-test-only-matcher-secret
 
   deploy:
     name: Deploy to Render
