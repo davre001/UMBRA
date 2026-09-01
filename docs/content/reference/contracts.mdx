@@ -42,11 +42,12 @@ proof-gated `extendCheckpoint` for every update after — see [Bitcoin
 Bridge](/concepts/bitcoin-bridge). `DEFAULT_ADMIN_ROLE` on this vault is
 held by a real, deployed 2-of-3 Safe, not a single EOA — see
 [`docs/LIMITATIONS.md`](https://github.com/davre001/UMBRA/blob/main/docs/LIMITATIONS.md)
-\#6. **Current status**: the queued `executeSetTrustedVerifier`/
-`executeSetExternalDepositToken` calls and the checkpoint genesis bootstrap
-haven't run yet, so BTC deposits/withdrawals aren't live on this vault —
-see the root [README's Status section](https://github.com/davre001/UMBRA#status)
-for the up-to-date picture. Before that, `ShieldedVault` was separately redeployed (2026-08-11) to
+\#6. **Current status**: `executeSetTrustedVerifier`/`executeSetExternalDepositToken`
+have now executed. The checkpoint genesis bootstrap is queued (targeting
+signet height 320241) with its 48h window closing 2026-09-03 — until that
+executes, BTC deposits/withdrawals aren't live on this vault — see the root
+[README's Status section](https://github.com/davre001/UMBRA#status) for
+the up-to-date picture. Before that, `ShieldedVault` was separately redeployed (2026-08-11) to
 add real Bitcoin bridging — `depositExternal` mints public `WrappedBTC`
 directly instead of a hidden note. Every other contract above is unchanged
 and reused across both redeployments.
