@@ -408,17 +408,27 @@ live addresses, and [Getting Started](https://docs-umbra.vercel.app/getting-star
 to make your first shielded deposit.
 
 The core dark pool (shield/pay/swap/withdraw for C2FLR/FXRP/USDT0) is live
-and verified end-to-end against the real deployment. The BTC bridge
-described above — deposit auto-broadcast/self-registration/auto-mint,
-permissionless checkpoint advancement, the 2-of-3 reserve withdrawal path,
-and the Safe/timelock admin handoff — is fully built and locally tested,
-but **not yet live on the deployed app**: `ShieldedVault` was redeployed
-this round to add the timelock and checkpoint-relay redesign, and its
-one-time bridge-config actions (trusting the deposit verifier, registering
-WrappedBTC, the checkpoint genesis) are sitting in their required 48h
-public timelock window before they can execute — BTC deposits and
-withdrawals are unavailable on the live app until that completes and the
-backend/worker deployments catch up. The rest of this README describes the
+and verified end-to-end against the real deployment.
+
+The backend is deployed on Render with the full timelock/checkpoint-relay/
+2-of-3-reserve redesign live and every environment variable it needs
+configured — this was actually broken from 2026-08-14 through 2026-09-01
+(a CI gap silently blocked every deploy behind it; see the "Backend CI/CD"
+workflow history if curious), fixed and confirmed working as of this
+writing.
+
+The BTC bridge itself is **still not usable on the live app**, but not
+because anything is still waiting on a clock: `ShieldedVault` was
+redeployed for the timelock/checkpoint-relay redesign, and two of its
+one-time bridge-config actions (`queueSetTrustedVerifier`,
+`queueSetExternalDepositToken`) were queued 2026-08-17 — their 48h public
+timelock window **closed 2026-08-19** — but neither has actually been
+executed yet, and the checkpoint genesis (`initializeCheckpoint`) hasn't
+been run at all. This is now a plain outstanding operational step (calling
+`executeSetTrustedVerifier`/`executeSetExternalDepositToken` and running
+`contract/scripts/initialize-btc-checkpoint.ts` through the 2-of-3 Safe),
+not something still blocked by the wait — BTC deposits and withdrawals stay
+unavailable until it's done. The rest of this README describes the
 finished design, not a claim that every piece of it is live at this exact
 moment; check `docs/LIMITATIONS.md` and the live app itself for current
 reality.

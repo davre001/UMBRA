@@ -92,12 +92,13 @@ Bitcoin block times.
 
 > **Check before you start**: the BTC bridge was recently rebuilt (a
 > timelock on admin actions, a permissionless checkpoint relay, a 2-of-3
-> Bitcoin reserve for withdrawals) and the redeployed vault's one-time
-> bridge-config actions may still be sitting in their 48h public timelock
-> window rather than live yet — see the root [README's Status
-> section](./README.md#status) for current reality before assuming a stuck
-> deposit here is a bug. If deposits are down for this reason, every other
-> step in this guide (tokens, shielding, paying, swapping) is unaffected.
+> Bitcoin reserve for withdrawals), and the redeployed vault's one-time
+> bridge-config actions are still pending execution — their 48h public
+> timelock window has already closed, it's just an outstanding manual step
+> — see the root [README's Status section](./README.md#status) for current
+> reality before assuming a stuck deposit here is a bug. If deposits are
+> down for this reason, every other step in this guide (tokens, shielding,
+> paying, swapping) is unaffected.
 
 1. On the **Faucet** page, find the BTC card. It auto-derives a signet
    deposit address for your connected wallet — no separate wallet or
